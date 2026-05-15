@@ -1,0 +1,73 @@
+{
+  "backendBaseUrl": "http://localhost:4001",
+  "apiKey": "dev-battery-ingest-key",
+  "deviceCode": "GW-LOCAL-001",
+  "ingestMode": "legacy",
+  "adapter": "mock",
+  "pollingIntervalSec": 30,
+  "heartbeatIntervalSec": 60,
+  "batchSize": 20,
+  "requestTimeoutSec": 10,
+  "clockSkewMaxSec": 300,
+  "queueDbPath": "data/gateway_queue.sqlite3",
+  "dryRun": true,
+  "logLevel": "INFO",
+  "model": "Simulator",
+  "firmwareVersion": "0.1.0",
+  "macAddress": null,
+  "batteryMappings": [
+    {
+      "batteryAssetSerial": "BAT-2026-001",
+      "batteryAssetId": "00000000-0000-0000-0000-000000000001",
+      "sensorSourceCode": "primary"
+    }
+  ],
+  "calibrations": [
+    {
+      "metric": "voltage",
+      "offsetValue": 0.0,
+      "scaleFactor": 1.0
+    },
+    {
+      "metric": "temperature",
+      "offsetValue": 0.0,
+      "scaleFactor": 1.0
+    }
+  ],
+  "mock": {
+    "scenario": "normal",
+    "seed": 42
+  },
+  "hardware": {
+    "modbus": {
+      "port": "/dev/ttyUSB0",
+      "baudrate": 9600,
+      "unitId": 1,
+      "registers": {
+        "voltage": { "address": 0, "scale": 0.01 },
+        "current": { "address": 1, "scale": 0.01, "signed": true },
+        "temperature": { "address": 2, "scale": 0.1, "offset": -40 },
+        "socPercent": { "address": 3, "scale": 1 },
+        "cycleCount": { "address": 4, "scale": 1 },
+        "sohPercent": { "address": 5, "scale": 1 }
+      }
+    },
+    "canbus": {
+      "channel": "can0",
+      "bustype": "socketcan",
+      "bitrate": 500000,
+      "frames": {
+        "0x351": {
+          "voltage": { "start": 0, "length": 2, "scale": 0.01, "endian": "little" },
+          "current": { "start": 2, "length": 2, "scale": 0.01, "signed": true, "endian": "little" },
+          "socPercent": { "start": 4, "length": 1, "scale": 1, "endian": "little" }
+        },
+        "0x352": {
+          "temperature": { "start": 0, "length": 2, "scale": 0.1, "offset": -40, "endian": "little" },
+          "sohPercent": { "start": 2, "length": 1, "scale": 1, "endian": "little" }
+        }
+      }
+    }
+  }
+}
+

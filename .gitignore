@@ -1,7 +1,8 @@
-.env
-.env.local
-.claude/CLAUDE.local.md
-.claude/settings.local.json
+__pycache__/
+*.pyc
+.venv/
+data/
+*.sqlite3
 .DS_Store
 Thumbs.db
 logs/*.log

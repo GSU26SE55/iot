@@ -1,0 +1,45 @@
+{
+  "backendBaseUrl": "http://localhost:4001",
+  "apiKey": "dev-battery-ingest-key",
+  "deviceCode": "GW-CAN-001",
+  "ingestMode": "legacy",
+  "adapter": "canbus",
+  "pollingIntervalSec": 30,
+  "heartbeatIntervalSec": 60,
+  "batchSize": 20,
+  "requestTimeoutSec": 10,
+  "clockSkewMaxSec": 300,
+  "queueDbPath": "data/gateway_queue.sqlite3",
+  "dryRun": true,
+  "logLevel": "INFO",
+  "model": "RaspberryPi-4B",
+  "firmwareVersion": "0.1.0",
+  "batteryMappings": [
+    {
+      "batteryAssetSerial": "BAT-2026-001",
+      "batteryAssetId": "00000000-0000-0000-0000-000000000001",
+      "sensorSourceCode": "primary"
+    }
+  ],
+  "calibrations": [],
+  "hardware": {
+    "canbus": {
+      "channel": "can0",
+      "bustype": "socketcan",
+      "bitrate": 500000,
+      "timeoutSec": 2,
+      "frames": {
+        "0x351": {
+          "voltage": { "start": 0, "length": 2, "scale": 0.01, "endian": "little" },
+          "current": { "start": 2, "length": 2, "scale": 0.01, "signed": true, "endian": "little" },
+          "socPercent": { "start": 4, "length": 1, "scale": 1, "endian": "little" }
+        },
+        "0x352": {
+          "temperature": { "start": 0, "length": 2, "scale": 0.1, "offset": -40, "endian": "little" },
+          "sohPercent": { "start": 2, "length": 1, "scale": 1, "endian": "little" }
+        }
+      }
+    }
+  }
+}
+
