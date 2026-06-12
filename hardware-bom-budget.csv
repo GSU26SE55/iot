@@ -1,0 +1,57 @@
+STT,NhomPhanHe,TenThietBi,Model_ThongSo,SoLuong,DonGiaVND,ThanhTienVND,CapMuaSam,MucDich,GhiChu
+1,A1 Edge compute,ESP32-S3 DevKitC-1,N16R8 16MB flash 8MB PSRAM,2,250000,500000,Cap0,Node chinh chay firmware,Uu tien ban S3 co PSRAM cho MQTT-TLS
+2,A1 Edge compute,ESP32-S3 du phong,N16R8,1,250000,250000,Cap1,Backup khi hong,Khong bat buoc cho MVP
+3,A1 Edge compute,Breadboard 830 diem,830 point,2,40000,80000,Cap0,Cam thu mach giai doan dev,
+4,A1 Edge compute,Perfboard PCB lo van nang,7x9cm,3,12000,36000,Cap1,Han ban co dinh demo,
+5,A1 Edge compute,ESP32 base board terminal vit,GPIO breakout,2,80000,160000,Cap1,De lap gon co domino,Tuy chon
+6,A1 Edge compute,Header pin cai 2.54mm,set,1,25000,25000,Cap1,Cam ESP32 thao duoc,
+7,A1 Edge compute,microSD + module SD SPI,16GB + module,2,110000,220000,Cap3,Mo rong local queue buffer mat mang,
+8,A1 Edge compute,Cap USB-C,data+power,3,30000,90000,Cap0,Nap firmware va cap nguon dev,
+9,A2 RS485,Module RS485 auto-direction,XY-017 MAX485,2,25000,50000,Cap1,Chuyen TTL sang RS485,Loai auto do khoi code DE/RE
+10,A2 RS485,Dien tro 120 ohm (pack),1/4W,1,10000,10000,Cap1,Terminating 2 dau bus,Pack nhieu con
+11,A2 RS485,Cap doi xoan co shield,2 loi 24AWG 20m,1,100000,100000,Cap1,Bus A/B chong nhieu di xa,
+12,A2 RS485,Terminal block domino,2-3 chan,6,5000,30000,Cap2,Dau nhieu BMS chung bus,
+13,A3 CAN,Transceiver CAN,SN65HVD230,2,30000,60000,Cap3,ESP32 TWAI sang CAN bus,Chi khi BMS dung CAN
+14,A3 CAN,Dien tro 120 ohm CAN (pack),1/4W,1,5000,5000,Cap3,Terminating CAN bus,
+15,A4 Pin+BMS,Pin LiFePO4 12V + BMS RS485,Daly/JBD/JK-BMS,3,1200000,3600000,Cap1,Doi tuong do chinh,Phai co register map va doi unitId
+16,A4 Pin+BMS,Pin + BMS dung CAN,12V,1,1200000,1200000,Cap3,Test duong CAN,Tuy chon
+17,A5 Sensor redundant,Module do V va I I2C,INA226,4,35000,140000,Cap3,Do voltage/current doc lap voi BMS,Phuc vu cross-source va energy
+18,A5 Sensor redundant,Cam bien dong,ACS712 30A,2,25000,50000,Cap3,Do current roi redundant,
+19,A5 Sensor redundant,Cam bien nhiet chong nuoc,DS18B20,6,25000,150000,Cap3,Nhiet than pin external-temp,
+20,A5 Sensor redundant,Dien tro 4.7k ohm (pack),pull-up,1,5000,5000,Cap3,Pull-up cho 1-Wire DS18B20,
+21,A6 Moi truong,Cam bien nhiet-am,SHT31,2,80000,160000,Cap3,Ambient temp + humidity,DHT22 re hon ~50k
+22,A6 Moi truong,Cam bien khoi,MQ-2,1,25000,25000,Cap3,Smoke incident,
+23,A6 Moi truong,Cam bien ro nuoc,Water leak,1,15000,15000,Cap3,Water incident,
+24,A7 Nguon,Adapter 5V,5V/3A,2,60000,120000,Cap0,Cap nguon ESP32 on dinh,
+25,A7 Nguon,Module ha ap DC-DC,LM2596,2,15000,30000,Cap1,12V pin sang 5V ESP32,
+26,A7 Nguon,Mach sac + pin du phong,TP4056 + 18650 + holder,2,75000,150000,Cap4,Node song khi cup dien,Offline bao dung
+27,A7 Nguon,Cau chi + gia do,2-5A,1,20000,20000,Cap1,Bao ve qua dong,
+28,A8 Mang,Router WiFi tai site,—,1,300000,300000,Cap0,ESP32 len Internet,Co the dung san
+29,A8 Mang,Module/Router 4G + SIM,SIM7600,1,700000,700000,Cap4,Fallback khi khong WiFi,
+30,A8 Mang,Anten WiFi/4G ngoai,—,1,50000,50000,Cap4,Tang song trong tu kim loai,Tuy chon
+31,A9 Day va dau noi,Day Dupont duc-duc,40 soi 2.54mm,1,20000,20000,Cap0,Cam breadboard,
+32,A9 Day va dau noi,Day Dupont duc-cai,40 soi 2.54mm,1,20000,20000,Cap0,ESP32 sang module,
+33,A9 Day va dau noi,Day Dupont cai-cai,40 soi 2.54mm,1,20000,20000,Cap0,Module sang module,
+34,A9 Day va dau noi,Day hook-up nhieu mau,22AWG,1,50000,50000,Cap1,Di day perfboard,
+35,A9 Day va dau noi,Day nguon 2 loi,18AWG,1,25000,25000,Cap1,Cap nguon dong cao,
+36,A9 Day va dau noi,Jack DC cai,5.5x2.1mm,2,5000,10000,Cap1,Cam adapter 5V,
+37,A9 Day va dau noi,Dau cos ferrule + kim bam,set,1,180000,180000,Cap4,Dau day gon vao domino,
+38,A9 Day va dau noi,Ong gen co nhiet + day rut,set,1,30000,30000,Cap1,Boc moi noi di day gon,
+39,A9 Day va dau noi,Dau noi JST/Molex,theo cong BMS,1,35000,35000,Cap1,Noi toi cong BMS,
+40,A10 Dong goi,Hop enclosure IP65,—,2,80000,160000,Cap4,Chong nuoc bui cho node,
+41,A10 Dong goi,DIN rail + de gan,—,1,30000,30000,Cap4,Lap trong tu dien,
+42,A10 Dong goi,Quat tan nhiet mini,5V,1,25000,25000,Cap4,Tranh node qua nong,
+43,A11 Calibration,Dong ho van nang chinh xac,Fluke 87V hoac tuong duong,1,800000,800000,Cap4,Chuan hieu chuan V/I/temp,Fluke 87V that ~10tr; ban tot tam trung ~800k
+44,A11 Calibration,Nhiet ke tham chieu,—,1,150000,150000,Cap4,Calibration temperature,
+45,A12 Dung cu,Mo han + thiec + flux,—,1,250000,250000,Cap1,Han chan header moi noi,
+46,A12 Dung cu,Kim tuot/cat + tua vit set,—,1,200000,200000,Cap1,Dau day lap rap,
+47,A12 Dung cu,USB-RS485 adapter,—,1,80000,80000,Cap1,Test BMS bang Modbus Poll tren laptop,
+48,A12 Dung cu,USB-CAN adapter,CANable,1,250000,250000,Cap3,Test/sniff duong CAN,
+49,A12 Dung cu,Logic analyzer mini,8 channel,1,150000,150000,Cap1,Debug tin hieu serial,Tuy chon
+50,A13 Backend infra,VPS cloud,2-4 vCPU 4-8GB RAM,1,200000,200000,Cap0,Chay 4 service + broker + DB,Gia theo thang; MVP chay Docker laptop mien phi
+51,A13 Backend infra,Domain,1 nam,1,250000,250000,Cap0,HTTPS endpoint,Gia theo nam
+52,A13 Backend infra,TLS cert Let's Encrypt,—,1,0,0,Cap0,HTTPS + MQTT-TLS 8883,Mien phi
+53,A13 Backend infra,MQTT/DB/Redis/RabbitMQ/Grafana,EMQX/Postgres/Docker,1,0,0,Cap0,Ha tang phan mem,Open-source mien phi
+54,A14 Solar that,Tam pin mat troi mini,20W,1,150000,150000,Cap4,Nguon sac that co chu ky charge,Tuy chon demo energy
+55,A14 Solar that,Solar charge controller,PWM,1,50000,50000,Cap4,Sac pin tu solar,
+56,A14 Solar that,Tai gia,bong den/dien tro cong suat,1,30000,30000,Cap4,Tao discharge demo energy + cycle,

@@ -1,0 +1,57 @@
+STT,Nhóm phân hệ,Tên thiết bị,Model / Thông số,Số lượng,Cấp mua sắm,Mục đích,Ghi chú
+1,A1 Edge compute,ESP32-S3 DevKitC-1,N16R8 16MB flash 8MB PSRAM,2,Cấp 0,Node chính chạy firmware,Ưu tiên bản S3 có PSRAM cho MQTT-TLS
+2,A1 Edge compute,ESP32-S3 dự phòng,N16R8,1,Cấp 1,Backup khi hỏng,Không bắt buộc cho MVP
+3,A1 Edge compute,Breadboard 830 điểm,830 point,2,Cấp 0,Cắm thử mạch giai đoạn dev,
+4,A1 Edge compute,Perfboard PCB lỗ vạn năng,7x9cm,3,Cấp 1,Hàn bản cố định demo,
+5,A1 Edge compute,ESP32 base board terminal vít,GPIO breakout,2,Cấp 1,Đế lắp gọn có domino,Tùy chọn
+6,A1 Edge compute,Header pin cái 2.54mm,set,1,Cấp 1,Cắm ESP32 tháo được,
+7,A1 Edge compute,microSD + module SD SPI,16GB + module,2,Cấp 3,Mở rộng local queue buffer mất mạng,
+8,A1 Edge compute,Cáp USB-C,data+power,3,Cấp 0,Nạp firmware và cấp nguồn dev,
+9,A2 RS485,Module RS485 auto-direction,XY-017 MAX485,2,Cấp 1,Chuyển TTL sang RS485,Loại auto đỡ khỏi code DE/RE
+10,A2 RS485,Điện trở 120 ohm (pack),1/4W,1,Cấp 1,Terminating 2 đầu bus,Pack nhiều con
+11,A2 RS485,Cáp đôi xoắn có shield,2 lõi 24AWG 20m,1,Cấp 1,Bus A/B chống nhiễu đi xa,
+12,A2 RS485,Terminal block domino,2-3 chân,6,Cấp 2,Đấu nhiều BMS chung bus,
+13,A3 CAN,Transceiver CAN,SN65HVD230,2,Cấp 3,ESP32 TWAI sang CAN bus,Chỉ khi BMS dùng CAN
+14,A3 CAN,Điện trở 120 ohm CAN (pack),1/4W,1,Cấp 3,Terminating CAN bus,
+15,A4 Pin+BMS,Pin LiFePO4 12V + BMS RS485,Daly/JBD/JK-BMS,3,Cấp 1,Đối tượng đo chính,Phải có register map và đổi unitId
+16,A4 Pin+BMS,Pin + BMS dùng CAN,12V,1,Cấp 3,Test đường CAN,Tùy chọn
+17,A5 Sensor redundant,Module đo V và I I2C,INA226,4,Cấp 3,Đo voltage/current độc lập với BMS,Phục vụ cross-source và energy
+18,A5 Sensor redundant,Cảm biến dòng,ACS712 30A,2,Cấp 3,Đo current rời redundant,
+19,A5 Sensor redundant,Cảm biến nhiệt chống nước,DS18B20,6,Cấp 3,Nhiệt thân pin external-temp,
+20,A5 Sensor redundant,Điện trở 4.7k ohm (pack),pull-up,1,Cấp 3,Pull-up cho 1-Wire DS18B20,
+21,A6 Môi trường,Cảm biến nhiệt-ẩm,SHT31,2,Cấp 3,Ambient temp + humidity,DHT22 rẻ hơn ~50k
+22,A6 Môi trường,Cảm biến khói,MQ-2,1,Cấp 3,Smoke incident,
+23,A6 Môi trường,Cảm biến rò nước,Water leak,1,Cấp 3,Water incident,
+24,A7 Nguồn,Adapter 5V,5V/3A,2,Cấp 0,Cấp nguồn ESP32 ổn định,
+25,A7 Nguồn,Module hạ áp DC-DC,LM2596,2,Cấp 1,12V pin sang 5V ESP32,
+26,A7 Nguồn,Mạch sạc + pin dự phòng,TP4056 + 18650 + holder,2,Cấp 4,Node sống khi cúp điện,Offline báo đúng
+27,A7 Nguồn,Cầu chì + giá đỡ,2-5A,1,Cấp 1,Bảo vệ quá dòng,
+28,A8 Mạng,Router WiFi tại site,—,1,Cấp 0,ESP32 lên Internet,Có thể dùng sẵn
+29,A8 Mạng,Module/Router 4G + SIM,SIM7600,1,Cấp 4,Fallback khi không WiFi,
+30,A8 Mạng,Anten WiFi/4G ngoài,—,1,Cấp 4,Tăng sóng trong tủ kim loại,Tùy chọn
+31,A9 Dây và đầu nối,Dây Dupont đực-đực,40 sợi 2.54mm,1,Cấp 0,Cắm breadboard,
+32,A9 Dây và đầu nối,Dây Dupont đực-cái,40 sợi 2.54mm,1,Cấp 0,ESP32 sang module,
+33,A9 Dây và đầu nối,Dây Dupont cái-cái,40 sợi 2.54mm,1,Cấp 0,Module sang module,
+34,A9 Dây và đầu nối,Dây hook-up nhiều màu,22AWG,1,Cấp 1,Đi dây perfboard,
+35,A9 Dây và đầu nối,Dây nguồn 2 lõi,18AWG,1,Cấp 1,Cấp nguồn dòng cao,
+36,A9 Dây và đầu nối,Jack DC cái,5.5x2.1mm,2,Cấp 1,Cắm adapter 5V,
+37,A9 Dây và đầu nối,Đầu cos ferrule + kìm bấm,set,1,Cấp 4,Đầu dây gọn vào domino,
+38,A9 Dây và đầu nối,Ống gen co nhiệt + dây rút,set,1,Cấp 1,Bọc mối nối đi dây gọn,
+39,A9 Dây và đầu nối,Đầu nối JST/Molex,theo cổng BMS,1,Cấp 1,Nối tới cổng BMS,
+40,A10 Đóng gói,Hộp enclosure IP65,—,2,Cấp 4,Chống nước bụi cho node,
+41,A10 Đóng gói,DIN rail + đế gắn,—,1,Cấp 4,Lắp trong tủ điện,
+42,A10 Đóng gói,Quạt tản nhiệt mini,5V,1,Cấp 4,Tránh node quá nóng,
+43,A11 Calibration,Đồng hồ vạn năng chính xác,Fluke 87V hoặc tương đương,1,Cấp 4,Chuẩn hiệu chuẩn V/I/temp,Fluke 87V thật ~10tr; bản tốt tầm trung ~800k
+44,A11 Calibration,Nhiệt kế tham chiếu,—,1,Cấp 4,Calibration temperature,
+45,A12 Dụng cụ,Mỏ hàn + thiếc + flux,—,1,Cấp 1,Hàn chân header mối nối,
+46,A12 Dụng cụ,Kìm tuốt/cắt + tua vít set,—,1,Cấp 1,Đấu dây lắp ráp,
+47,A12 Dụng cụ,USB-RS485 adapter,—,1,Cấp 1,Test BMS bằng Modbus Poll trên laptop,
+48,A12 Dụng cụ,USB-CAN adapter,CANable,1,Cấp 3,Test/sniff đường CAN,
+49,A12 Dụng cụ,Logic analyzer mini,8 channel,1,Cấp 1,Debug tín hiệu serial,Tùy chọn
+50,A13 Backend infra,VPS cloud,2-4 vCPU 4-8GB RAM,1,Cấp 0,Chạy 4 service + broker + DB,Giá theo tháng; MVP chạy Docker laptop miễn phí
+51,A13 Backend infra,Domain,1 năm,1,Cấp 0,HTTPS endpoint,Giá theo năm
+52,A13 Backend infra,TLS cert Let's Encrypt,—,1,Cấp 0,HTTPS + MQTT-TLS 8883,Miễn phí
+53,A13 Backend infra,MQTT/DB/Redis/RabbitMQ/Grafana,EMQX/Postgres/Docker,1,Cấp 0,Hạ tầng phần mềm,Open-source miễn phí
+54,A14 Solar thật,Tấm pin mặt trời mini,20W,1,Cấp 4,Nguồn sạc thật có chu kỳ charge,Tùy chọn demo energy
+55,A14 Solar thật,Solar charge controller,PWM,1,Cấp 4,Sạc pin từ solar,
+56,A14 Solar thật,Tải giả,bóng đèn/điện trở công suất,1,Cấp 4,Tạo discharge demo energy + cycle,
