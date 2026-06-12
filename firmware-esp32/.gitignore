@@ -1,0 +1,13 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+.vscode/
+
+# Project local config (chứa WiFi password, API key)
+include/config.h
+
+# Build artifact
+*.bin
+*.elf
+*.map
