@@ -1,4 +1,0 @@
-# The simulator path uses only Python standard library.
-# Optional but recommended for richer heartbeat metrics:
-psutil>=5.9
-

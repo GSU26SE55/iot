@@ -6,3 +6,13 @@ data/
 .DS_Store
 Thumbs.db
 logs/*.log
+
+# Sprint 0 — Firmware
+firmware-esp32/.pio/
+firmware-esp32/.pioenvs/
+firmware-esp32/.piolibdeps/
+firmware-esp32/.vscode/
+firmware-esp32/include/config.h
+
+# Sprint 0 — Infra
+infra/.env
