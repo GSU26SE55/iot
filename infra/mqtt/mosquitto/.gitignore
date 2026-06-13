@@ -1,0 +1,4 @@
+# Sprint IoT-1 #253 — không commit secrets MQTT.
+passwd
+certs/*
+!certs/.gitkeep
