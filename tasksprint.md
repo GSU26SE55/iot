@@ -114,22 +114,34 @@ S7 (OTA + observability) có thể trễ vào S8 nếu thiếu thời gian.
 
 #### Backlog
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **1. S0-INF-01** (#2) | Tạo monorepo skeleton: `firmware-esp32/`, `infra/mqtt/`, `infra/db/`, `docs/` (BE đã có repo riêng) | NI §9 | `tree -L 2` thấy đúng cấu trúc; README root mô tả 3 codebase | INF |
-| **2. S0-INF-02** (#3) | `infra/docker-compose.dev.yml` chạy Postgres+Timescale + Redis + RabbitMQ + EMQX/Mosquitto | OV §A13 | `docker compose up -d` → 4 service healthy, port 1883/5432/6379/5672/15672/18083 OK | INF |
-| **3. S0-INF-03** (#4) | Seed Postgres extension `timescaledb`, tạo DB `battery_service_dev` | NI §7.1 | `psql -c '\dx'` thấy `timescaledb` | INF |
-| **4. S0-FW-01** (#5) | Cài PlatformIO + tạo project `firmware-esp32/` board `esp32-s3-devkitc-1`, lib: PubSubClient, ModbusMaster, ArduinoJson, OneWire, DallasTemperature, Adafruit INA226, Adafruit SHT31 | NI §9.1 | `pio run` compile pass với main.cpp trống | FW |
-| **5. S0-FW-02** (#6) | Flash sketch "blink + Serial.println('hello')" lên ESP32-S3 thật | — | LED nhấp nháy, Serial Monitor in chuỗi | FW |
-| **6. S0-FW-03** (#7) | Sketch WiFi connect + NTP sync + Serial in giờ ISO8601 | NI §12 (bẫy NTP) | Serial in `2026-06-12T...Z` đúng giờ thực, lệch ≤ 1s | FW |
-| **7. S0-HW-01** (#8) | Đặt mua **Cấp 0**: 1× ESP32-S3 DevKitC-1 (N16R8), 3× cáp USB-C, 1× breadboard | OV phụ lục | Có linh kiện trên tay cuối sprint | HW |
-| **8. S0-HW-02** (#9) | Đặt order **Cấp 1**: 2× MAX485 (XY-017), điện trở 120Ω × 4, 4.7kΩ × 4, 20m cáp đôi xoắn shielded, domino | OV §A2, §A9 | Đã đặt; ETA trước S5 | HW |
-| **9. S0-HW-03** (#10) | Đặt order **BMS-RS485**: 3–4 pin LiFePO4 12V có BMS Daly/JBD/JK-BMS, **hỏi rõ register map + đổi unitId** | OV §A4 checklist | Có xác nhận seller về register map | HW |
-| **10. S0-QA-01** (#11) | Tạo trang `docs/glossary.md` thuật ngữ (BMS, Modbus unitId, LWT, hypertable, idempotency, clock skew...) để team mới đọc nhanh | NI §0 | Cover ≥ 15 thuật ngữ | QA |
+> **Trạng thái:** ✅ Done · 🟡 Code OK / cần verify hardware · 🔴 Gap chưa làm
 
-**Backend (BE):** task `S0-BE-01` (pull BatteryService, build pass, migration cũ) đã chuyển sang **`backend/overall.md` Sprint IoT-2 Phase A** (`#IoT2-01`). IoT track không tự build BE — chỉ verify Swagger UI mở được trước S1.
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **1. S0-INF-01** (#2) | Tạo monorepo skeleton: `firmware-esp32/`, `infra/mqtt/`, `infra/db/`, `docs/` (BE đã có repo riêng) | NI §9 | `tree -L 2` thấy đúng cấu trúc; README root mô tả 3 codebase | INF | ✅ |
+| **2. S0-INF-02** (#3) | `infra/docker-compose.dev.yml` chạy Postgres+Timescale + Redis + RabbitMQ + EMQX/Mosquitto | OV §A13 | `docker compose up -d` → 4 service healthy, port 1883/5432/6379/5672/15672/18083 OK | INF | ✅ (Mosquitto thay EMQX → không có port 18083) |
+| **3. S0-INF-03** (#4) | Seed Postgres extension `timescaledb`, tạo DB `battery_service_dev` | NI §7.1 | `psql -c '\dx'` thấy `timescaledb` | INF | ✅ |
+| **4. S0-FW-01** (#5) | Cài PlatformIO + tạo project `firmware-esp32/` board `esp32-s3-devkitc-1`, lib: PubSubClient, ModbusMaster, ArduinoJson, OneWire, DallasTemperature, Adafruit INA226, Adafruit SHT31 | NI §9.1 | `pio run` compile pass với main.cpp trống | FW | ✅ (thừa lib `adafruit/Adafruit INA219` không trong spec) |
+| **5. S0-FW-02** (#6) | Flash sketch "blink + Serial.println('hello')" lên ESP32-S3 thật | — | LED nhấp nháy, Serial Monitor in chuỗi | FW | 🟡 Code có (`examples/01-blink-hello/`); chưa flash ESP32 verify |
+| **6. S0-FW-03** (#7) | Sketch WiFi connect + NTP sync + Serial in giờ ISO8601 | NI §12 (bẫy NTP) | Serial in `2026-06-12T...Z` đúng giờ thực, lệch ≤ 1s | FW | 🟡 Functionality nằm trong Sprint 1 `src/main.cpp` (đã overwrite); sketch standalone biến mất; chưa flash verify |
+| **7. S0-HW-01** (#8) | Đặt mua **Cấp 0**: 1× ESP32-S3 DevKitC-1 (N16R8), 3× cáp USB-C, 1× breadboard | OV phụ lục | Có linh kiện trên tay cuối sprint | HW | 🔴 Checklist có, status thực `☐` |
+| **8. S0-HW-02** (#9) | Đặt order **Cấp 1**: 2× MAX485 (XY-017), điện trở 120Ω × 4, 4.7kΩ × 4, 20m cáp đôi xoắn shielded, domino | OV §A2, §A9 | Đã đặt; ETA trước S5 | HW | 🔴 Checklist có, status thực `☐` |
+| **9. S0-HW-03** (#10) | Đặt order **BMS-RS485**: 3–4 pin LiFePO4 12V có BMS Daly/JBD/JK-BMS, **hỏi rõ register map + đổi unitId** | OV §A4 checklist | Có xác nhận seller về register map | HW | 🔴 Critical path; chưa đặt |
+| **10. S0-QA-01** (#11) | Tạo trang `docs/glossary.md` thuật ngữ (BMS, Modbus unitId, LWT, hypertable, idempotency, clock skew...) để team mới đọc nhanh | NI §0 | Cover ≥ 15 thuật ngữ | QA | ✅ 31 thuật ngữ (≥ 15 spec) |
+
+**Backend (BE):** task `S0-BE-01` (pull BatteryService, build pass, migration cũ) đã chuyển sang **`backend/overall.md` Sprint IoT-2 Phase A** (`#IoT2-01`). IoT track không tự build BE — chỉ verify Swagger UI mở được trước S1. **Status:** 🔴 chưa biết Thắng đã làm chưa.
 
 **DoD sprint:** Họp 30 phút, mọi member demo được sketch ESP32 in giờ NTP + `docker compose up` trên máy mình.
+
+##### Sprint 0 — Tổng kết gap
+
+| Nhóm | Items |
+|------|-------|
+| ✅ Đã làm (6) | #2, #3, #4, #5 (lib INA219 thừa), #11 ─ + procurement checklist file |
+| 🟡 Code OK, cần ESP32 (2) | #6 blink, #7 wifi+ntp (Sprint 1 đã overwrite `src/main.cpp` → mất isolation demo) |
+| 🔴 Procurement chưa làm (3) | #8 Cấp 0, #9 Cấp 1, #10 BMS — leader/HW owner update `docs/procurement-checklist.md` |
+| 🔴 Backend dep (1) | `#IoT2-01` Swagger UI verify (hỏi Thắng) |
+| 🔴 Cleanup code/doc (3) | Restore `examples/02-wifi-ntp/` từ git, remove lib INA219, update README outdated "Quick start (Sprint 0)" |
 
 ---
 
@@ -141,24 +153,37 @@ S7 (OTA + observability) có thể trễ vào S8 nếu thiếu thời gian.
 
 #### Backlog
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **11. S1-FW-01** (#12) | `include/config.h` chứa `WIFI_SSID/PASS, BACKEND_URL, DEVICE_CODE, API_KEY` placeholder | NI §9.1 | Build pass; đọc được trong main | FW |
-| **12. S1-FW-02** (#13) | `src/net/wifi_manager.cpp` — connect + auto reconnect khi rớt | NI §9.1 | Tắt WiFi router → ESP32 log "reconnecting"; bật lại → reconnect ≤ 30s | FW |
-| **13. S1-FW-03** (#14) | `src/net/time_sync.cpp` — NTP `configTime("pool.ntp.org")` + util `isoNow()` | NI §12 #1 | `isoNow()` trả đúng RFC3339 UTC | FW |
-| **14. S1-FW-04** (#15) | `src/bms/mock_bms.cpp` sinh reading giả cho N pin (config: serial + cycle voltage 12.0–13.0V, dao động sine + noise nhỏ); scenario flag `overheat`, `low_soc` | NI §9.1, §11 A | Mock trả mảng `SensorReading` đúng struct; switch scenario qua compile flag | FW |
-| **15. S1-FW-05** (#16) | `src/core/payload.cpp` build JSON theo **legacy contract** `items[].batteryAssetId` (MVP backward compat NI §7.4) | NI §7.4 | JSON output match schema legacy; có test unit | FW |
-| **16. S1-FW-06** (#17) | `src/net/http_client.cpp` POST batch sang `/api/sensor-readings/batch` (HTTPS, `setInsecure()` chỉ cho dev) | NI §7.4 | Backend nhận 200; có log response | FW |
-| **17. S1-FW-07** (#18) | Loop chính: mỗi 5s đọc mock → build payload → POST → log status | NI §8.3 loop | Quan sát Serial: cứ 5s in 1 dòng "posted 4 readings (200 OK)" | FW |
-| **18. S1-FE-01** (#19) | Trang "Battery list" hiển thị `LastReadingAt`, V/I/temp/SOC mới nhất, refresh 5s | NI §4 sơ đồ tổng | Mở web → thấy số nhảy mỗi 5s khớp ESP32 | FE |
-| **19. S1-FE-02** (#20) | Chart lịch sử voltage 1 giờ gần nhất | — | Đường line cập nhật mỗi 5s | FE |
-| **20. S1-QA-01** (#21) | Quay video 60s demo "ESP32 → dashboard" | — | Video share team | QA |
+> **Trạng thái:** ✅ Done · 🟡 Code OK / cần verify hardware · 🔴 Gap chưa làm
 
-**Backend (BE):** task `S1-BE-01` (seed) + `S1-BE-02` (legacy endpoint verify) đã chuyển sang **`backend/overall.md` Sprint IoT-2 Phase A** (`#IoT2-02`, `#IoT2-03`). IoT track cần chốt với Thắng trước S1 ngày bắt đầu: seed data sẵn sàng + endpoint chấp nhận format ESP32 mock.
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **11. S1-FW-01** (#12) | `include/config.h` chứa `WIFI_SSID/PASS, BACKEND_URL, DEVICE_CODE, API_KEY` placeholder | NI §9.1 | Build pass; đọc được trong main | FW | ✅ 5 macros literal match spec |
+| **12. S1-FW-02** (#13) | `src/net/wifi_manager.cpp` — connect + auto reconnect khi rớt | NI §9.1 | Tắt WiFi router → ESP32 log "reconnecting"; bật lại → reconnect ≤ 30s | FW | 🟡 Code có (log "reconnecting" throttle 5s); chưa flash ESP32 + router để đo ≤ 30s |
+| **13. S1-FW-03** (#14) | `src/net/time_sync.cpp` — NTP `configTime("pool.ntp.org")` + util `isoNow()` | NI §12 #1 | `isoNow()` trả đúng RFC3339 UTC | FW | 🟡 Code có (`%Y-%m-%dT%H:%M:%SZ`, 3 NTP server fallback); chưa verify trên ESP32 thật |
+| **14. S1-FW-04** (#15) | `src/bms/mock_bms.cpp` sinh reading giả cho N pin (config: serial + cycle voltage 12.0–13.0V, dao động sine + noise nhỏ); scenario flag `overheat`, `low_soc` | NI §9.1, §11 A | Mock trả mảng `SensorReading` đúng struct; switch scenario qua compile flag | FW | ✅ Struct ở `src/core/reading.h`, `batteryMappings[]` ở `src/config/`, voltage strict `[12.0, 13.0]V` (sine 0.48 + noise 0.02), scenarios `MOCK_SCENARIO_{OVERHEAT,LOW_SOC}` |
+| **15. S1-FW-05** (#16) | `src/core/payload.cpp` build JSON theo **legacy contract** `items[].batteryAssetId` (MVP backward compat NI §7.4) | NI §7.4 | JSON output match schema legacy; có test unit | FW | ✅ `{items[].batteryAssetId,...}` camelCase, 6/6 unit tests PASS |
+| **16. S1-FW-06** (#17) | `src/net/http_client.cpp` POST batch sang `/api/sensor-readings/batch` (HTTPS, `setInsecure()` chỉ cho dev) | NI §7.4 | Backend nhận 200; có log response | FW | 🟡 Code có (`setInsecure()`, X-Api-Key header, log response snippet); test với mock backend trả 200; chưa verify với BE thật |
+| **17. S1-FW-07** (#18) | Loop chính: mỗi 5s đọc mock → build payload → POST → log status | NI §8.3 loop | Quan sát Serial: cứ 5s in 1 dòng "posted 4 readings (200 OK)" | FW | 🟡 Code có (`INGEST_INTERVAL_MS=5000`, log substring `posted N readings (200 OK)`); chưa flash ESP32 + monitor |
+| **18. S1-FE-01** (#19) | Trang "Battery list" hiển thị `LastReadingAt`, V/I/temp/SOC mới nhất, refresh 5s | NI §4 sơ đồ tổng | Mở web → thấy số nhảy mỗi 5s khớp ESP32 | FE | 🔴 Repo riêng (`gsu26se55/web-frontend`) — không trong `iot/` |
+| **19. S1-FE-02** (#20) | Chart lịch sử voltage 1 giờ gần nhất | — | Đường line cập nhật mỗi 5s | FE | 🔴 Repo riêng — same |
+| **20. S1-QA-01** (#21) | Quay video 60s demo "ESP32 → dashboard" | — | Video share team | QA | 🔴 Cần ESP32 thật + dashboard FE + record |
+
+**Backend (BE):** task `S1-BE-01` (seed) + `S1-BE-02` (legacy endpoint verify) đã chuyển sang **`backend/overall.md` Sprint IoT-2 Phase A** (`#IoT2-02`, `#IoT2-03`). IoT track cần chốt với Thắng trước S1 ngày bắt đầu: seed data sẵn sàng + endpoint chấp nhận format ESP32 mock. **Status:** 🔴 chưa biết Thắng đã làm chưa.
 
 **DoD sprint:** Mọi người trong team mở dashboard, thấy chart voltage nhảy realtime từ ESP32 mock. Không cần pin thật.
 
 **Rủi ro:** Nếu backend hiện tại đòi `batteryAssetId` (GUID) thay vì serial, cần shim hoặc cập nhật sớm endpoint — không để kéo dài.
+
+##### Sprint 1 — Tổng kết gap
+
+| Nhóm | Items |
+|------|-------|
+| ✅ Đã làm (4) | #12 config.h, #15 mock_bms, #16 payload.cpp + 6 unit test, + extras (mock backend, integration test, NI §9.1 structure refactor) |
+| 🟡 Code OK, cần ESP32 + monitor (4) | #13 wifi reconnect, #14 NTP sync, #17 HTTPS 200 (chỉ test với mock backend), #18 main loop log format |
+| 🔴 Frontend repo khác (2) | #19 Battery list page, #20 Voltage chart — FE team làm |
+| 🔴 Manual demo (1) | #21 Video 60s — cần ESP32 + FE dashboard chạy được trước |
+| 🔴 Backend dep (2) | `#IoT2-02` seed data, `#IoT2-03` endpoint verify (hỏi Thắng) |
+| 🔴 Config GUID mismatch (1) | Firmware dùng `11111111-1111-4111-8111-00000000000{1..4}` placeholder; backend thật có 3 pin với GUID `54754d04-...`, `2810f7d9-...`, `5e2116ec-...` (xem `iot-simulator/config/seed.yaml`). POST 4 → backend skip cả 4. Cần chọn: (A) sync firmware GUID + giảm `MOCK_BATTERY_COUNT=3`, (B) Thắng seed thêm pin 4, hoặc (C) Thắng seed lại 4 pin với GUID placeholder |
 
 ---
 
@@ -170,33 +195,46 @@ S7 (OTA + observability) có thể trễ vào S8 nếu thiếu thời gian.
 
 #### Backend (BE) — chuyển sang Sprint IoT-2
 
-> 10 task BE của Sprint 2 (entity migration, hypertable, API key + scope, admin/device endpoints, offline detection + dedup vai Customer/Staff, ApiGateway route, `IotDeviceWentOfflineEvent` SharedContracts + NotificationService consumer/template) **đã chuyển sang `backend/overall.md` Sprint IoT-2 Phase B** (`#IoT2-04..13`).
+> 10 task BE của Sprint 2 (entity migration, hypertable, API key + scope, admin/device endpoints, offline detection + dedup vai Customer/Staff, ApiGateway route, `IotDeviceWentOfflineEvent` SharedContracts + NotificationService consumer/template) **đã chuyển sang `backend/overall.md` Sprint IoT-2 Phase B** (`#IoT2-04..13`). **Status BE (verified 2026-06-13):** ✅ **10/10 task ĐÃ implement trong backend repo** — migration `AddIotDeviceManagement` + `AddIotSprint2Schema`, hypertable `iot_device_heartbeats` retention 30d, `IotApiKeyService` + scope, `AdminIotDevicesController` (CRUD + rotate-key + revoke-key), `IotDevicesController` (provision + heartbeat), `IotDeviceOfflineDetectionBackgroundService`, ApiGateway routes, `IotDeviceWentOfflineEvent` + `IotDeviceWentOfflineConsumer`. Label GitHub `status: init` outdated (backend devs chưa update).
 >
-> IoT track (FW/QA) cần verify với Thắng trước S2 start: endpoint provision/heartbeat sẵn, API key sinh được + scope đầy đủ, NotificationService consumer chạy.
+> **Lưu ý route thực:** Backend dùng `/api/iot-devices/{provision,heartbeat}` KHÔNG có `/v1/` như tasksprint mô tả. Firmware đã align route thực.
 
 #### Backlog — Firmware
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **21. S2-FW-01** (#22) | Hỗ trợ load `apiKey + deviceCode` từ NVS (đầu tiên flash hard-coded, sau đổi qua config portal hoặc Serial) | NI §9.1 | Đổi key trong NVS → firmware dùng key mới mà không reflash | FW |
-| **22. S2-FW-02** (#23) | Provision flow boot: nếu Status=Provisioning thì gọi `/provision` 1 lần, lưu configJson về NVS | OV §B1 | Sau provision: log "provisioned, polling=5s" | FW |
-| **23. S2-FW-03** (#24) | Heartbeat task riêng (mỗi **60s** — đồng bộ MO §52.4): gửi chip temp → `Temperature`, free heap → `MemoryUsageMb`, WiFi RSSI → `SignalStrengthDbm`, độ sâu queue NVS → `LocalQueueDepth`. `Cpu`/`DiskFreeMb` để null vì ESP32 không có khái niệm Linux CPU/disk (MO §52.2 field mapping) | NI §7.1 heartbeat, MO §52.4 | Backend hypertable có row mới mỗi 60s với đúng tập field ESP32 | FW |
-| **24. S2-FW-04** (#25) | Header chuẩn cho mọi request: `X-Api-Key`, `X-Device-Code` | NI §7.4 | Backend log thấy header | FW |
+> **Trạng thái:** ✅ Done · 🟡 Code OK / cần verify hardware · 🔴 Gap chưa làm
+
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **21. S2-FW-01** (#22) | Hỗ trợ load `apiKey + deviceCode` từ NVS (đầu tiên flash hard-coded, sau đổi qua config portal hoặc Serial) | NI §9.1 | Đổi key trong NVS → firmware dùng key mới mà không reflash | FW | 🟡 Code: `src/config/{nvs_store, device_identity}.{h,cpp}` + `src/cli/serial_cli.{h,cpp}` Serial CLI commands (`show`/`set apikey`/`set devcode`/`clear`/`reboot`). Hot reload runtime: next POST đọc `identity::apiKey()` lấy giá trị mới. **Cần ESP32 verify** `set apikey iotk_xxx` không cần reflash |
+| **22. S2-FW-02** (#23) | Provision flow boot: nếu Status=Provisioning thì gọi `/provision` 1 lần, lưu configJson về NVS | OV §B1 | Sau provision: log "provisioned, polling=5s" | FW | 🟡 Code: `src/provision/provision.{h,cpp}` flow `loadProvisioned → POST /api/iot-devices/provision → parse IotDeviceProvisionResultDto → lưu NVS (provd, pollIntS, hbIntS, siteid, ntpsv) → set provd=1`. Retry 30s cooldown. Test mock backend OK. **Cần backend dev** verify log đúng "provisioned, polling=5s" |
+| **23. S2-FW-03** (#24) | Heartbeat task riêng (mỗi **60s** — đồng bộ MO §52.4): gửi chip temp → `Temperature`, free heap → `MemoryUsageMb`, WiFi RSSI → `SignalStrengthDbm`, độ sâu queue NVS → `LocalQueueDepth`. `Cpu`/`DiskFreeMb` để null vì ESP32 không có khái niệm Linux CPU/disk (MO §52.2 field mapping) | NI §7.1 heartbeat, MO §52.4 | Backend hypertable có row mới mỗi 60s với đúng tập field ESP32 | FW | 🟡 Code: `src/telemetry/heartbeat.{h,cpp}` POST `/api/iot-devices/heartbeat` với 10 field (gồm bonus `FreeMemoryPercent` cho board không PSRAM). Bounds `[10s, 1h]` defensive. Test mock backend OK. **Cần backend dev** verify hypertable `iot_device_heartbeats` có row mỗi 60s |
+| **24. S2-FW-04** (#25) | Header chuẩn cho mọi request: `X-Api-Key`, `X-Device-Code` | NI §7.4 | Backend log thấy header | FW | 🟡 Code: `src/net/http_client.cpp` `addHeader` cả 2 header runtime từ identity store. Bonus `httpPostJsonRecv()` variant cho response > 256 chars. **Cần backend dev** tail log verify 2 header xuất hiện |
 
 #### Backlog — Frontend
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **25. S2-FE-01** (#26) | Trang Admin "IoT Devices" — list + create modal hiện API key đúng 1 lần (copy-to-clipboard) | NI §11 E | Admin tạo device → hiện key → reload không thấy lại key | FE |
-| **26. S2-FE-02** (#27) | Trang detail device: trạng thái (Provisioning/Active/Offline), LastSeenAt, mappings, nút rotate key | — | Bấm rotate → key mới, key cũ 401 | FE |
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **25. S2-FE-01** (#26) | Trang Admin "IoT Devices" — list + create modal hiện API key đúng 1 lần (copy-to-clipboard) | NI §11 E | Admin tạo device → hiện key → reload không thấy lại key | FE | 🔴 Repo riêng (`gsu26se55/web-frontend` hoặc tương đương) — không trong `iot/`. Backend admin endpoint `POST /api/admin/iot-devices` đã có. |
+| **26. S2-FE-02** (#27) | Trang detail device: trạng thái (Provisioning/Active/Offline), LastSeenAt, mappings, nút rotate key | — | Bấm rotate → key mới, key cũ 401 | FE | 🔴 Repo riêng. Backend đã có `POST /api/admin/iot-devices/{id}/rotate-key` + `revoke-key`. |
 
 #### Backlog — QA
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **27. S2-QA-01** (#28) | Test scenario: tắt ESP32 5 phút → expect alert DeviceOffline + email/push | OV §B4 | Pass | QA |
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **27. S2-QA-01** (#28) | Test scenario: tắt ESP32 5 phút → expect alert DeviceOffline + email/push | OV §B4 | Pass | QA | 🔴 Cần ESP32 thật + backend dev + NotificationService chạy. Backend `IotDeviceOfflineDetectionBackgroundService` đã có (chạy mỗi 2 phút quét `LastSeenAt < now-5min`). |
 
 **DoD sprint:** Admin có thể tự tạo device, đưa key cho team firmware, ESP32 provision tự động và bị mark Offline sau khi rút điện.
+
+##### Sprint 2 — Tổng kết gap
+
+| Nhóm | Items |
+|------|-------|
+| 🟡 Code OK, cần ESP32 + backend (4) | #22 S2-FW-01 (Serial CLI hot reload), #23 S2-FW-02 (provision log), #24 S2-FW-03 (hypertable row mỗi 60s), #25 S2-FW-04 (header xuất hiện trong BE log) |
+| 🔴 Frontend repo khác (2) | #26 S2-FE-01 Admin IoT Devices page, #27 S2-FE-02 Detail + rotate — backend admin endpoints đã ready |
+| 🔴 Manual scenario test (1) | #28 S2-QA-01 — cần ESP32 + backend dev + NotificationService |
+| ✅ Backend dep verified | `#IoT2-04..13` (10 task) đã implement xong trong backend repo — KHÔNG block FW |
+| 🔴 Bonus — files mới cần code review | `nvs_store`, `device_identity`, `serial_cli`, `provision`, `heartbeat` + http_client mở rộng + mock-backend Sprint 2 endpoints |
+| 🔧 8 bug fix sau 2 review pass | (1) nvsBegin RO→RW, (2) MemoryUsageMb PSRAM+round, (3) provision retry cooldown ordering, (4) heartbeatBegin bounds, (5) device_identity constants+length check, (6) loadProvisioned defensive bounds, (7) FreeMemoryPercent field mới, (8) Serial.flush trước ESP.restart |
 
 ---
 

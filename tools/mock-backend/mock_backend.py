@@ -295,26 +295,77 @@ class MockHandler(BaseHTTPRequestHandler):
         })
 
     def _handle_provision(self):
+        """Sprint 2 S2-FW-02 — schema khớp IotDeviceProvisionResultDto của backend."""
         raw = self._read_body()
         try:
             body = json.loads(raw) if raw else {}
         except json.JSONDecodeError:
             body = {}
-        self._print_request(YELLOW, 200, "provision (stub)")
+
+        fw  = body.get("FirmwareVersion") or body.get("firmwareVersion") or "?"
+        hw  = body.get("HardwareRevision") or body.get("hardwareRevision") or "?"
+        ts  = body.get("DeviceTimestamp") or body.get("deviceTimestamp") or "?"
+        device_code = self.headers.get("X-Device-Code", "GW-ESP32-MVP-001")
+
+        self._print_request(YELLOW, 200, "provision",
+                            f"fw={fw} hw={hw} ts={ts}")
         self._send_json(200, {
             "isSuccess": True,
+            "statusCode": 200,
             "data": {
-                "deviceCode": self.headers.get("X-Device-Code", "GW-ESP32-MVP-001"),
-                "pollingIntervalSeconds": 5,
+                "deviceId":   "11111111-1111-4111-8111-d00000000001",
+                "deviceCode": device_code,
+                "siteId":     "11111111-1111-1111-1111-111111111111",
                 "heartbeatIntervalSeconds": 60,
-                "configJson": "{}",
+                "pollingIntervalSeconds":   5,
+                "ntpServer":  "time.google.com",
+                "apiKeyScopes": 7,   # SensorIngest|DeviceProvision|DeviceHeartbeat
+                "targetFirmwareVersion": None,
+                "batteryMappings": [
+                    {"batteryAssetSerial": "BAT-MOCK-001", "unitId": 1, "sensorSourceCode": "primary"},
+                    {"batteryAssetSerial": "BAT-MOCK-002", "unitId": 2, "sensorSourceCode": "primary"},
+                    {"batteryAssetSerial": "BAT-MOCK-003", "unitId": 3, "sensorSourceCode": "primary"},
+                    {"batteryAssetSerial": "BAT-MOCK-004", "unitId": 4, "sensorSourceCode": "primary"},
+                ],
+                "supportedSensors": ["voltage", "current", "temperature", "soc"],
             },
         })
 
     def _handle_heartbeat(self):
-        self._read_body()
-        self._print_request(CYAN, 200, "heartbeat (stub)")
-        self._send_json(200, {"isSuccess": True})
+        """Sprint 2 S2-FW-03 — schema khớp IotHeartbeatAckDto."""
+        raw = self._read_body()
+        try:
+            body = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            body = {}
+
+        device_code = self.headers.get("X-Device-Code", "?")
+        temp = body.get("Temperature") or body.get("temperature")
+        rssi = body.get("SignalStrengthDbm") or body.get("RssiDbm") or body.get("signalStrengthDbm")
+        mem  = body.get("MemoryUsageMb") or body.get("memoryUsageMb")
+        qd   = body.get("LocalQueueDepth") or body.get("QueuedReadingCount")
+        ts   = body.get("DeviceTimestamp") or body.get("deviceTimestamp") or ""
+
+        with self.state.lock:
+            d = self.state.by_device.setdefault(device_code, {"batches": 0, "readings": 0, "lastSeen": 0})
+            d["lastSeen"] = time.time()
+            d["lastHeartbeat"] = {"temp": temp, "rssi": rssi, "memMb": mem, "queueDepth": qd, "ts": ts}
+
+        extra = f"temp={temp}°C rssi={rssi}dBm mem={mem}MB queue={qd}"
+        self._print_request(CYAN, 200, "heartbeat", extra)
+
+        # ClockSkewSeconds = 0 nếu ts trùng server time (mock không enforce).
+        self._send_json(200, {
+            "isSuccess": True,
+            "statusCode": 200,
+            "data": {
+                "serverTime": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "clockSkewSeconds": 0.0,
+                "clockSkewWarning": False,
+                "nextHeartbeatInSeconds": 60,
+                "firmwareUpdateAvailable": False,
+            },
+        })
 
     # ---- dashboard ----
     def _dashboard_root(self):

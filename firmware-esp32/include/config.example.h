@@ -37,7 +37,14 @@
 
 // Endpoint ingest theo legacy contract (Sprint 1 MVP — backward compat NI §7.4).
 // Sprint 3 (S3-FW-04) giữ URL nhưng đổi schema sang production contract.
-#define BACKEND_INGEST_PATH "/api/sensor-readings/batch"
+#define BACKEND_INGEST_PATH    "/api/sensor-readings/batch"
+
+// Sprint 2 endpoints (backend route prefix `/api/iot-devices/`, KHÔNG có `/v1/`).
+#define BACKEND_PROVISION_PATH "/api/iot-devices/provision"
+#define BACKEND_HEARTBEAT_PATH "/api/iot-devices/heartbeat"
+
+// Hardware revision string — backend dùng để track HW version per device.
+#define HARDWARE_REVISION      "ESP32-S3-DevKitC-1-N16R8"
 
 // `DEVICE_CODE` — định danh device (placeholder theo tasksprint S1-FW-01).
 // Admin tạo trên web rồi đưa cho team firmware (Sprint 2 S2-BE-03).

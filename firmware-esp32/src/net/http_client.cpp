@@ -1,13 +1,14 @@
 // ==================================================================
 // Sprint 1 — S1-FW-06: HTTPS client implementation
+// Sprint 2 — S2-FW-04: thêm `X-Device-Code` + đọc credentials runtime từ identity store
 //
-// Acceptance (tasksprint.md S1-FW-06):
-//   - Backend nhận 200; có log response
+// Acceptance:
+//   - S1-FW-06: Backend nhận 2xx; có log response
+//   - S2-FW-04: backend log thấy 2 header X-Api-Key + X-Device-Code
 //
 // Lưu ý:
 //   - WiFiClientSecure::setInsecure() chỉ chấp nhận trong dev (Sprint 1 PILOT).
-//     Sprint 3 (S3-BE-01..04 đã chuyển sang backend) hoặc Sprint 4 phải thay
-//     bằng root CA bundle (esp_crt_bundle_attach hoặc CA cert qua LittleFS).
+//     Sprint 3 hoặc Sprint 4 phải thay bằng root CA bundle.
 // ==================================================================
 #include "net/http_client.h"
 
@@ -15,6 +16,8 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <string.h>
+
+#include "config/device_identity.h"     // S2-FW-01 + S2-FW-04: runtime credentials
 
 #if __has_include("config.h")
   #include "config.h"
@@ -30,15 +33,88 @@ namespace {
 WiFiClientSecure s_tlsClient;
 bool             s_tlsConfigured = false;
 
-void copyResponseSnippet(HTTPClient& http, char* dst, size_t dstLen) {
-  if (dstLen == 0) return;
-  dst[0] = '\0';
-  // getString() đọc cả body — Sprint 1 batch response thường <1kB.
-  // Cắt 256 chars để đỡ tốn log.
+size_t copyResponseFull(HTTPClient& http,
+                        char* snippet, size_t snippetLen,
+                        char* fullBuf, size_t fullBufLen) {
   String body = http.getString();
-  size_t n = body.length() < (dstLen - 1) ? body.length() : (dstLen - 1);
-  memcpy(dst, body.c_str(), n);
-  dst[n] = '\0';
+  size_t bodyLen = body.length();
+
+  if (snippet != nullptr && snippetLen > 0) {
+    size_t n = bodyLen < (snippetLen - 1) ? bodyLen : (snippetLen - 1);
+    memcpy(snippet, body.c_str(), n);
+    snippet[n] = '\0';
+  }
+  if (fullBuf != nullptr && fullBufLen > 0) {
+    size_t n = bodyLen < (fullBufLen - 1) ? bodyLen : (fullBufLen - 1);
+    memcpy(fullBuf, body.c_str(), n);
+    fullBuf[n] = '\0';
+    return n;
+  }
+  return 0;
+}
+
+PostResult postJsonInternal(const char* path,
+                            const char* body, size_t bodyLen,
+                            char* respBuf, size_t respBufLen,
+                            size_t* outRespBytes) {
+  PostResult res{};
+  res.httpCode      = -1;
+  res.requestBytes  = bodyLen;
+  res.responseBytes = 0;
+  res.responseSnippet[0] = '\0';
+  if (outRespBytes) *outRespBytes = 0;
+
+  if (!s_tlsConfigured) httpClientBegin();
+
+  String url;
+  url.reserve(96 + (path ? strlen(path) : 0));
+  url += BACKEND_URL;
+  url += path;
+
+  HTTPClient http;
+  http.setReuse(true);
+  http.setTimeout(HTTP_TIMEOUT_MS);
+  http.setConnectTimeout(HTTP_TIMEOUT_MS);
+
+  uint32_t t0 = millis();
+  if (!http.begin(s_tlsClient, url)) {
+    Serial.printf("[http] begin() failed url=%s\n", url.c_str());
+    res.durationMs = millis() - t0;
+    return res;
+  }
+
+  // S2-FW-04: 2 header bắt buộc đọc từ identity store runtime.
+  http.addHeader("Content-Type",   "application/json");
+  http.addHeader("X-Api-Key",      identity::apiKey());
+  http.addHeader("X-Device-Code",  identity::deviceCode());
+  http.addHeader("Accept",         "application/json");
+
+  int code = http.POST(reinterpret_cast<uint8_t*>(const_cast<char*>(body)),
+                       bodyLen);
+
+  res.httpCode   = code;
+  res.durationMs = millis() - t0;
+
+  if (code > 0) {
+    size_t n = copyResponseFull(http,
+                                res.responseSnippet, sizeof(res.responseSnippet),
+                                respBuf, respBufLen);
+    res.responseBytes = n;
+    if (outRespBytes) *outRespBytes = n;
+    Serial.printf("[http] POST %s → %d (%lums, %u bytes sent, %u bytes resp)\n",
+                  path, code,
+                  static_cast<unsigned long>(res.durationMs),
+                  static_cast<unsigned>(bodyLen),
+                  static_cast<unsigned>(n));
+  } else {
+    Serial.printf("[http] POST %s FAIL (%lums) err=%s\n",
+                  path,
+                  static_cast<unsigned long>(res.durationMs),
+                  http.errorToString(code).c_str());
+  }
+
+  http.end();
+  return res;
 }
 }  // namespace
 
@@ -53,59 +129,14 @@ void httpClientBegin() {
 PostResult httpPostJson(const char* path,
                         const char* body,
                         size_t      bodyLen) {
-  PostResult res{};
-  res.httpCode      = -1;
-  res.requestBytes  = bodyLen;
-  res.responseSnippet[0] = '\0';
+  return postJsonInternal(path, body, bodyLen, nullptr, 0, nullptr);
+}
 
-  if (!s_tlsConfigured) httpClientBegin();
-
-  // Build URL: BACKEND_URL + path. URL constructor không validate scheme;
-  // assert thủ công vì setInsecure() chỉ áp dụng cho HTTPS.
-  String url;
-  url.reserve(96 + (path ? strlen(path) : 0));
-  url += BACKEND_URL;
-  url += path;
-
-  HTTPClient http;
-  http.setReuse(true);                     // keep-alive nếu cùng host
-  http.setTimeout(HTTP_TIMEOUT_MS);
-  http.setConnectTimeout(HTTP_TIMEOUT_MS);
-
-  uint32_t t0 = millis();
-  if (!http.begin(s_tlsClient, url)) {
-    Serial.printf("[http] begin() failed url=%s\n", url.c_str());
-    res.durationMs = millis() - t0;
-    return res;
-  }
-
-  // Sprint 1 — chỉ X-Api-Key (NI §7.4 legacy). X-Device-Code là Sprint 3 (S3-FW-04).
-  http.addHeader("Content-Type",   "application/json");
-  http.addHeader("X-Api-Key",      API_KEY);
-  http.addHeader("Accept",         "application/json");
-
-  // POST: HTTPClient muốn (uint8_t*, size_t).
-  int code = http.POST(reinterpret_cast<uint8_t*>(const_cast<char*>(body)),
-                       bodyLen);
-
-  res.httpCode   = code;
-  res.durationMs = millis() - t0;
-
-  if (code > 0) {
-    copyResponseSnippet(http, res.responseSnippet, sizeof(res.responseSnippet));
-    Serial.printf("[http] POST %s → %d (%lums, %u bytes sent)\n",
-                  path, code,
-                  static_cast<unsigned long>(res.durationMs),
-                  static_cast<unsigned>(bodyLen));
-  } else {
-    Serial.printf("[http] POST %s FAIL (%lums) err=%s\n",
-                  path,
-                  static_cast<unsigned long>(res.durationMs),
-                  http.errorToString(code).c_str());
-  }
-
-  http.end();
-  return res;
+PostResult httpPostJsonRecv(const char* path,
+                            const char* body, size_t bodyLen,
+                            char* respBuf, size_t respBufLen,
+                            size_t* outRespBytes) {
+  return postJsonInternal(path, body, bodyLen, respBuf, respBufLen, outRespBytes);
 }
 
 }  // namespace net
