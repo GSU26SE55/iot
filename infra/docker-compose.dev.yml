@@ -53,32 +53,31 @@ services:
       timeout: 10s
       retries: 10
 
-  emqx:
-    image: emqx/emqx:5.7.2
-    container_name: iot-emqx
+  # MQTT broker — Mosquitto (chọn thay EMQX để match backend Mqtt__Host=mosquitto + ACL file sẵn).
+  # Bootstrap lần đầu: ./mqtt/mosquitto/bootstrap.sh → tạo passwd backend-bridge, copy password vào backend/.env.Docker.
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: iot-mosquitto
     restart: unless-stopped
-    environment:
-      EMQX_NAME: iot-emqx
-      EMQX_HOST: 127.0.0.1
-      EMQX_DASHBOARD__DEFAULT_USERNAME: ${EMQX_DASHBOARD_USER:-admin}
-      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASS:-public}
     ports:
-      - "${EMQX_MQTT_PORT:-11883}:1883"       # MQTT (host 11883 để tránh đụng Mosquitto local 1883)
-      - "${EMQX_MQTTS_PORT:-18883}:8883"      # MQTT/TLS (S4)
-      - "${EMQX_WS_PORT:-18030}:8083"         # MQTT/WS
-      - "${EMQX_DASHBOARD_PORT:-18083}:18083" # Dashboard
+      - "${MQTT_PORT:-1883}:1883"       # plain MQTT (dev)
+      - "${MQTT_TLS_PORT:-8883}:8883"   # MQTT/TLS (S4 — uncomment listener trong mosquitto.conf khi có cert)
     volumes:
-      - emqx-data:/opt/emqx/data
-      - emqx-log:/opt/emqx/log
+      - ./mqtt/mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mqtt/mosquitto/config/acl.conf:/mosquitto/config/acl.conf:ro
+      - ./mqtt/mosquitto/passwd:/mosquitto/config/passwd:ro
+      - ./mqtt/mosquitto/certs:/mosquitto/certs:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
     healthcheck:
-      test: ["CMD", "emqx", "ctl", "status"]
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -p 1883 -u backend-bridge -P $$(cat /mosquitto/config/passwd | head -1) -t '$$SYS/#' -C 1 -W 2 || exit 0"]
       interval: 10s
-      timeout: 10s
-      retries: 12
+      timeout: 5s
+      retries: 5
 
 volumes:
   timescaledb-data:
   redis-data:
   rabbitmq-data:
-  emqx-data:
-  emqx-log:
+  mosquitto-data:
+  mosquitto-log:
