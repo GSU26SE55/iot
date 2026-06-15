@@ -66,8 +66,33 @@ class State:
         self.reading_count = 0
         self.fail_count = 0
         self.by_device: dict[str, dict] = {}     # deviceCode → {batches, readings, lastSeen}
-        self.by_battery: dict[str, dict] = {}    # batteryAssetId → {count, lastVoltage, lastTemp, ...}
+        self.by_battery: dict[str, dict] = {}    # batteryAssetId/Serial → {count, lastVoltage, ...}
         self.recent_batches: deque = deque(maxlen=history_size)
+        # Sprint 3 (S3-FW-02 / #IoT2-16): idempotency dedup.
+        # Key = (device_code, idempotency_key) → cached response dict + insert_ts.
+        # TTL 24h — mock không cleanup; in-memory đủ cho dev session.
+        self.idempotency_cache: dict[tuple[str, str], dict] = {}
+        self.idempotency_hits = 0
+
+    def get_idempotent_response(self, device_code: str, key: str) -> dict | None:
+        """Sprint 3: nếu (device, key) đã có response → trả lại + count hit."""
+        if not key:
+            return None
+        with self.lock:
+            entry = self.idempotency_cache.get((device_code, key))
+            if entry is not None:
+                self.idempotency_hits += 1
+                return entry["response"]
+        return None
+
+    def store_idempotent_response(self, device_code: str, key: str, response: dict):
+        if not key:
+            return
+        with self.lock:
+            self.idempotency_cache[(device_code, key)] = {
+                "response": response,
+                "ts": time.time(),
+            }
 
     def record(self, device_code: str, payload: dict, num_readings: int):
         now = time.time()
@@ -80,7 +105,8 @@ class State:
             d["lastSeen"] = now
 
             for r in payload.get("items", []):
-                bid = r.get("batteryAssetId", "?")
+                # Sprint 3: ưu tiên batteryAssetSerial, fallback batteryAssetId
+                bid = r.get("batteryAssetSerial") or r.get("batteryAssetId", "?")
                 b = self.by_battery.setdefault(bid, {
                     "count": 0, "lastVoltage": None, "lastCurrent": None,
                     "lastTemp": None, "lastSoc": None, "lastSeenIso": None,
@@ -112,10 +138,15 @@ UUID_RE = re.compile(
 )
 BATCH_LIMIT = 1000   # api-battery.md: tối đa 1000 readings/request
 
-def validate_legacy_batch(body: dict) -> tuple[bool, list[dict]]:
-    """Validate theo backend/docs/api-battery.md §POST /api/sensor-readings/batch.
+def validate_batch(body: dict) -> tuple[bool, list[dict]]:
+    """Validate cả Sprint 1 legacy và Sprint 3 production schema.
 
-    Trả mảng list[{field, detail}] để khớp shape `listErrors` của backend khi 400.
+    Sprint 3 (S3-FW-04): items[] có thể chứa:
+      - batteryAssetSerial (preferred) HOẶC batteryAssetId (legacy fallback)
+      - sourceType (1=Bms, 2=IotGateway, 3=External)
+      - sensorSourceCode (≤ 20 chars)
+      - sohPercent, chargingState (1-5), bmsErrorCode (≤ 64 chars)
+      - deviceTimestamp (cho clock skew check #IoT2-15)
     """
     errs: list[dict] = []
 
@@ -137,15 +168,28 @@ def validate_legacy_batch(body: dict) -> tuple[bool, list[dict]]:
             if not isinstance(it, dict):
                 errs.append({"field": prefix, "detail": "not object"}); continue
 
+            # Sprint 3: chấp nhận batteryAssetSerial HOẶC batteryAssetId
             bid = it.get("batteryAssetId")
-            if not isinstance(bid, str):
-                errs.append({"field": f"{prefix}.batteryAssetId", "detail": "required string"})
-            elif not UUID_RE.match(bid):
-                errs.append({"field": f"{prefix}.batteryAssetId", "detail": "invalid UUID"})
+            bsr = it.get("batteryAssetSerial")
+            if bsr is None and bid is None:
+                errs.append({"field": f"{prefix}.batteryAssetId",
+                             "detail": "PHẢI có batteryAssetSerial hoặc batteryAssetId"})
+            elif bsr is not None:
+                if not isinstance(bsr, str) or len(bsr) > 64:
+                    errs.append({"field": f"{prefix}.batteryAssetSerial",
+                                 "detail": "must be string ≤ 64 chars"})
+            else:
+                if not isinstance(bid, str) or not UUID_RE.match(bid):
+                    errs.append({"field": f"{prefix}.batteryAssetId", "detail": "invalid UUID"})
 
             t = it.get("time")
             if t is None or not isinstance(t, str) or not ISO_RE.match(t):
                 errs.append({"field": f"{prefix}.time", "detail": "invalid ISO8601"})
+
+            # Sprint 3 (#IoT2-15): deviceTimestamp optional nhưng nếu có phải ISO8601
+            dts = it.get("deviceTimestamp")
+            if dts is not None and (not isinstance(dts, str) or not ISO_RE.match(dts)):
+                errs.append({"field": f"{prefix}.deviceTimestamp", "detail": "invalid ISO8601"})
 
             for k in ("voltage", "current", "temperature", "socPercent"):
                 v = it.get(k)
@@ -177,9 +221,33 @@ def validate_legacy_batch(body: dict) -> tuple[bool, list[dict]]:
                 elif c < 0:
                     errs.append({"field": f"{prefix}.cycleCount", "detail": "must be >= 0"})
 
-            # Sprint 1 KHÔNG có sourceDeviceId/sohPercent — chỉ accept-and-ignore nếu được gửi.
+            # Sprint 3 — optional production fields
+            soh = it.get("sohPercent")
+            if soh is not None and (not isinstance(soh, (int, float)) or not (0 <= soh <= 100)):
+                errs.append({"field": f"{prefix}.sohPercent", "detail": "must be number 0..100"})
+
+            cs = it.get("chargingState")
+            if cs is not None and (not isinstance(cs, int) or cs < 1 or cs > 5):
+                errs.append({"field": f"{prefix}.chargingState",
+                             "detail": "must be int 1..5 (Idle/Charging/Discharging/Float/Bypass)"})
+
+            bec = it.get("bmsErrorCode")
+            if bec is not None and (not isinstance(bec, str) or len(bec) > 64):
+                errs.append({"field": f"{prefix}.bmsErrorCode", "detail": "must be string ≤ 64 chars"})
+
+            ssc = it.get("sensorSourceCode")
+            if ssc is not None and (not isinstance(ssc, str) or len(ssc) > 20):
+                errs.append({"field": f"{prefix}.sensorSourceCode", "detail": "must be string ≤ 20 chars"})
+
+            st = it.get("sourceType")
+            if st is not None and (not isinstance(st, int) or st < 1 or st > 3):
+                errs.append({"field": f"{prefix}.sourceType",
+                             "detail": "must be int 1..3 (Bms/IotGateway/External)"})
 
     return (not errs), errs
+
+# Alias backward-compat cho code cũ
+validate_legacy_batch = validate_batch
 
 
 # ---------------- Handler ----------------
@@ -264,9 +332,24 @@ class MockHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"isSuccess": False, "message": f"bad json: {e}"})
             return
 
-        ok, errs = validate_legacy_batch(body)
+        device_code = self.headers.get("X-Device-Code", "?")
+        idemp_key   = self.headers.get("Idempotency-Key", "")
+
+        # Sprint 3 (#IoT2-16): idempotency dedup — kiểm tra TRƯỚC khi validate
+        # (backend chấp nhận retry same key → trả lại response cũ).
+        if idemp_key:
+            cached = self.state.get_idempotent_response(device_code, idemp_key)
+            if cached is not None:
+                code = cached.get("__statusCode", 200)
+                self._print_request(CYAN, code, "idempotent-replay",
+                                    f"key={idemp_key[:8]}...")
+                # Loại bỏ field internal trước khi gửi
+                payload = {k: v for k, v in cached.items() if not k.startswith("__")}
+                self._send_json(code, payload)
+                return
+
+        ok, errs = validate_batch(body)
         if not ok:
-            # api-battery.md: 400 cho validation error (KHÔNG phải 422).
             first = errs[0]
             self._print_request(RED, 400, f"validation {len(errs)} errors",
                                 f"first={first['field']}: {first['detail']}")
@@ -274,25 +357,68 @@ class MockHandler(BaseHTTPRequestHandler):
                 "isSuccess": False,
                 "statusCode": 400,
                 "message": "validation failed",
-                "listErrors": errs,    # khớp shape backend (Errors[] với Field+Detail)
+                "listErrors": errs,
             })
             return
 
-        # Sprint 1: chưa có X-Device-Code (Sprint 3) — lấy từ header nếu sẵn,
-        # hoặc dùng "?" (legacy contract không yêu cầu device code per item).
+        # Sprint 3 (#IoT2-15): clock skew check per item
+        from datetime import datetime as _dt
         items = body["items"]
-        device_code = self.headers.get("X-Device-Code", "?")
+        now = _dt.now(timezone.utc)
+        skew_errs = []
+        for i, it in enumerate(items):
+            dts = it.get("deviceTimestamp")
+            if not dts:
+                continue
+            try:
+                ts = _dt.fromisoformat(dts.replace("Z", "+00:00"))
+                skew_sec = abs((ts - now).total_seconds())
+                if skew_sec > 300:    # 5 phút
+                    skew_errs.append({
+                        "field": f"items[{i}].deviceTimestamp",
+                        "detail": f"clock skew {int(skew_sec)}s > 300s (5 phút)",
+                    })
+            except ValueError:
+                pass
+        if skew_errs:
+            self._print_request(RED, 400, "clock_drift",
+                                f"items={len(skew_errs)} skewed")
+            self._send_json(400, {
+                "isSuccess": False,
+                "statusCode": 400,
+                "message": "clock drift",
+                "listErrors": skew_errs,
+            })
+            return
+
         self.state.record(device_code, body, len(items))
 
         first = items[0]
+        # Sprint 3: log source type breakdown nếu có
+        sources = {it.get("sourceType", "?") for it in items}
+        src_breakdown = "/".join(str(s) for s in sorted(sources)) if sources else ""
         extra = (f"items={len(items)} v={first.get('voltage'):.2f}V "
-                 f"t={first.get('temperature'):.1f}°C soc={first.get('socPercent'):.1f}%")
-        # tasksprint S1-FW-06 acceptance: "Backend nhận 200".
-        self._print_request(GREEN, 200, "batch", extra)
-        self._send_json(200, {
+                 f"t={first.get('temperature'):.1f}°C soc={first.get('socPercent'):.1f}% "
+                 f"src={src_breakdown}")
+        # Backend api-battery.md returns 201 Created cho POST insert.
+        # (S1-FW-06 spec viết "200" — nhưng backend code dùng 201; firmware check 2xx).
+        self._print_request(GREEN, 201, "batch", extra)
+        response = {
             "isSuccess": True,
-            "data": {"accepted": len(items)},
-        })
+            "statusCode": 201,
+            "data": {
+                "totalReceived": len(items),
+                "inserted":      len(items),
+                "skipped":       0,
+            },
+            "__statusCode": 201,
+        }
+        # Sprint 3: cache cho idempotency replay
+        if idemp_key:
+            self.state.store_idempotent_response(device_code, idemp_key, response)
+        # Loại bỏ internal field khi gửi
+        payload = {k: v for k, v in response.items() if not k.startswith("__")}
+        self._send_json(201, payload)
 
     def _handle_provision(self):
         """Sprint 2 S2-FW-02 — schema khớp IotDeviceProvisionResultDto của backend."""

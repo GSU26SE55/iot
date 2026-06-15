@@ -100,14 +100,16 @@ int main(int argc, char** argv) {
 
   // 4) Assert: code 200 + isSuccess=true + accepted=4
   //    (tasksprint S1-FW-06 acceptance: "Backend nhận 200; có log response")
-  if (code != 200) { fprintf(stderr, "[itest] FAIL: expected 200 got %ld\n", code); return 3; }
+  if (code != 201) { fprintf(stderr, "[itest] FAIL: expected 201 got %ld\n", code); return 3; }
   if (resp.find("\"isSuccess\": true") == std::string::npos &&
       resp.find("\"isSuccess\":true")  == std::string::npos) {
     fprintf(stderr, "[itest] FAIL: response missing isSuccess=true\n"); return 4;
   }
-  if (resp.find("\"accepted\": 4") == std::string::npos &&
-      resp.find("\"accepted\":4")  == std::string::npos) {
-    fprintf(stderr, "[itest] FAIL: response missing accepted=4\n"); return 5;
+  // Sprint 3 mock backend returns totalReceived/inserted (matches real backend
+  // SensorReadingBatchIngestResult shape).
+  if (resp.find("\"totalReceived\": 4") == std::string::npos &&
+      resp.find("\"totalReceived\":4")  == std::string::npos) {
+    fprintf(stderr, "[itest] FAIL: response missing totalReceived=4\n"); return 5;
   }
 
   // 5) Negative #1: temperature out of NI §7.4 range (-50..150) → 400 + listErrors

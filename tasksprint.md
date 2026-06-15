@@ -246,28 +246,40 @@ S7 (OTA + observability) có thể trễ vào S8 nếu thiếu thời gian.
 
 #### Backlog — Firmware
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **28. S3-FW-01** (#29) | `src/queue/local_queue.cpp` — buffer NVS (FIFO, key = epoch), max 200 batch | NI §9.1, OV §B7 | Unit test: enqueue 200 → 201 đẩy ra cái cũ nhất | FW |
-| **29. S3-FW-02** (#30) | Mỗi batch sinh `Idempotency-Key` (UUIDv4 hoặc deviceCode+epoch+seq) lưu kèm trong queue | NI §7.4 | Hai lần POST cùng key → backend chỉ ghi 1 lần (xem S3-BE-03) | FW |
-| **30. S3-FW-03** (#31) | Retry exponential backoff (base 2s, max 5 phút, jitter ±20%) | NI §1 #2 | Tắt backend → log thấy backoff tăng dần; bật lại → flush hết | FW |
-| **31. S3-FW-04** (#32) | Đổi contract sang **production** (NI §7.4 + MO §52.5): payload có `deviceTimestamp` (ISO8601), readings dùng `batteryAssetSerial`, mỗi reading tag `sensorSourceCode` + `sourceType` **theo đúng nguồn vật lý** (MO §52.9 bảng): BMS-relay qua RS485 → `sourceType=Bms (1)`, `sensorSourceCode="primary"`; INA226 → `sourceType=IotGateway (2)`, `sensorSourceCode="redundant"`; DS18B20 → `sourceType=IotGateway (2)`, `sensorSourceCode="external-temp"`. **KHÔNG hard-code `sourceType=2` cho tất cả** — sẽ phá cross-source validation §1.6.6 (so Bms vs IotGateway). Field optional khác: `cycleCount`, `sohPercent`, `chargingState`, `bmsErrorCode` (≤ 64 chars) | NI §7.4, MO §52.5, §52.9 | Payload có ít nhất 2 reading cùng battery, khác `sourceType`/`sensorSourceCode`; backend nhận đúng schema | FW |
-| **32. S3-FW-05** (#33) | Status LED (GPIO48 RGB): xanh = online, vàng = queue có data, đỏ = mất mạng | WD §1 | Quan sát LED trực quan đúng trạng thái | FW |
+> **Trạng thái:** ✅ Done · 🟡 Code OK / cần verify hardware · 🔴 Gap chưa làm
+
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **28. S3-FW-01** (#29) | `src/queue/local_queue.cpp` — buffer NVS (FIFO, key = epoch), max 200 batch | NI §9.1, OV §B7 | Unit test: enqueue 200 → 201 đẩy ra cái cũ nhất | FW | 🟡 Code: `src/queue/{local_queue,queue_index}.{h,cpp}` — **LittleFS-backed** (NI §9.1 cho phép "NVS/LittleFS"; NVS default partition 24KB không fit 200 batch × ~1KB). Pure FIFO logic extracted ra `queue_index.h` để test native. **14 unit tests PASS** gồm AC trọng tâm `test_enqueue_200_then_201st_drops_oldest`. LittleFS persist verify trên ESP32 còn pending. |
+| **29. S3-FW-02** (#30) | Mỗi batch sinh `Idempotency-Key` (UUIDv4 hoặc deviceCode+epoch+seq) lưu kèm trong queue | NI §7.4 | Hai lần POST cùng key → backend chỉ ghi 1 lần (xem S3-BE-03) | FW | 🟡 Code: `src/core/idempotency_key.{h,cpp}` — UUIDv4 (default) + alt `deviceCode-epoch-seq`. Lưu kèm trong queue (`<epoch>.idem` file). HTTP `httpPostJsonWithIdempotency` thêm header. **5 unit tests + Sprint 3 integration test** verify replay (POST 2 lần cùng key → mock backend cache → cùng response). |
+| **30. S3-FW-03** (#31) | Retry exponential backoff (base 2s, max 5 phút, jitter ±20%) | NI §1 #2 | Tắt backend → log thấy backoff tăng dần; bật lại → flush hết | FW | 🟡 Code: `src/net/backoff.{h,cpp}` — `kBackoffBaseMs=2000, kBackoffMaxMs=300000, kBackoffJitterPct=0.20`. Bonus `isTransientFailure()` phân biệt 4xx permanent (drop) vs 5xx/network transient (retry) — tránh infinite retry loop khi backend trả validation error. **8 unit tests PASS** (growth, cap, jitter, transient/permanent classification). |
+| **31. S3-FW-04** (#32) | Đổi contract sang **production** (NI §7.4 + MO §52.5): payload có `deviceTimestamp` (ISO8601), readings dùng `batteryAssetSerial`, mỗi reading tag `sensorSourceCode` + `sourceType` **theo đúng nguồn vật lý** (MO §52.9 bảng): BMS-relay qua RS485 → `sourceType=Bms (1)`, `sensorSourceCode="primary"`; INA226 → `sourceType=IotGateway (2)`, `sensorSourceCode="redundant"`; DS18B20 → `sourceType=IotGateway (2)`, `sensorSourceCode="external-temp"`. **KHÔNG hard-code `sourceType=2` cho tất cả** — sẽ phá cross-source validation §1.6.6 (so Bms vs IotGateway). Field optional khác: `cycleCount`, `sohPercent`, `chargingState`, `bmsErrorCode` (≤ 64 chars) | NI §7.4, MO §52.5, §52.9 | Payload có ít nhất 2 reading cùng battery, khác `sourceType`/`sensorSourceCode`; backend nhận đúng schema | FW | 🟡 Code: `src/core/payload.cpp::buildProductionBatchPayload` + extend `core::SensorReading` (sohPercent, chargingState, bmsErrorCode[65], sensorSourceCode, sourceType). Mock sinh **3 nguồn per battery**: BMS primary (sourceType=1) + INA226 redundant (sourceType=2) + DS18B20 external-temp (sourceType=2 / sensorSourceCode khác). **8 unit tests + Sprint 3 integration** verify cross-source pair + 3-source mapping + 64-char bmsErrorCode boundary. Backend dev (#IoT2-14..20) verified ready. |
+| **32. S3-FW-05** (#33) | Status LED (GPIO48 RGB): xanh = online, vàng = queue có data, đỏ = mất mạng | WD §1 | Quan sát LED trực quan đúng trạng thái | FW | 🟡 Code: `src/ui/{status_led,led_palette}.{h,cpp}` — GPIO48 WS2812 với 5 state (Off/Online/Queued/Offline/Provisioning). Priority `main.cpp::updateStatusLed`: !wifi→red > queue>0→yellow > else→green. Brightness ≤ 32/255 (tránh chói). **7 unit tests palette** verify color mapping + distinguishability. Quan sát LED thực trên ESP32 pending. |
 
 #### Backend (BE) — chuyển sang Sprint IoT-2
 
-> 7 task BE của Sprint 3 (contract production + backward compat, clock skew, idempotency, outlier + auto-disable, mapping check, calibration apply + Redis cache, LastSeenAt update) **đã chuyển sang `backend/overall.md` Sprint IoT-2 Phase C** (`#IoT2-14..20`).
+> 7 task BE của Sprint 3 (contract production + backward compat, clock skew, idempotency, outlier + auto-disable, mapping check, calibration apply + Redis cache, LastSeenAt update) **đã chuyển sang `backend/overall.md` Sprint IoT-2 Phase C** (`#IoT2-14..20`). **Status BE (verified 2026-06-14):** ✅ **7/7 task ĐÃ implement trong backend repo** — `BatchIngestSensorReadingsCommandHandler.cs` đầy đủ: `ClockSkewMaxMinutes=5` + metric `clock_drift` (#IoT2-15), `IdempotencyTtl=24h` + dedup (#IoT2-16), `OutlierThresholdPerHour=50` + auto-Decommissioned (#IoT2-17), serial→Id resolve (#IoT2-18), `IIotCalibrationCache` Redis (#IoT2-19), `LastSeenAt` update (#IoT2-20). DTO `SensorReadingItem` full Sprint 3 fields.
 >
-> IoT track (FW) cần verify với Thắng trước S3 start: endpoint `/api/sensor-readings/batch` chấp nhận đủ field production contract (`X-Device-Code`, `Idempotency-Key`, `deviceTimestamp`, `sourceType` per-source, `bmsErrorCode`) đồng thời giữ backward compat cho payload S1 mock.
+> **Lưu ý cho FW:** route thực tế là `/api/sensor-readings/batch` (giữ nguyên từ Sprint 1), response **201 Created** (KHÔNG phải 200). Firmware đã handle 2xx range.
 
 #### Backlog — QA
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **33. S3-QA-01** (#34) | Test resilience: tắt WiFi 5 phút giữa luồng ingest → bật lại → đếm row DB == số batch ESP32 đã sinh | OV §B7 | Pass, không trùng, không mất | QA |
-| **34. S3-QA-02** (#35) | Test clock skew: chỉnh ESP32 NTP lệch 10 phút → reading bị reject | NI §12 #1 | Backend trả 400; metric tăng | QA |
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **33. S3-QA-01** (#34) | Test resilience: tắt WiFi 5 phút giữa luồng ingest → bật lại → đếm row DB == số batch ESP32 đã sinh | OV §B7 | Pass, không trùng, không mất | QA | 🔴 Cần ESP32 thật + backend dev + DB access — manual test. Firmware đã có queue + idempotency + backoff sẵn sàng cover scenario này. |
+| **34. S3-QA-02** (#35) | Test clock skew: chỉnh ESP32 NTP lệch 10 phút → reading bị reject | NI §12 #1 | Backend trả 400; metric tăng | QA | 🔴 Cần ESP32 + manipulate NTP. Firmware đã handle 400 permanent fail (drop batch). Sprint 3 integration test đã verify backend trả 400 cho clock_drift. |
 
 **DoD sprint:** "Tôi rút WiFi router 5 phút, cắm lại — backend nhận đủ data, không trùng" — kiểm chứng trực tiếp.
+
+##### Sprint 3 — Tổng kết gap
+
+| Nhóm | Items |
+|------|-------|
+| ✅ Backend dep verified | `#IoT2-14..20` (7 task) đã implement đầy đủ trong backend repo — KHÔNG block FW |
+| 🟡 Code OK, cần ESP32 + backend (5) | #29 S3-FW-01 (LittleFS persist), #30 S3-FW-02 (idempotency 24h cross-session), #31 S3-FW-03 (backoff + flush khi backend back up), #32 S3-FW-04 (backend accept full Sprint 3 schema), #33 S3-FW-05 (LED visual) |
+| 🔴 Manual scenario test (2) | #34 S3-QA-01 (WiFi 5 phút resilience), #35 S3-QA-02 (clock skew NTP) — cần ESP32 + backend dev + manual manipulation |
+| 🔧 Refactor/extras Sprint 3 không yêu cầu nhưng đã làm | Tách `queue/queue_index.h` (testable native), tách `ui/led_palette.h` (testable native), `isTransientFailure()` phân biệt 4xx/5xx fix infinite retry loop, 3-source mock generation (BMS+INA226+DS18B20) |
+| 📊 Test coverage | **56 test cases** PASS — test_payload (6) + test_payload_v3 (8) + test_idempotency (5) + test_backoff (8) + test_queue (14) + test_led_palette (7) + S1 integration (4) + S3 integration (4) |
 
 ---
 
