@@ -59,13 +59,13 @@ jobs:
       - name: Verify minimum test count (regression guard)
         working-directory: firmware-esp32
         run: |
-          # Sprint 1: 6, Sprint 3: +30, Sprint 4: +23, S2 LED: +7 → tổng ≥ 71.
+          # Sprint 1: 6, Sprint 3: +30, Sprint 4: +23, S2 LED: +7, Sprint 5 BMS reg: +23 → tổng ≥ 94.
           # Nếu drop tests xuống, fail CI để tránh ai đó comment out test.
           OUTPUT=$(pio test -e native 2>&1 | tail -5)
           COUNT=$(echo "$OUTPUT" | grep -oE '[0-9]+ test cases:' | grep -oE '^[0-9]+' || echo "0")
           echo "Test cases run: $COUNT"
-          if [ "$COUNT" -lt 71 ]; then
-            echo "::error::Test count dropped below 71 (Sprint 4 baseline). Was $COUNT."
+          if [ "$COUNT" -lt 94 ]; then
+            echo "::error::Test count dropped below 94 (Sprint 5 baseline). Was $COUNT."
             exit 1
           fi
 
@@ -99,9 +99,15 @@ jobs:
         working-directory: firmware-esp32
         run: cp include/config.example.h include/config.h
 
-      - name: Build esp32-s3-devkitc-1 (main env)
+      - name: Build esp32-s3-devkitc-1 (main env, USE_MOCK_BMS=1)
         working-directory: firmware-esp32
         run: pio run -e esp32-s3-devkitc-1
+
+      - name: Build esp32-s3-real (Sprint 5, USE_MOCK_BMS=0)
+        working-directory: firmware-esp32
+        # Sprint 5: env real bật full path modbus_bms + ina226 + ds18b20 + sht31.
+        # Catch compile error trong real path nếu dev chỉ test mock env.
+        run: pio run -e esp32-s3-real
 
       - name: Build example-blink (Sprint 0 backward compat)
         working-directory: firmware-esp32

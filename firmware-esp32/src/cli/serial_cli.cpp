@@ -12,9 +12,14 @@
   #include "config.example.h"
 #endif
 
+#include "bms/bms_source.h"
+#include "bms/modbus_bms.h"
 #include "config/device_identity.h"
 #include "config/nvs_store.h"
 #include "net/mqtt_client.h"
+#include "sensor/ds18b20.h"
+#include "sensor/ina226.h"
+#include "sensor/sht31.h"
 
 namespace cli {
 
@@ -71,6 +76,25 @@ void executeCommand(const char* line) {
     Serial.printf("  fail streak= %lu (threshold %d → fallback HTTPS)\n",
                   static_cast<unsigned long>(net::mqttConsecutiveFailCount()),
                   static_cast<int>(MQTT_PUBLISH_FAIL_THRESHOLD));
+    // Sprint 5 — BMS source + sensor status.
+    Serial.println("  -- BMS + Sensors (Sprint 5) --");
+    Serial.printf("  mode       = %s\n", bms::bmsSourceMode());
+#if !USE_MOCK_BMS
+    Serial.printf("  modbus     = ok=%lu fail=%lu\n",
+                  static_cast<unsigned long>(bms::modbusPollOkCount()),
+                  static_cast<unsigned long>(bms::modbusPollFailCount()));
+    Serial.printf("  ina226     = ok=%lu fail=%lu (redundant cross-source)\n",
+                  static_cast<unsigned long>(sensor::ina226ReadOkCount()),
+                  static_cast<unsigned long>(sensor::ina226ReadFailCount()));
+    Serial.printf("  ds18b20    = ok=%lu fail=%lu (external-temp)\n",
+                  static_cast<unsigned long>(sensor::ds18b20ReadOkCount()),
+                  static_cast<unsigned long>(sensor::ds18b20ReadFailCount()));
+    Serial.printf("  sht31      = post ok=%lu fail=%lu (ambient)\n",
+                  static_cast<unsigned long>(sensor::sht31PostOkCount()),
+                  static_cast<unsigned long>(sensor::sht31PostFailCount()));
+#else
+    Serial.println("  (mock mode — sensor counters n/a)");
+#endif
     return;
   }
   if (strcmp(line, "clear") == 0) {

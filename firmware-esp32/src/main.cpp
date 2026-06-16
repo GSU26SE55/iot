@@ -39,12 +39,19 @@
 #include "net/mqtt_client.h"
 #include "net/backoff.h"
 #include "bms/mock_bms.h"
+#include "bms/bms_source.h"
+#include "bms/modbus_bms.h"
+#include "sensor/sht31.h"
+#include "sensor/ina226.h"
+#include "sensor/ds18b20.h"
 #include "core/payload.h"
 #include "core/idempotency_key.h"
 #include "queue/local_queue.h"
 #include "provision/provision.h"
 #include "telemetry/heartbeat.h"
 #include "ui/status_led.h"
+
+#include <cstring>
 
 namespace {
 
@@ -84,6 +91,8 @@ void ensureProvisioned() {
   if (s_provisionDone) return;
   if (s_provCfg.provisioned) {
     s_provisionDone = true;
+    // Sprint 5 (S5-FW-06): siteId now available — wire vào SHT31.
+    sensor::sht31SetSiteId(s_provCfg.siteId);
     return;
   }
   if (!net::wifiIsConnected() || !net::timeIsSynced()) return;
@@ -96,19 +105,22 @@ void ensureProvisioned() {
   if (provision::runProvisionFlow(FW_VERSION, HARDWARE_REVISION, s_provCfg)) {
     s_provisionDone = true;
     telemetry::heartbeatSetInterval(s_provCfg.heartbeatIntervalMs);
+    // S5-FW-06: provision response chứa siteId → wire vào SHT31.
+    sensor::sht31SetSiteId(s_provCfg.siteId);
   } else {
     s_nextAttemptMs = millis() + 30000;
     Serial.println("[main] provision fail — retry sau 30s");
   }
 }
 
-// Sprint 3 (S3-FW-04): build production payload với multi-source mock.
+// Sprint 3 (S3-FW-04): build production payload với multi-source.
+// Sprint 5 (S5-FW-07): dispatch qua bms_source — mock hoặc real BMS theo USE_MOCK_BMS.
 size_t buildBatchPayload(const char* isoTs, size_t* outReadingCount) {
   core::SensorReading readings[kMaxReadings];
   const size_t nBat = MOCK_BATTERY_COUNT > bms::kMockMaxBatteries
                       ? bms::kMockMaxBatteries
                       : MOCK_BATTERY_COUNT;
-  const size_t n = bms::mockGenerateMultiSource(readings, nBat);
+  const size_t n = bms::bmsSourcePollAll(readings, nBat);
   if (n == 0) return 0;
 
   size_t bodyLen = core::buildProductionBatchPayload(
@@ -150,48 +162,72 @@ PostOutcome postBatch(const char* body, size_t bodyLen, const char* idempKey) {
 }
 
 // Sprint 4 (S4-FW-04): MQTT-first publish path.
-// Sinh readings 1 lần, split theo battery, publish từng pin trên topic riêng.
-// Trả true nếu TẤT CẢ pin publish OK; false nếu ANY pin fail → caller fallback HTTPS.
+// Sprint 5 fix: GROUP BY SERIAL dynamic — KHÔNG assume fixed kSourcesPerBattery slots.
+// Lý do: real path (USE_MOCK_BMS=0) có thể skip INA226/DS18B20 fail → battery có
+// 1 hoặc 2 reading thay vì 3. Slot indexing cũ `b * 3` sẽ misgroup.
 //
-// Note: build payload PER battery (count=kSourcesPerBattery) — KHÔNG dùng full
-// batch buffer s_payloadBuf để tránh xung đột với HTTPS path khi fallback.
+// Returns true nếu TẤT CẢ battery có ≥ 1 reading publish OK; false nếu ANY fail.
 bool ingestViaMqtt(const char* isoTs, size_t batteryCount,
                    const core::SensorReading* readings, size_t readingCount) {
+  (void)batteryCount;  // không còn dùng — group by serial dynamic
   if (!net::mqttIsConnected()) return false;
+  if (readings == nullptr || readingCount == 0) return false;
 
   // Buffer per-battery: 3 source × ~384B = ~1.2KB + envelope.
   static char perPinBuf[core::payloadBufferSize(bms::kSourcesPerBattery) + 128];
 
-  size_t allOk = 0;
-  for (size_t b = 0; b < batteryCount; ++b) {
-    const size_t off = b * bms::kSourcesPerBattery;
-    if (off + bms::kSourcesPerBattery > readingCount) break;
-
-    const core::SensorReading* pinReadings = &readings[off];
-    const char* serial = pinReadings[0].serial;
-    if (!serial || serial[0] == '\0') {
-      Serial.printf("[mqtt-ingest] battery #%u thiếu serial — skip\n",
-                    static_cast<unsigned>(b));
-      continue;
+  // ---- Step 1: Enumerate unique serials (max kMockMaxBatteries) ----
+  // Dùng pointer-comparison + strcmp để tránh allocate (FW single-threaded loop OK).
+  const char* uniqueSerials[bms::kMockMaxBatteries] = {nullptr};
+  size_t nUnique = 0;
+  for (size_t i = 0; i < readingCount; ++i) {
+    const char* s = readings[i].serial;
+    if (!s || s[0] == '\0') continue;
+    bool seen = false;
+    for (size_t k = 0; k < nUnique; ++k) {
+      if (strcmp(uniqueSerials[k], s) == 0) { seen = true; break; }
     }
+    if (!seen && nUnique < bms::kMockMaxBatteries) {
+      uniqueSerials[nUnique++] = s;
+    }
+  }
+  if (nUnique == 0) {
+    Serial.println("[mqtt-ingest] không có battery serial nào trong readings — skip");
+    return false;
+  }
+
+  // ---- Step 2: For each unique serial, collect matching readings + publish ----
+  // Buffer per-battery group: max kSourcesPerBattery readings + safety margin.
+  core::SensorReading group[bms::kSourcesPerBattery + 2];
+
+  size_t okCount = 0;
+  for (size_t s = 0; s < nUnique; ++s) {
+    const char* serial = uniqueSerials[s];
+    size_t nGroup = 0;
+    for (size_t i = 0; i < readingCount && nGroup < (bms::kSourcesPerBattery + 2); ++i) {
+      if (strcmp(readings[i].serial, serial) == 0) {
+        group[nGroup++] = readings[i];
+      }
+    }
+    if (nGroup == 0) continue;
 
     size_t bodyLen = core::buildProductionBatchPayload(
-        pinReadings, bms::kSourcesPerBattery, isoTs, identity::deviceCode(),
+        group, nGroup, isoTs, identity::deviceCode(),
         perPinBuf, sizeof(perPinBuf));
     if (bodyLen == 0) {
-      Serial.printf("[mqtt-ingest] battery #%u payload build FAIL\n",
-                    static_cast<unsigned>(b));
+      Serial.printf("[mqtt-ingest] battery %s payload build FAIL\n", serial);
       return false;
     }
 
     bool pubOk = net::mqttPublishTelemetry(serial, perPinBuf, bodyLen);
-    Serial.printf("[mqtt-ingest] pub %s (%u bytes) → %s\n",
-                  serial, static_cast<unsigned>(bodyLen),
+    Serial.printf("[mqtt-ingest] pub %s (%u readings, %u bytes) → %s\n",
+                  serial, static_cast<unsigned>(nGroup),
+                  static_cast<unsigned>(bodyLen),
                   pubOk ? "OK" : "FAIL");
     if (!pubOk) return false;
-    allOk++;
+    okCount++;
   }
-  return allOk == batteryCount;
+  return okCount == nUnique;
 }
 
 bool ingestOnce() {
@@ -202,11 +238,12 @@ bool ingestOnce() {
   }
 
   // Sinh readings 1 lần (dùng chung cho cả MQTT + HTTPS fallback).
+  // Sprint 5 (S5-FW-07): dispatch mock vs real BMS qua bms_source.
   core::SensorReading readings[kMaxReadings];
   const size_t nBat = MOCK_BATTERY_COUNT > bms::kMockMaxBatteries
                       ? bms::kMockMaxBatteries
                       : MOCK_BATTERY_COUNT;
-  const size_t n = bms::mockGenerateMultiSource(readings, nBat);
+  const size_t n = bms::bmsSourcePollAll(readings, nBat);
   if (n == 0) return false;
 
   // ---- Sprint 4 (S4-FW-04 + S4-FW-06): chọn transport ----
@@ -327,6 +364,7 @@ void logStatsPeriodic() {
   const uint32_t now = millis();
   if (now - s_lastStatsMs < 60000) return;
   s_lastStatsMs = now;
+
   Serial.printf("[stats] uptime=%lus ingest ok=%lu fail=%lu queued=%lu flushed=%lu / "
                 "hb ok=%lu fail=%lu / queue=%u backoff_attempt=%lu / "
                 "mqtt conn=%s cn=%lu pubok=%lu pubfail=%lu streak=%lu / "
@@ -354,6 +392,21 @@ void logStatsPeriodic() {
                 net::wifiRssi(),
                 net::wifiIsConnected() ? "UP" : "DOWN",
                 s_provisionDone ? "yes" : "no");
+
+  // Sprint 5 — sensor stats (chỉ relevant nếu USE_MOCK_BMS=0; mock mode counters luôn 0).
+#if !USE_MOCK_BMS
+  Serial.printf("[s5-stats] mode=%s modbus ok=%lu fail=%lu / ina226 ok=%lu fail=%lu / "
+                "ds18b20 ok=%lu fail=%lu / sht31 post ok=%lu fail=%lu\n",
+                bms::bmsSourceMode(),
+                static_cast<unsigned long>(bms::modbusPollOkCount()),
+                static_cast<unsigned long>(bms::modbusPollFailCount()),
+                static_cast<unsigned long>(sensor::ina226ReadOkCount()),
+                static_cast<unsigned long>(sensor::ina226ReadFailCount()),
+                static_cast<unsigned long>(sensor::ds18b20ReadOkCount()),
+                static_cast<unsigned long>(sensor::ds18b20ReadFailCount()),
+                static_cast<unsigned long>(sensor::sht31PostOkCount()),
+                static_cast<unsigned long>(sensor::sht31PostFailCount()));
+#endif
 }
 
 }  // namespace
@@ -382,7 +435,18 @@ void setup() {
   }
 
   net::httpClientBegin();
-  bms::mockBegin();
+  // Sprint 5 (S5-FW-07): bms_source init thay cho mockBegin trực tiếp.
+  // Mock mode → delegate mock_bms; Real mode → init Modbus + INA226 + DS18B20 + SHT31.
+  bms::bmsSourceBegin();
+  Serial.printf("[setup] BMS source mode: %s\n", bms::bmsSourceMode());
+
+  // Sprint 5 (S5-FW-06): wire siteId vào SHT31 — backend AmbientReadingItem.SiteId required.
+  // Nếu chưa provision (s_provCfg.siteId rỗng), sht31PostNow tự skip cho đến khi
+  // provision flow xong + main.cpp re-set qua sht31SetSiteId.
+  if (s_provCfg.provisioned) {
+    sensor::sht31SetSiteId(s_provCfg.siteId);
+  }
+
   telemetry::heartbeatBegin(s_provCfg.heartbeatIntervalMs);
   cli::cliBegin();
 
@@ -439,6 +503,12 @@ void loop() {
   // Sprint 2: heartbeat
   if (net::wifiIsConnected() && net::timeIsSynced()) {
     telemetry::heartbeatTick();
+  }
+
+  // Sprint 5 (S5-FW-06): SHT31 ambient post mỗi SHT31_POLL_INTERVAL_MS (60s default).
+  // Tự skip nếu USE_MOCK_BMS=1 (sht31Begin() chưa init nên Tick no-op).
+  if (net::wifiIsConnected() && net::timeIsSynced()) {
+    sensor::sht31Tick();
   }
 
   updateStatusLed();

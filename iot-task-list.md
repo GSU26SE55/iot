@@ -148,17 +148,27 @@
 - [ ] **S5-HW-06** — Đấu INA226 + SHT31 chung I2C (GPIO8 SDA, GPIO9 SCL)
 - [ ] **S5-HW-07** — Đo điện áp pin thật bằng Fluke 87V (input cho calibration)
 
-### Firmware (7)
-- [ ] **S5-FW-01** — `src/bms/modbus_bms.cpp` đọc 1 BMS đúng register map + `bmsErrorCode`, `cycleCount`, `sohPercent`, `chargingState`; tag `sourceType=Bms(1)`, `sensorSourceCode="primary"`
-- [ ] **S5-FW-02** — Điều khiển DE/RE (nếu không auto-direction): HIGH trước gửi, LOW sau nhận
-- [ ] **S5-FW-03** — Multi-drop: loop unitId 1→N, gom 1 batch nhiều reading
-- [ ] **S5-FW-04** — `src/sensor/ina226.cpp` V/I qua I2C → `sourceType=IotGateway(2)`, `sensorSourceCode="redundant"` (CHỈ cross-source, KHÔNG kWh)
-- [ ] **S5-FW-05** — `src/sensor/ds18b20.cpp` nhiệt thân pin → `sourceType=IotGateway(2)`, `sensorSourceCode="external-temp"`
-- [ ] **S5-FW-06** — `src/sensor/sht31.cpp` ambient temp+humidity → POST `/api/ambient-readings/batch` với `Source=IotSensor`, `SourceDeviceId=<DeviceCode>`
-- [ ] **S5-FW-07** — Compile flag `USE_MOCK_BMS=1` chuyển giữa `mock_bms` và `modbus_bms`
+### Firmware (7) — ✅ Done (compile multi-env + native test 23 BMS register; hardware verify pending)
+- [x] **S5-FW-01** — `src/bms/modbus_bms.{h,cpp}` + `bms_register_map.{h,cpp}` preset Daly/JBD/JK + `decodeErrorCode` short codes ≤ 64 chars + retry 1x
+- [x] **S5-FW-02** — `preTransmission/postTransmission` callbacks: DE HIGH + delayMicroseconds(10) trước; flush() + delayMicroseconds(50) sau (T3.5 guard)
+- [x] **S5-FW-03** — `modbusReadMultiDrop` loop `BMS_UNIT_ID_START..START+COUNT-1`, skip BMS timeout (không block 3 BMS khác)
+- [x] **S5-FW-04** — `src/sensor/ina226.{h,cpp}` INA226 lib + replicate cho N battery serial. Range check ±50V/±max×1.2A. ⚠ ADR-017 KHÔNG energy metrics
+- [x] **S5-FW-05** — `src/sensor/ds18b20.{h,cpp}` OneWire + DallasTemperature, enumerate addresses, trigger 1 conversion cho all sensors
+- [x] **S5-FW-06** — `src/sensor/sht31.{h,cpp}` Adafruit_SHT31, POST `/api/ambient/readings/batch` mỗi 60s. Wire siteId từ provision config. Source=1 (IotSensor INT enum)
+- [x] **S5-FW-07** — `src/bms/bms_source.{h,cpp}` dispatcher + `[env:esp32-s3-real]` PlatformIO env (USE_MOCK_BMS=0) trong CI
 
-### QA (1)
+### QA (1) — 🔴 Pending lab
 - [ ] **S5-QA-01** — So sánh số ESP32 vs Fluke trên 4 pin → bảng số liệu lệch (input cho calibration S7)
+
+### Out-of-spec gaps đã fix qua audit (4 vòng review)
+- 🚨 SHT31 sai endpoint `/api/ambient-readings/batch` → fix `/api/ambient/readings/batch` (verified controller)
+- 🚨 SHT31 sai field name `temperature` + thiếu required `siteId` → fix `ambientTemperature` + wire `sht31SetSiteId()` từ provision config
+- 🚨 SHT31 sai enum format string `"IotSensor"` → fix integer `1` (backend không có `JsonStringEnumConverter`)
+- 🚨 `ingestViaMqtt` slot indexing `b * 3` BREAK real path khi battery thiếu INA/DS18B20 → refactor group-by-serial dynamic
+- 🔧 CI workflow thiếu build `esp32-s3-real` env → thêm; test count threshold 71→94
+- 🔧 Sprint 5 sensor section trong `show` CLI + logStatsPeriodic
+- 🔧 Dedup constant `kSourcesPerBatterySprint5` → re-use `mock_bms::kSourcesPerBattery`
+- 🔧 SHT31 header doc + firmware README + iot-task-list update với Sprint 5 status
 
 ---
 

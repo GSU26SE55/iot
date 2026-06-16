@@ -379,35 +379,62 @@ S7 (OTA + observability) có thể trễ vào S8 nếu thiếu thời gian.
 
 #### Backlog — Hardware lab
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **47. S5-HW-01** (#48) | Đấu ESP32 ↔ MAX485 theo WD §3 (GPIO17 TX→DI, GPIO18 RX→RO, GPIO16 DE+RE nếu không phải auto-direction), chung GND | WD §3, OV nguyên tắc common ground | Bằng đồng hồ kiểm tra liên tục VCC, không ngắn mạch | HW |
-| **48. S5-HW-02** (#49) | Lập bảng register map cho từng model BMS đang dùng (voltage, current, temp, soc, soh, cycle, error, scale, offset) — verify bằng USB-RS485 + Modbus Poll trên laptop trước | OV §A4, §A12 #47 | Có file `docs/bms-register-map-{model}.md` | HW |
-| **49. S5-HW-03** (#50) | Đổi `unitId` của từng pin (1, 2, 3, 4) bằng phần mềm hãng | WD §3 quy tắc | Từng BMS phản hồi đúng unitId mới | HW |
-| **50. S5-HW-04** (#51) | Đấu RS485 multi-drop: 4 BMS song song cùng A/B + 120Ω 2 đầu bus | WD §3 | Modbus Poll quét được cả 4 unitId | HW |
-| **51. S5-HW-05** (#52) | Đấu DS18B20 (GPIO4 + 4.7kΩ pull-up) gắn vào thân pin | WD §4.1 | Quét bus 1-Wire ra được 64-bit address | HW |
-| **52. S5-HW-06** (#53) | Đấu INA226 + SHT31 chung I2C (GPIO8 SDA, GPIO9 SCL) | WD §4.2 | I2C scanner thấy 0x40 + 0x44 | HW |
-| **53. S5-HW-07** (#54) | Đo điện áp pin thật bằng Fluke 87V (làm chuẩn cho calibration sprint sau) | OV §A11 | Ghi số vào sổ tay | HW |
+> **Trạng thái:** 🔴 **TOÀN BỘ GAP** — chờ procurement linh kiện Cấp 1/2 (đặt từ S0 #9/#10/#11) + lab session. FW driver đã sẵn sàng (S5-FW-01..07) chỉ chờ hardware connect.
+
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **47. S5-HW-01** (#48) | Đấu ESP32 ↔ MAX485 theo WD §3 (GPIO17 TX→DI, GPIO18 RX→RO, GPIO16 DE+RE nếu không phải auto-direction), chung GND | WD §3, OV nguyên tắc common ground | Bằng đồng hồ kiểm tra liên tục VCC, không ngắn mạch | HW | 🔴 **GAP** — cần MAX485 module (đặt S0 #9), breadboard hoặc PCB, đồng hồ |
+| **48. S5-HW-02** (#49) | Lập bảng register map cho từng model BMS đang dùng (voltage, current, temp, soc, soh, cycle, error, scale, offset) — verify bằng USB-RS485 + Modbus Poll trên laptop trước | OV §A4, §A12 #47 | Có file `docs/bms-register-map-{model}.md` | HW | 🔴 **GAP** — cần BMS thật (S0 #10) + USB-RS485 + Modbus Poll software. **Critical**: FW có sẵn 3 preset (Daly/JBD/JK) trong `src/bms/bms_register_map.h` nhưng PHẢI verify đúng model BMS thực tế nhà cung cấp trước khi flash, nếu khác → tạo `kGenericBmsMap` custom + đổi `BMS_MODEL=4` |
+| **49. S5-HW-03** (#50) | Đổi `unitId` của từng pin (1, 2, 3, 4) bằng phần mềm hãng | WD §3 quy tắc | Từng BMS phản hồi đúng unitId mới | HW | 🔴 **GAP** — cần BMS thật + phần mềm vendor (Daly Smart App / JBD Bluetooth / JK-BMS) để đổi unitId mặc định (thường = 1) |
+| **50. S5-HW-04** (#51) | Đấu RS485 multi-drop: 4 BMS song song cùng A/B + 120Ω 2 đầu bus | WD §3 | Modbus Poll quét được cả 4 unitId | HW | 🔴 **GAP** — cần 4 BMS + cáp đôi xoắn shielded (S0 #9) + 2 điện trở 120Ω terminator |
+| **51. S5-HW-05** (#52) | Đấu DS18B20 (GPIO4 + 4.7kΩ pull-up) gắn vào thân pin | WD §4.1 | Quét bus 1-Wire ra được 64-bit address | HW | 🔴 **GAP** — cần DS18B20 sensor + 4.7kΩ pull-up. **Note FW**: `ds18b20Begin()` đã enumerate sensor address tự động, mapping theo thứ tự = battery serial |
+| **52. S5-HW-06** (#53) | Đấu INA226 + SHT31 chung I2C (GPIO8 SDA, GPIO9 SCL) | WD §4.2 | I2C scanner thấy 0x40 + 0x44 | HW | 🔴 **GAP** — cần INA226 module + SHT31 module + shunt resistor 10mΩ. FW dùng default address 0x40 (INA226) + 0x44 (SHT31) |
+| **53. S5-HW-07** (#54) | Đo điện áp pin thật bằng Fluke 87V (làm chuẩn cho calibration sprint sau) | OV §A11 | Ghi số vào sổ tay | HW | 🔴 **GAP** — cần Fluke 87V (mượn hoặc mua); input cho QA #62 + calibration Sprint 7 |
 
 #### Backlog — Firmware
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **54. S5-FW-01** (#55) | `src/bms/modbus_bms.cpp` — đọc 1 BMS đúng register map (struct `BmsRegisterMap{voltageReg, currentReg, tempReg, socReg, sohReg, cycleReg, errorReg}`). Đọc thêm `bmsErrorCode` (string ≤ 64 chars — MO §52.5, Sprint 7 #113) và `cycleCount`, `sohPercent`, `chargingState` nếu register map có; tag `sourceType=Bms (1)`, `sensorSourceCode="primary"` (xem S3-FW-04) | NI §9.1, OV §A4, MO §52.5 | Serial in voltage thực, khớp Fluke ±0.2V; payload có `bmsErrorCode` khi BMS có lỗi (ví dụ over-voltage) | FW |
-| **55. S5-FW-02** (#56) | Điều khiển DE/RE (nếu không dùng auto-direction): set HIGH trước khi gửi, LOW sau khi nhận | NI §12 #3, WD §3 | Modbus reply ổn định | FW |
-| **56. S5-FW-03** (#57) | Multi-drop: loop unitId 1→N, gom thành 1 batch nhiều `SensorReading` | NI §5, OV §B2 (a) | 1 batch chứa 4 reading khác serial | FW |
-| **57. S5-FW-04** (#58) | `src/sensor/ina226.cpp` đọc V/I qua I2C → push thêm vào batch với `sourceType=IotGateway (2)` + `sensorSourceCode="redundant"` (MO §52.9). **LƯU Ý ADR-017 (MO §53.1):** INA226 CHỈ phục vụ cross-source validation `SensorMismatch` — KHÔNG tích phân kWh / charge cycle / energy metrics | OV §A5, B2 (b), MO §52.9, §53.1 | Reading redundant xuất hiện DB cùng timestamp với BMS reading; cross-source pair được tạo (xem S6) | FW |
-| **58. S5-FW-05** (#59) | `src/sensor/ds18b20.cpp` đọc nhiệt độ thân pin (mỗi pin 1 con DS18B20) → `sourceType=IotGateway (2)`, `sensorSourceCode="external-temp"` (MO §52.9) | OV §A5, MO §52.9 | Backend nhận temp reading khác source; cross-source pair với BMS temp được tạo | FW |
-| **59. S5-FW-06** (#60) | `src/sensor/sht31.cpp` đọc ambient temp+humidity → POST `/api/ambient-readings/batch` (MO §52.9bis, §1.8) với `Source=IotSensor`, `SourceDeviceId=<DeviceCode ESP32>`. Dùng cùng device API key (scope `environmental.ingest` — xem S2-BE-03) | OV §A6, MO §52.9bis | Reading xuất hiện trong bảng `ambient_readings` với đúng Source/SourceDeviceId | FW |
-| **60. S5-FW-07** (#61) | Compile flag chuyển giữa `mock_bms` và `modbus_bms` để dev không cần BMS vẫn build được | NI §1 #4 | Flag `USE_MOCK_BMS=1` → cùng binary chạy mock | FW |
+> **Trạng thái:** ✅ **TOÀN BỘ DONE** — code complete + 94/94 native tests PASS + 3 envs build SUCCESS (mock + real + blink) + CI guard + backend contract verified. Hardware integration verify thuộc Hardware track (S5-HW-01..07).
+
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **54. S5-FW-01** (#55) | `src/bms/modbus_bms.cpp` — đọc 1 BMS đúng register map; thêm `bmsErrorCode` ≤ 64 chars + `cycleCount`/`sohPercent`/`chargingState`; tag `sourceType=Bms (1)`, `sensorSourceCode="primary"` | NI §9.1, OV §A4, MO §52.5 | Serial in voltage thực, khớp Fluke ±0.2V; payload có `bmsErrorCode` khi BMS lỗi | FW | ✅ **DONE** — 3 preset Daly/JBD/JK + `decodeErrorCode` short codes (13 flags fit ≤ 64 chars) + retry 1x. 23 native test PASS (decode V/I/T/SOC bounds + signed current + Kelvin→C bias). GitHub issue #55 → In Review |
+| **55. S5-FW-02** (#56) | Điều khiển DE/RE (nếu không auto-direction): HIGH trước gửi, LOW sau nhận | NI §12 #3, WD §3 | Modbus reply ổn định | FW | ✅ **DONE** — `preTransmission` HIGH + `delayMicroseconds(10)` guard; `postTransmission` flush() + `delayMicroseconds(50)` T3.5 inter-frame. ModbusMaster lib re-call `begin()` safety verified (chỉ update `_u8MBSlave` + tx buffer, KHÔNG touch pre/post callbacks). GitHub issue #56 → In Review |
+| **56. S5-FW-03** (#57) | Multi-drop: loop unitId 1→N, gom 1 batch nhiều `SensorReading` | NI §5, OV §B2 (a) | 1 batch chứa 4 reading khác serial | FW | ✅ **DONE** — `modbusReadMultiDrop` loop `BMS_UNIT_ID_START..START+COUNT-1`, skip-not-fail logic (1 BMS chết không block 3 BMS khác). 20ms inter-poll spacing. GitHub issue #57 → In Review |
+| **57. S5-FW-04** (#58) | `src/sensor/ina226.cpp` đọc V/I I2C → batch với `sourceType=IotGateway (2)` + `sensorSourceCode="redundant"`. **⚠ ADR-017:** CHỈ cross-source, KHÔNG energy metrics | OV §A5, MO §52.9, §53.1 | Reading redundant xuất hiện DB cùng timestamp BMS; cross-source pair tạo (S6) | FW | ✅ **DONE** — INA226 lib (robtillaart) + replicate readings cho N battery serial. Defensive range check ±50V/±max×1.2A (catch I2C lỗi). GitHub issue #58 → In Review |
+| **58. S5-FW-05** (#59) | `src/sensor/ds18b20.cpp` đọc nhiệt thân pin (mỗi pin 1 con DS18B20) → `sourceType=IotGateway (2)`, `sensorSourceCode="external-temp"` | OV §A5, MO §52.9 | Backend nhận temp khác source; cross-source pair BMS temp tạo | FW | ✅ **DONE** — OneWire + DallasTemperature, enumerate addresses tự động, trigger 1 conversion cho all sensors (tiết kiệm 750ms × N). `DEVICE_DISCONNECTED_C` detection. GitHub issue #59 → In Review |
+| **59. S5-FW-06** (#60) | `src/sensor/sht31.cpp` ambient → POST `/api/ambient/readings/batch` với `Source=IotSensor`, `SourceDeviceId=<DeviceCode>`, scope `EnvironmentalIngest` | OV §A6, MO §52.9bis | Reading xuất hiện trong `ambient_readings` với đúng `Source/SourceDeviceId` | FW | ✅ **DONE** — Adafruit_SHT31 + I2C shared. **4 critical bugs phát hiện + fix qua audit**: (1) sai endpoint `/api/ambient-readings/batch` → `/api/ambient/readings/batch` (verified controller); (2) thiếu required `siteId` (wire `sht31SetSiteId()` từ provision); (3) sai field `temperature` → `ambientTemperature`; (4) sai enum format string `"IotSensor"` → integer `1` (no JsonStringEnumConverter trên backend). **⚠ Deployment**: admin tạo IoT device PHẢI set `ApiKeyScopes` bitmask include `EnvironmentalIngest=4`. GitHub issue #60 → In Review |
+| **60. S5-FW-07** (#61) | Compile flag chuyển giữa `mock_bms` và `modbus_bms` | NI §1 #4 | Flag `USE_MOCK_BMS=1` → cùng binary chạy mock | FW | ✅ **DONE** — `src/bms/bms_source.{h,cpp}` dispatcher; `[env:esp32-s3-real]` (USE_MOCK_BMS=0) trong `platformio.ini`. CI build cả 2 env (mock + real) catch regression dài hạn. example-blink env vẫn backward compat. GitHub issue #61 → In Review |
 
 #### Backlog — QA
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **61. S5-QA-01** (#62) | So sánh số ESP32 báo vs Fluke trên cả 4 pin → ghi lệch số → input cho calibration S7 | OV §B5 | Bảng số liệu lệch | QA |
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **61. S5-QA-01** (#62) | So sánh số ESP32 vs Fluke trên 4 pin → ghi lệch số → input cho calibration S7 | OV §B5 | Bảng số liệu lệch | QA | 🔴 **GAP** — cần ESP32 + 4 BMS thật + Fluke 87V + sổ tay. Pending until Hardware (S5-HW-07) đã đo Fluke baseline xong |
 
 **DoD sprint:** ESP32 đọc 4 pin LiFePO4 thật, dashboard thấy voltage thực, không còn dùng `mock_bms` trong môi trường lab.
+
+##### Sprint 5 — Tổng kết gap
+
+| Nhóm | Count | Items |
+|------|-------|-------|
+| ✅ **DONE — Firmware** | **7/7** | #55 S5-FW-01 modbus driver + register map, #56 S5-FW-02 DE/RE, #57 S5-FW-03 multi-drop, #58 S5-FW-04 INA226 redundant, #59 S5-FW-05 DS18B20 external-temp, #60 S5-FW-06 SHT31 ambient (+ 4 critical bug fixes), #61 S5-FW-07 USE_MOCK_BMS dispatcher. **GitHub Project Board: 7/7 issues → In Review** |
+| 🔴 **GAP — Hardware** | **7/7** | #48 đấu MAX485, #49 lập register map BMS thực tế, #50 đổi unitId, #51 RS485 multi-drop, #52 DS18B20 pull-up, #53 INA226+SHT31 I2C, #54 đo Fluke baseline. **Block reason**: cần procurement linh kiện Cấp 1+2 + lab session |
+| 🔴 **GAP — QA** | **1/1** | #62 S5-QA-01 so sánh ESP32 vs Fluke. **Block reason**: cần Hardware S5-HW-07 xong trước |
+| 🚨 **Bug catch qua audit (4)** — đã fix | 4 | (1) SHT31 endpoint route wrong → `/api/ambient/readings/batch`; (2) SHT31 missing required `siteId` (wire từ provision); (3) SHT31 field `temperature` → `ambientTemperature` + enum INT format (no JsonStringEnumConverter); (4) `ingestViaMqtt` slot indexing `b * 3` BROKE real path khi battery thiếu sensor → refactor group-by-serial dynamic |
+| 🔧 **Polish + CI + docs (5)** — đã làm | 5 | CI thêm `esp32-s3-real` env build + threshold 94 tests; `show` CLI Sprint 5 sensor section; logStatsPeriodic sensor counters; dedup `kSourcesPerBatterySprint5`; doc sync README/iot-task-list/tasksprint với Status column |
+
+**Files mới (10):**
+- `firmware-esp32/src/bms/{bms_register_map,modbus_bms,bms_source}.{h,cpp}` (S5-FW-01/02/03/07)
+- `firmware-esp32/src/sensor/{ina226,ds18b20,sht31}.{h,cpp}` (S5-FW-04/05/06)
+- `firmware-esp32/test/test_bms_register_map/test_bms_register_map.cpp` (23 native tests)
+
+**Files modified (6):**
+- `firmware-esp32/{include/config.h,include/config.example.h,platformio.ini,src/main.cpp,src/cli/serial_cli.cpp}`
+- `.github/workflows/firmware-ci.yml` (thêm esp32-s3-real env)
+
+**Test coverage:** 94/94 native tests PASS (71 Sprint 1-4 + 23 Sprint 5 BMS register decode). ESP32 build SUCCESS 3 envs (mock + real + blink).
+
+**Backend contract verified** với code thực tế: `SensorReadingItem` 17 field, `AmbientReadingItem` 7 field (incl required siteId), enums INT format (ChargingState/SourceType/AmbientReadingSource), camelCase JSON.
 
 ---
 

@@ -127,6 +127,63 @@
 // MQTT trở lại sau khi reconnect.
 #define MQTT_PUBLISH_FAIL_THRESHOLD 3
 
+// ============== Sprint 5 — Hardware Integration (S5-FW-01..07) =================
+
+// Compile-time switch giữa mock_bms (Sprint 1) và modbus_bms (Sprint 5 real BMS).
+// USE_MOCK_BMS=1 → ESP32 generate mock readings (dev workflow không cần BMS).
+// USE_MOCK_BMS=0 → ESP32 đọc BMS thật qua RS485 + INA226 + DS18B20 + SHT31.
+// Override qua build_flag `-DUSE_MOCK_BMS=0` trong env riêng (`pio run -e esp32-s3-real`).
+#ifndef USE_MOCK_BMS
+  #define USE_MOCK_BMS  1
+#endif
+
+// --------- RS485 Modbus BMS pins (WD §3) ---------
+// ESP32-S3 DevKitC-1 → MAX485 XY-017:
+//   GPIO17 (TX2/U2TXD) → DI (driver input)
+//   GPIO18 (RX2/U2RXD) → RO (receiver output)
+//   GPIO16             → DE+RE tied (direction control). Set -1 nếu module auto-direction.
+//   GND chung
+#define BMS_RS485_TX_PIN     17
+#define BMS_RS485_RX_PIN     18
+#define BMS_RS485_DE_PIN     16        // -1 = auto-direction module (KHÔNG cần GPIO)
+#define BMS_RS485_BAUD       9600UL    // Daly/JBD default; JK-BMS có thể 19200
+
+// BMS model — chọn register map preset (xem src/bms/bms_register_map.h).
+//   1 = Daly Smart BMS (custom protocol — Sprint 5 chỉ stub, dùng JBD nếu thật sự cần)
+//   2 = JBD BMS (LiFePO4 phổ biến — register map chuẩn Modbus RTU)
+//   3 = JK-BMS (multi-cell — register map khác JBD)
+//   4 = Generic (user tự định nghĩa register trong bms_register_map_custom.h)
+#define BMS_MODEL            2          // JBD default
+
+// Multi-drop config (S5-FW-03): loop unitId từ kBmsUnitIdStart đến +Count-1.
+// Phải khớp số pin trong config/battery_mapping.h.
+#define BMS_UNIT_ID_START    1
+#define BMS_UNIT_ID_COUNT    4
+#define BMS_POLL_TIMEOUT_MS  500UL      // Modbus request timeout per battery
+#define BMS_POLL_RETRY       1          // retry 1 lần nếu timeout
+
+// --------- I2C bus shared INA226 + SHT31 (WD §4.2) ---------
+#define I2C_SDA_PIN          8
+#define I2C_SCL_PIN          9
+#define I2C_FREQUENCY_HZ     100000UL   // 100kHz standard (an toàn cable dài)
+
+// INA226 (S5-FW-04) — current + voltage redundant
+#define INA226_I2C_ADDRESS   0x40       // default; AD0=GND, AD1=GND
+#define INA226_SHUNT_OHM     0.1f       // shunt resistor value (10mΩ phổ biến với pin nhỏ)
+#define INA226_MAX_CURRENT_A 20.0f      // expected max current — calc current LSB
+
+// --------- DS18B20 1-Wire (WD §4.1) ---------
+#define DS18B20_GPIO         4
+#define DS18B20_RESOLUTION   12         // bits: 9-12, càng cao càng chính xác + chậm
+#define DS18B20_MAX_SENSORS  8          // max sensors trên bus (≥ BMS_UNIT_ID_COUNT)
+
+// --------- SHT31 ambient (WD §4.2 cùng I2C) ---------
+#define SHT31_I2C_ADDRESS    0x44       // default; ADDR=GND
+#define SHT31_POLL_INTERVAL_MS 60000UL  // 1 phút (ambient không cần realtime)
+// Backend route thật: `[Route("api/ambient")] + [HttpPost("readings/batch")]`
+// → full path `/api/ambient/readings/batch` (verified với AmbientReadingsController.cs).
+#define BACKEND_AMBIENT_PATH "/api/ambient/readings/batch"
+
 // --------- Firmware metadata ---------
 #ifndef FW_VERSION
   #define FW_VERSION "unknown"
