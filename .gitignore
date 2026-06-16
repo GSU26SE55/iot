@@ -1,7 +1,10 @@
 __pycache__/
 *.pyc
 .venv/
-data/
+# Sprint 4 — anchor `/data/` để chỉ match data/ ở root iot/ (Python tools dataset).
+# Rule cũ `data/` unanchored match TOÀN BỘ subfolder data/, ignore luôn
+# firmware-esp32/data/ca_cert.pem.placeholder (cần commit như setup hint).
+/data/
 *.sqlite3
 .DS_Store
 Thumbs.db

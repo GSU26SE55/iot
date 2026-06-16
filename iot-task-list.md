@@ -107,23 +107,33 @@
 
 ## Sprint 4 — MQTT Broker & Bridge (12 task)
 
-### Infra (4)
-- [ ] **S4-INF-01** — `infra/mqtt/docker-compose.yml` chạy EMQX (hoặc Mosquitto); expose 1883 + 8883
-- [ ] **S4-INF-02** — Sinh CA tự ký + server cert (`infra/mqtt/scripts/gen-certs.sh`)
-- [ ] **S4-INF-03** — `acl.conf` per-device: pub `solar/+/{dev}/telemetry`, `heartbeat`, `status`, `cmd/ack`; sub `solar/{dev}/cmd`
-- [ ] **S4-INF-04** — Bridge backend user `backend-bridge`: sub `solar/#` + pub `solar/+/cmd`
+### Infra (4) — ✅ Done (live verified with broker)
+- [x] **S4-INF-01** — `infra/mqtt/docker-compose.yml` chạy Mosquitto (chọn thay EMQX); expose 1883 + 8883
+- [x] **S4-INF-02** — Sinh CA tự ký + server cert (`infra/mqtt/scripts/gen-certs.sh`) — fix CA `basicConstraints=CA:TRUE`
+- [x] **S4-INF-03** — `acl.conf` per-device: pub `solar/%u/+/telemetry`, `heartbeat`, `status`, `cmd/ack`; sub `solar/%u/cmd` — verified 4 ACL tests PASS
+- [x] **S4-INF-04** — Bridge backend user `backend-bridge`: `topic readwrite solar/#` + `topic read $SYS/#`
 
-### Firmware (6)
-- [ ] **S4-FW-01** — `src/net/mqtt_client.cpp` dùng `PubSubClient` + `WiFiClientSecure` (CA cert LittleFS)
-- [ ] **S4-FW-02** — LWT: `willTopic=solar/{dev}/status`, payload `offline`, QoS 1, retain
-- [ ] **S4-FW-03** — Sau connect: publish `online` retained + subscribe `solar/{dev}/cmd`
-- [ ] **S4-FW-04** — Đổi `publishTelemetry()` thay HTTPS POST (HTTPS giữ cho flush queue + firmware-check)
-- [ ] **S4-FW-05** — `src/cmd/command_handler.cpp` parse downlink (`set_interval`, `trigger_ota`, `request_heartbeat`) + publish ack lên `solar/{dev}/cmd/ack`
-- [ ] **S4-FW-06** — Fallback MQTT fail N lần → switch sang HTTPS cho batch đó
+### Firmware (6) — ✅ Done (compile + native tests; ESP32 hardware verify pending)
+- [x] **S4-FW-01** — `src/net/mqtt_client.{h,cpp}` PubSubClient + WiFiClientSecure + CA cert LittleFS `/ca_cert.pem` + NTP gate
+- [x] **S4-FW-02** — LWT: `willTopic=solar/{dev}/status`, payload `offline`, QoS 1, retain=true
+- [x] **S4-FW-03** — Sau connect: publish `online` retained + subscribe `solar/{dev}/cmd` QoS 1
+- [x] **S4-FW-04** — `ingestViaMqtt()` per-battery publish — HTTPS giữ cho queue flush + firmware-check (S7)
+- [x] **S4-FW-05** — `src/cmd/command_handler.{h,cpp}` + `cmd_logic.{h,cpp}` (pure) parse downlink + publish ack `{cmdId,status,error}` — 23 native tests
+- [x] **S4-FW-06** — Fallback MQTT consecutive fail ≥ `MQTT_PUBLISH_FAIL_THRESHOLD=3` → HTTPS; auto-reset on reconnect
 
-### QA (2)
+### QA (2) — ⏳ Pending lab (cần ESP32 + broker + backend + admin dashboard)
 - [ ] **S4-QA-01** — Đo latency end-to-end MQTT (publish → DB row), kỳ vọng p95 < 500ms
 - [ ] **S4-QA-02** — Test LWT vs job 5 phút: rút điện → so sánh thời gian alert
+
+### Out-of-spec gaps đã fix qua audit (11 vòng review)
+- ⚠ Backend hash `PBKDF2$sha256$...` ≠ Mosquitto `$7$` → `scripts/add-device.sh` re-hash plaintext + SIGHUP
+- ⚠ Backend `Mqtt:Enabled=false` default → silent fail; documented prominent trong README
+- ⚠ Case mismatch deviceCode/mqtt_username phá downlink → `warnIfCaseMismatch()` + lowercase placeholder convention
+- ⚠ TLS handshake trước NTP sync → `mqtt_client::mqttTick()` NTP gate
+- ⚠ Root `.gitignore` `data/` over-broad ignore `firmware-esp32/data/ca_cert.pem.placeholder` → đổi `/data/` anchored
+- 🔐 Security guidance consolidate trong `infra/mqtt/SECURITY.md` (file classification + threat model + audit queries)
+- 🔐 `add-device.sh` thêm stdin mode (tránh password vào shell history)
+- 🔐 `gen-certs.sh` cert expiry awareness + key handling warnings
 
 ---
 
@@ -138,17 +148,27 @@
 - [ ] **S5-HW-06** — Đấu INA226 + SHT31 chung I2C (GPIO8 SDA, GPIO9 SCL)
 - [ ] **S5-HW-07** — Đo điện áp pin thật bằng Fluke 87V (input cho calibration)
 
-### Firmware (7)
-- [ ] **S5-FW-01** — `src/bms/modbus_bms.cpp` đọc 1 BMS đúng register map + `bmsErrorCode`, `cycleCount`, `sohPercent`, `chargingState`; tag `sourceType=Bms(1)`, `sensorSourceCode="primary"`
-- [ ] **S5-FW-02** — Điều khiển DE/RE (nếu không auto-direction): HIGH trước gửi, LOW sau nhận
-- [ ] **S5-FW-03** — Multi-drop: loop unitId 1→N, gom 1 batch nhiều reading
-- [ ] **S5-FW-04** — `src/sensor/ina226.cpp` V/I qua I2C → `sourceType=IotGateway(2)`, `sensorSourceCode="redundant"` (CHỈ cross-source, KHÔNG kWh)
-- [ ] **S5-FW-05** — `src/sensor/ds18b20.cpp` nhiệt thân pin → `sourceType=IotGateway(2)`, `sensorSourceCode="external-temp"`
-- [ ] **S5-FW-06** — `src/sensor/sht31.cpp` ambient temp+humidity → POST `/api/ambient-readings/batch` với `Source=IotSensor`, `SourceDeviceId=<DeviceCode>`
-- [ ] **S5-FW-07** — Compile flag `USE_MOCK_BMS=1` chuyển giữa `mock_bms` và `modbus_bms`
+### Firmware (7) — ✅ Done (compile multi-env + native test 23 BMS register; hardware verify pending)
+- [x] **S5-FW-01** — `src/bms/modbus_bms.{h,cpp}` + `bms_register_map.{h,cpp}` preset Daly/JBD/JK + `decodeErrorCode` short codes ≤ 64 chars + retry 1x
+- [x] **S5-FW-02** — `preTransmission/postTransmission` callbacks: DE HIGH + delayMicroseconds(10) trước; flush() + delayMicroseconds(50) sau (T3.5 guard)
+- [x] **S5-FW-03** — `modbusReadMultiDrop` loop `BMS_UNIT_ID_START..START+COUNT-1`, skip BMS timeout (không block 3 BMS khác)
+- [x] **S5-FW-04** — `src/sensor/ina226.{h,cpp}` INA226 lib + replicate cho N battery serial. Range check ±50V/±max×1.2A. ⚠ ADR-017 KHÔNG energy metrics
+- [x] **S5-FW-05** — `src/sensor/ds18b20.{h,cpp}` OneWire + DallasTemperature, enumerate addresses, trigger 1 conversion cho all sensors
+- [x] **S5-FW-06** — `src/sensor/sht31.{h,cpp}` Adafruit_SHT31, POST `/api/ambient/readings/batch` mỗi 60s. Wire siteId từ provision config. Source=1 (IotSensor INT enum)
+- [x] **S5-FW-07** — `src/bms/bms_source.{h,cpp}` dispatcher + `[env:esp32-s3-real]` PlatformIO env (USE_MOCK_BMS=0) trong CI
 
-### QA (1)
+### QA (1) — 🔴 Pending lab
 - [ ] **S5-QA-01** — So sánh số ESP32 vs Fluke trên 4 pin → bảng số liệu lệch (input cho calibration S7)
+
+### Out-of-spec gaps đã fix qua audit (4 vòng review)
+- 🚨 SHT31 sai endpoint `/api/ambient-readings/batch` → fix `/api/ambient/readings/batch` (verified controller)
+- 🚨 SHT31 sai field name `temperature` + thiếu required `siteId` → fix `ambientTemperature` + wire `sht31SetSiteId()` từ provision config
+- 🚨 SHT31 sai enum format string `"IotSensor"` → fix integer `1` (backend không có `JsonStringEnumConverter`)
+- 🚨 `ingestViaMqtt` slot indexing `b * 3` BREAK real path khi battery thiếu INA/DS18B20 → refactor group-by-serial dynamic
+- 🔧 CI workflow thiếu build `esp32-s3-real` env → thêm; test count threshold 71→94
+- 🔧 Sprint 5 sensor section trong `show` CLI + logStatsPeriodic
+- 🔧 Dedup constant `kSourcesPerBatterySprint5` → re-use `mock_bms::kSourcesPerBattery`
+- 🔧 SHT31 header doc + firmware README + iot-task-list update với Sprint 5 status
 
 ---
 

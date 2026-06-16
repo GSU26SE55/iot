@@ -1,13 +1,98 @@
 # firmware-esp32 — ESP32-S3 firmware
 
 Roadmap firmware:
-- **Sprint 0** — skeleton + 2 sketch demo (blink, NTP sync)
-- **Sprint 1** ← **HIỆN TẠI** — MVP Mock HTTPS ingest (mock BMS → HTTPS POST → backend)
-- Sprint 2 — provision + heartbeat (load API key từ NVS)
-- Sprint 3 — production contract + local queue + idempotency
-- Sprint 4 — MQTT-over-TLS
-- Sprint 5 — BMS thật qua RS485 + sensor phụ
+- **Sprint 0** ✅ — skeleton + 2 sketch demo (blink, NTP sync)
+- **Sprint 1** ✅ — MVP Mock HTTPS ingest (mock BMS → HTTPS POST → backend)
+- **Sprint 2** ✅ — provision + heartbeat (load API key từ NVS)
+- **Sprint 3** ✅ — production contract + local queue + idempotency
+- **Sprint 4** ✅ — MQTT-over-TLS + LWT + downlink command + HTTPS fallback
+- **Sprint 5** ← **HIỆN TẠI** — Modbus RTU BMS + INA226 + DS18B20 + SHT31 + USE_MOCK_BMS dispatcher
 - Sprint 7 — OTA
+
+## Sprint 4 quick reference
+
+```
+MQTT publish (FW → backend):
+  solar/{deviceCode}/{batterySerial}/telemetry    retain false
+  solar/{deviceCode}/status                       retain true  (LWT + connect "online")
+  solar/{deviceCode}/cmd/ack                      retain false
+
+MQTT subscribe (backend → FW):
+  solar/{deviceCode}/cmd                          QoS 1
+```
+
+**Setup MQTT broker + cert (1 lần):**
+```bash
+cd ../infra/mqtt
+./mosquitto/bootstrap.sh                                    # tạo passwd backend-bridge
+./scripts/gen-certs.sh                                      # sinh CA + server cert
+./scripts/add-device.sh <username> <plaintext-password>     # plaintext từ IotDeviceCreatedDto
+
+cp mosquitto/certs/ca.crt ../../firmware-esp32/data/ca_cert.pem
+cd ../../firmware-esp32
+pio run -t uploadfs                                         # upload LittleFS chứa CA cert
+pio run -t upload                                           # flash firmware
+```
+
+**Config bắt buộc trong `include/config.h`:**
+- `DEVICE_CODE` — **PHẢI LOWERCASE** (xem `warnIfCaseMismatch` trong `src/net/mqtt_client.cpp`)
+- `MQTT_BROKER_HOST/PORT/USE_TLS`
+- `MQTT_USERNAME = lowercase(DEVICE_CODE)`, `MQTT_PASSWORD = plaintext` từ admin (trả 1 lần)
+
+**Behavior matrix:**
+
+| State | Telemetry transport | Heartbeat | Queue flush |
+|-------|--------------------|-----------|-------------|
+| MQTT connected, streak < 3 fail | **MQTT** (< 1s latency) | HTTPS | HTTPS |
+| MQTT disconnected hoặc streak ≥ 3 fail | HTTPS + idempotency | HTTPS | HTTPS |
+| MQTT reconnect | Streak reset → quay lại MQTT | HTTPS | HTTPS |
+
+## Sprint 5 quick reference
+
+```
+USE_MOCK_BMS=1 (default dev)  → bms_source dispatch → mock_bms (no hardware)
+USE_MOCK_BMS=0 (real BMS)     → bms_source dispatch → modbus_bms + ina226 + ds18b20 + sht31
+
+Per-battery reading slots:
+  primary       (sourceType=Bms=1)         — Modbus RTU từ BMS qua RS485
+  redundant     (sourceType=IotGateway=2)  — INA226 V/I qua I2C
+  external-temp (sourceType=IotGateway=2)  — DS18B20 1-Wire qua GPIO
+
+Ambient (separate endpoint):
+  POST /api/ambient/readings/batch
+  Headers: X-Api-Key + X-Device-Code, scope EnvironmentalIngest (1<<2=4)
+  Items: { siteId, time, ambientTemperature, humidity, source=1 (IotSensor), sourceDeviceId }
+```
+
+**Pin layout (WD §3 + §4):**
+
+| Pin | Function | Notes |
+|-----|----------|-------|
+| GPIO17 | RS485 TX2 → MAX485 DI | 9600 baud default |
+| GPIO18 | RS485 RX2 → MAX485 RO | |
+| GPIO16 | RS485 DE+RE tied | -1 nếu MAX485 auto-direction |
+| GPIO4 | DS18B20 1-Wire | + 4.7kΩ pull-up đến 3.3V |
+| GPIO8 | I2C SDA (INA226 + SHT31) | 100kHz |
+| GPIO9 | I2C SCL | |
+| GPIO48 | Status LED (Sprint 3) | onboard RGB |
+
+**Build:**
+```bash
+pio run -e esp32-s3-devkitc-1   # mock mode (default dev)
+pio run -e esp32-s3-real        # real BMS path (USE_MOCK_BMS=0)
+pio run -e example-blink        # Sprint 0 blink demo
+```
+
+**BMS model selection** trong `include/config.h`:
+- `BMS_MODEL=1` Daly stub
+- `BMS_MODEL=2` JBD (LiFePO4 phổ biến — default)
+- `BMS_MODEL=3` JK-BMS multi-cell
+- `BMS_MODEL=4` Generic (user define `kGenericBmsMap` custom)
+
+⚠ **DEPLOYMENT — Admin tạo IoT device PHẢI:**
+- Set `DeviceCode` lowercase (vd `gw-esp32-001`) — match MQTT username convention
+- Set `ApiKeyScopes` bitmask include `SensorIngest(1)` + `DeviceHeartbeat(2)` + `EnvironmentalIngest(4)` + `FirmwareCheck(8)` = `15` (full)
+- Set `SiteId` — required cho SHT31 ambient POST (S5-FW-06)
 
 ## Yêu cầu môi trường
 

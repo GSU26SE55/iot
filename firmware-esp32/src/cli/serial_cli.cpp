@@ -6,8 +6,20 @@
 #include <Arduino.h>
 #include <string.h>
 
+#if __has_include("config.h")
+  #include "config.h"
+#else
+  #include "config.example.h"
+#endif
+
+#include "bms/bms_source.h"
+#include "bms/modbus_bms.h"
 #include "config/device_identity.h"
 #include "config/nvs_store.h"
+#include "net/mqtt_client.h"
+#include "sensor/ds18b20.h"
+#include "sensor/ina226.h"
+#include "sensor/sht31.h"
 
 namespace cli {
 
@@ -18,14 +30,14 @@ char     s_buf[kMaxLineLen];
 size_t   s_idx = 0;
 
 void printHelp() {
-  Serial.println("---- Sprint 2 Serial CLI ----");
-  Serial.println("  show              — in trạng thái identity");
+  Serial.println("---- Serial CLI (Sprint 2 + Sprint 4) ----");
+  Serial.println("  show              — in trạng thái identity + MQTT (Sprint 4)");
   Serial.println("  set apikey <K>    — đổi API key (lưu NVS, hot reload)");
   Serial.println("  set devcode <C>   — đổi device code");
   Serial.println("  clear             — erase NVS, fallback compile-time");
   Serial.println("  reboot            — ESP.restart()");
   Serial.println("  help              — in help này");
-  Serial.println("-----------------------------");
+  Serial.println("------------------------------------------");
 }
 
 const char* skipSpace(const char* p) {
@@ -52,6 +64,37 @@ void executeCommand(const char* line) {
     Serial.printf("  free heap  = %u bytes\n", static_cast<unsigned>(ESP.getFreeHeap()));
     Serial.printf("  NVS free   = %u entries\n",
                   static_cast<unsigned>(storage::nvsFreeEntries()));
+    // Sprint 4 — MQTT broker status.
+    Serial.println("  -- MQTT (Sprint 4) --");
+    Serial.printf("  connected  = %s\n", net::mqttIsConnected() ? "YES" : "NO");
+    Serial.printf("  reconnects = %lu\n",
+                  static_cast<unsigned long>(net::mqttConnectCount()));
+    Serial.printf("  pub ok     = %lu\n",
+                  static_cast<unsigned long>(net::mqttPublishOkCount()));
+    Serial.printf("  pub fail   = %lu\n",
+                  static_cast<unsigned long>(net::mqttPublishFailCount()));
+    Serial.printf("  fail streak= %lu (threshold %d → fallback HTTPS)\n",
+                  static_cast<unsigned long>(net::mqttConsecutiveFailCount()),
+                  static_cast<int>(MQTT_PUBLISH_FAIL_THRESHOLD));
+    // Sprint 5 — BMS source + sensor status.
+    Serial.println("  -- BMS + Sensors (Sprint 5) --");
+    Serial.printf("  mode       = %s\n", bms::bmsSourceMode());
+#if !USE_MOCK_BMS
+    Serial.printf("  modbus     = ok=%lu fail=%lu\n",
+                  static_cast<unsigned long>(bms::modbusPollOkCount()),
+                  static_cast<unsigned long>(bms::modbusPollFailCount()));
+    Serial.printf("  ina226     = ok=%lu fail=%lu (redundant cross-source)\n",
+                  static_cast<unsigned long>(sensor::ina226ReadOkCount()),
+                  static_cast<unsigned long>(sensor::ina226ReadFailCount()));
+    Serial.printf("  ds18b20    = ok=%lu fail=%lu (external-temp)\n",
+                  static_cast<unsigned long>(sensor::ds18b20ReadOkCount()),
+                  static_cast<unsigned long>(sensor::ds18b20ReadFailCount()));
+    Serial.printf("  sht31      = post ok=%lu fail=%lu (ambient)\n",
+                  static_cast<unsigned long>(sensor::sht31PostOkCount()),
+                  static_cast<unsigned long>(sensor::sht31PostFailCount()));
+#else
+    Serial.println("  (mock mode — sensor counters n/a)");
+#endif
     return;
   }
   if (strcmp(line, "clear") == 0) {

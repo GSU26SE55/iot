@@ -1,0 +1,65 @@
+# ==================================================================
+# Sprint 4 — S4-INF-01 (#36): Standalone MQTT broker compose
+#
+# Tách riêng khỏi infra/docker-compose.dev.yml để có thể chạy broker độc lập
+# (vd: bench latency, test ACL, demo LWT) mà không cần dựng cả Postgres + Redis + RabbitMQ.
+#
+# Cách dùng:
+#   1. Bootstrap passwd backend-bridge (1 lần):
+#        ./mosquitto/bootstrap.sh
+#   2. (TLS optional) Sinh CA + server cert:
+#        ./scripts/gen-certs.sh
+#        → mở comment block `listener 8883` trong mosquitto/config/mosquitto.conf
+#   3. Start broker:
+#        docker compose -f infra/mqtt/docker-compose.yml up -d
+#   4. Verify pub/sub:
+#        mosquitto_sub -h localhost -p 1883 -u backend-bridge -P "$MQTT_PASSWORD" \
+#          -t 'solar/#' -v
+#        mosquitto_pub -h localhost -p 1883 -u backend-bridge -P "$MQTT_PASSWORD" \
+#          -t solar/test/heartbeat -m '{"ok":true}'
+#   5. TLS verify:
+#        mosquitto_pub -h localhost -p 8883 --cafile mosquitto/certs/ca.crt \
+#          -u backend-bridge -P "$MQTT_PASSWORD" -t solar/test/status -m online
+#
+# Lưu ý:
+#   - Compose này dùng cùng volume cấu hình với dev compose (../mqtt/mosquitto/...)
+#     nên đổi acl.conf/mosquitto.conf áp dụng cho cả 2.
+#   - Default network: bridge (mặc định). Backend KHÔNG truy cập qua compose này
+#     trừ khi join network thủ công. Cho prod dùng `docker-compose.dev.yml`.
+#
+# Acceptance criteria (S4-INF-01):
+#   ✓ `docker compose up` → broker healthy
+#   ✓ Cổng 1883 (plain) + 8883 (TLS sau khi enable listener) expose ra host
+#
+# Acceptance criteria (S4-INF-04):
+#   ✓ User `backend-bridge` login được + subscribe `solar/#` thấy mọi message
+# ==================================================================
+
+name: iot-mqtt
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: iot-mqtt-mosquitto
+    restart: unless-stopped
+    ports:
+      - "${MQTT_PORT:-1883}:1883"           # plain MQTT (dev)
+      - "${MQTT_TLS_PORT:-8883}:8883"       # MQTT/TLS — uncomment listener khi có cert
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/config/acl.conf:/mosquitto/config/acl.conf:ro
+      - ./mosquitto/passwd:/mosquitto/config/passwd:ro
+      - ./mosquitto/certs:/mosquitto/certs:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    healthcheck:
+      # Verify broker accept connection — dùng `nc` thay vì mosquitto_sub vì
+      # mosquitto:2.0 image không kèm credential file để self-sub trong healthcheck.
+      test: ["CMD-SHELL", "timeout 2 sh -c '</dev/tcp/127.0.0.1/1883' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mosquitto-data:
+  mosquitto-log:

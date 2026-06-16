@@ -46,4 +46,12 @@ PostResult httpPostJsonRecv(const char* path,
                             size_t      respBufLen,
                             size_t*     outRespBytes);
 
+// Sprint 3 (S3-FW-02): POST với `Idempotency-Key` header.
+// Backend §IoT2-16 dedup theo (deviceCode, idempotencyKey) TTL 24h.
+// `idempotencyKey` null/empty → KHÔNG set header (legacy mode).
+PostResult httpPostJsonWithIdempotency(const char* path,
+                                       const char* body,
+                                       size_t      bodyLen,
+                                       const char* idempotencyKey);
+
 }  // namespace net

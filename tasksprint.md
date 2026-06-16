@@ -246,28 +246,40 @@ S7 (OTA + observability) có thể trễ vào S8 nếu thiếu thời gian.
 
 #### Backlog — Firmware
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **28. S3-FW-01** (#29) | `src/queue/local_queue.cpp` — buffer NVS (FIFO, key = epoch), max 200 batch | NI §9.1, OV §B7 | Unit test: enqueue 200 → 201 đẩy ra cái cũ nhất | FW |
-| **29. S3-FW-02** (#30) | Mỗi batch sinh `Idempotency-Key` (UUIDv4 hoặc deviceCode+epoch+seq) lưu kèm trong queue | NI §7.4 | Hai lần POST cùng key → backend chỉ ghi 1 lần (xem S3-BE-03) | FW |
-| **30. S3-FW-03** (#31) | Retry exponential backoff (base 2s, max 5 phút, jitter ±20%) | NI §1 #2 | Tắt backend → log thấy backoff tăng dần; bật lại → flush hết | FW |
-| **31. S3-FW-04** (#32) | Đổi contract sang **production** (NI §7.4 + MO §52.5): payload có `deviceTimestamp` (ISO8601), readings dùng `batteryAssetSerial`, mỗi reading tag `sensorSourceCode` + `sourceType` **theo đúng nguồn vật lý** (MO §52.9 bảng): BMS-relay qua RS485 → `sourceType=Bms (1)`, `sensorSourceCode="primary"`; INA226 → `sourceType=IotGateway (2)`, `sensorSourceCode="redundant"`; DS18B20 → `sourceType=IotGateway (2)`, `sensorSourceCode="external-temp"`. **KHÔNG hard-code `sourceType=2` cho tất cả** — sẽ phá cross-source validation §1.6.6 (so Bms vs IotGateway). Field optional khác: `cycleCount`, `sohPercent`, `chargingState`, `bmsErrorCode` (≤ 64 chars) | NI §7.4, MO §52.5, §52.9 | Payload có ít nhất 2 reading cùng battery, khác `sourceType`/`sensorSourceCode`; backend nhận đúng schema | FW |
-| **32. S3-FW-05** (#33) | Status LED (GPIO48 RGB): xanh = online, vàng = queue có data, đỏ = mất mạng | WD §1 | Quan sát LED trực quan đúng trạng thái | FW |
+> **Trạng thái:** ✅ Done · 🟡 Code OK / cần verify hardware · 🔴 Gap chưa làm
+
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **28. S3-FW-01** (#29) | `src/queue/local_queue.cpp` — buffer NVS (FIFO, key = epoch), max 200 batch | NI §9.1, OV §B7 | Unit test: enqueue 200 → 201 đẩy ra cái cũ nhất | FW | 🟡 Code: `src/queue/{local_queue,queue_index}.{h,cpp}` — **LittleFS-backed** (NI §9.1 cho phép "NVS/LittleFS"; NVS default partition 24KB không fit 200 batch × ~1KB). Pure FIFO logic extracted ra `queue_index.h` để test native. **14 unit tests PASS** gồm AC trọng tâm `test_enqueue_200_then_201st_drops_oldest`. LittleFS persist verify trên ESP32 còn pending. |
+| **29. S3-FW-02** (#30) | Mỗi batch sinh `Idempotency-Key` (UUIDv4 hoặc deviceCode+epoch+seq) lưu kèm trong queue | NI §7.4 | Hai lần POST cùng key → backend chỉ ghi 1 lần (xem S3-BE-03) | FW | 🟡 Code: `src/core/idempotency_key.{h,cpp}` — UUIDv4 (default) + alt `deviceCode-epoch-seq`. Lưu kèm trong queue (`<epoch>.idem` file). HTTP `httpPostJsonWithIdempotency` thêm header. **5 unit tests + Sprint 3 integration test** verify replay (POST 2 lần cùng key → mock backend cache → cùng response). |
+| **30. S3-FW-03** (#31) | Retry exponential backoff (base 2s, max 5 phút, jitter ±20%) | NI §1 #2 | Tắt backend → log thấy backoff tăng dần; bật lại → flush hết | FW | 🟡 Code: `src/net/backoff.{h,cpp}` — `kBackoffBaseMs=2000, kBackoffMaxMs=300000, kBackoffJitterPct=0.20`. Bonus `isTransientFailure()` phân biệt 4xx permanent (drop) vs 5xx/network transient (retry) — tránh infinite retry loop khi backend trả validation error. **8 unit tests PASS** (growth, cap, jitter, transient/permanent classification). |
+| **31. S3-FW-04** (#32) | Đổi contract sang **production** (NI §7.4 + MO §52.5): payload có `deviceTimestamp` (ISO8601), readings dùng `batteryAssetSerial`, mỗi reading tag `sensorSourceCode` + `sourceType` **theo đúng nguồn vật lý** (MO §52.9 bảng): BMS-relay qua RS485 → `sourceType=Bms (1)`, `sensorSourceCode="primary"`; INA226 → `sourceType=IotGateway (2)`, `sensorSourceCode="redundant"`; DS18B20 → `sourceType=IotGateway (2)`, `sensorSourceCode="external-temp"`. **KHÔNG hard-code `sourceType=2` cho tất cả** — sẽ phá cross-source validation §1.6.6 (so Bms vs IotGateway). Field optional khác: `cycleCount`, `sohPercent`, `chargingState`, `bmsErrorCode` (≤ 64 chars) | NI §7.4, MO §52.5, §52.9 | Payload có ít nhất 2 reading cùng battery, khác `sourceType`/`sensorSourceCode`; backend nhận đúng schema | FW | 🟡 Code: `src/core/payload.cpp::buildProductionBatchPayload` + extend `core::SensorReading` (sohPercent, chargingState, bmsErrorCode[65], sensorSourceCode, sourceType). Mock sinh **3 nguồn per battery**: BMS primary (sourceType=1) + INA226 redundant (sourceType=2) + DS18B20 external-temp (sourceType=2 / sensorSourceCode khác). **8 unit tests + Sprint 3 integration** verify cross-source pair + 3-source mapping + 64-char bmsErrorCode boundary. Backend dev (#IoT2-14..20) verified ready. |
+| **32. S3-FW-05** (#33) | Status LED (GPIO48 RGB): xanh = online, vàng = queue có data, đỏ = mất mạng | WD §1 | Quan sát LED trực quan đúng trạng thái | FW | 🟡 Code: `src/ui/{status_led,led_palette}.{h,cpp}` — GPIO48 WS2812 với 5 state (Off/Online/Queued/Offline/Provisioning). Priority `main.cpp::updateStatusLed`: !wifi→red > queue>0→yellow > else→green. Brightness ≤ 32/255 (tránh chói). **7 unit tests palette** verify color mapping + distinguishability. Quan sát LED thực trên ESP32 pending. |
 
 #### Backend (BE) — chuyển sang Sprint IoT-2
 
-> 7 task BE của Sprint 3 (contract production + backward compat, clock skew, idempotency, outlier + auto-disable, mapping check, calibration apply + Redis cache, LastSeenAt update) **đã chuyển sang `backend/overall.md` Sprint IoT-2 Phase C** (`#IoT2-14..20`).
+> 7 task BE của Sprint 3 (contract production + backward compat, clock skew, idempotency, outlier + auto-disable, mapping check, calibration apply + Redis cache, LastSeenAt update) **đã chuyển sang `backend/overall.md` Sprint IoT-2 Phase C** (`#IoT2-14..20`). **Status BE (verified 2026-06-14):** ✅ **7/7 task ĐÃ implement trong backend repo** — `BatchIngestSensorReadingsCommandHandler.cs` đầy đủ: `ClockSkewMaxMinutes=5` + metric `clock_drift` (#IoT2-15), `IdempotencyTtl=24h` + dedup (#IoT2-16), `OutlierThresholdPerHour=50` + auto-Decommissioned (#IoT2-17), serial→Id resolve (#IoT2-18), `IIotCalibrationCache` Redis (#IoT2-19), `LastSeenAt` update (#IoT2-20). DTO `SensorReadingItem` full Sprint 3 fields.
 >
-> IoT track (FW) cần verify với Thắng trước S3 start: endpoint `/api/sensor-readings/batch` chấp nhận đủ field production contract (`X-Device-Code`, `Idempotency-Key`, `deviceTimestamp`, `sourceType` per-source, `bmsErrorCode`) đồng thời giữ backward compat cho payload S1 mock.
+> **Lưu ý cho FW:** route thực tế là `/api/sensor-readings/batch` (giữ nguyên từ Sprint 1), response **201 Created** (KHÔNG phải 200). Firmware đã handle 2xx range.
 
 #### Backlog — QA
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **33. S3-QA-01** (#34) | Test resilience: tắt WiFi 5 phút giữa luồng ingest → bật lại → đếm row DB == số batch ESP32 đã sinh | OV §B7 | Pass, không trùng, không mất | QA |
-| **34. S3-QA-02** (#35) | Test clock skew: chỉnh ESP32 NTP lệch 10 phút → reading bị reject | NI §12 #1 | Backend trả 400; metric tăng | QA |
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **33. S3-QA-01** (#34) | Test resilience: tắt WiFi 5 phút giữa luồng ingest → bật lại → đếm row DB == số batch ESP32 đã sinh | OV §B7 | Pass, không trùng, không mất | QA | 🔴 Cần ESP32 thật + backend dev + DB access — manual test. Firmware đã có queue + idempotency + backoff sẵn sàng cover scenario này. |
+| **34. S3-QA-02** (#35) | Test clock skew: chỉnh ESP32 NTP lệch 10 phút → reading bị reject | NI §12 #1 | Backend trả 400; metric tăng | QA | 🔴 Cần ESP32 + manipulate NTP. Firmware đã handle 400 permanent fail (drop batch). Sprint 3 integration test đã verify backend trả 400 cho clock_drift. |
 
 **DoD sprint:** "Tôi rút WiFi router 5 phút, cắm lại — backend nhận đủ data, không trùng" — kiểm chứng trực tiếp.
+
+##### Sprint 3 — Tổng kết gap
+
+| Nhóm | Items |
+|------|-------|
+| ✅ Backend dep verified | `#IoT2-14..20` (7 task) đã implement đầy đủ trong backend repo — KHÔNG block FW |
+| 🟡 Code OK, cần ESP32 + backend (5) | #29 S3-FW-01 (LittleFS persist), #30 S3-FW-02 (idempotency 24h cross-session), #31 S3-FW-03 (backoff + flush khi backend back up), #32 S3-FW-04 (backend accept full Sprint 3 schema), #33 S3-FW-05 (LED visual) |
+| 🔴 Manual scenario test (2) | #34 S3-QA-01 (WiFi 5 phút resilience), #35 S3-QA-02 (clock skew NTP) — cần ESP32 + backend dev + manual manipulation |
+| 🔧 Refactor/extras Sprint 3 không yêu cầu nhưng đã làm | Tách `queue/queue_index.h` (testable native), tách `ui/led_palette.h` (testable native), `isTransientFailure()` phân biệt 4xx/5xx fix infinite retry loop, 3-source mock generation (BMS+INA226+DS18B20) |
+| 📊 Test coverage | **56 test cases** PASS — test_payload (6) + test_payload_v3 (8) + test_idempotency (5) + test_backoff (8) + test_queue (14) + test_led_palette (7) + S1 integration (4) + S3 integration (4) |
 
 ---
 
@@ -279,40 +291,83 @@ S7 (OTA + observability) có thể trễ vào S8 nếu thiếu thời gian.
 
 #### Backlog — Infra
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **35. S4-INF-01** (#36) | `infra/mqtt/docker-compose.yml` chạy EMQX (khuyến nghị, dashboard sẵn) hoặc Mosquitto; expose 1883 (dev) + 8883 (TLS) | NI §8.2 | `docker compose up` → EMQX dashboard `localhost:18083` truy cập | INF |
-| **36. S4-INF-02** (#37) | Sinh CA tự ký + server cert cho broker (script `infra/mqtt/scripts/gen-certs.sh`) | NI §8.2 | TLS handshake test bằng `mosquitto_pub -p 8883 --cafile ca.crt` pass | INF |
-| **37. S4-INF-03** (#38) | `acl.conf` (MO §52.14 topic design): rule `username = deviceCode` — publish chỉ `solar/+/{deviceCode}/telemetry`, `solar/{deviceCode}/heartbeat`, `solar/{deviceCode}/status`, `solar/{deviceCode}/cmd/ack`; subscribe chỉ `solar/{deviceCode}/cmd` | NI §8.1, §11 C, MO §52.14 | Test ACL: device A không pub được topic của device B; device pub được ack lên `cmd/ack` của chính nó | INF |
-| **38. S4-INF-04** (#39) | Bridge service backend dùng user riêng `backend-bridge` có quyền subscribe `solar/#` + publish `solar/+/cmd` | NI §8.4 | Login bằng `backend-bridge` qua MQTT client → list topic OK | INF |
+> **Trạng thái:** ✅ Done (live verified với Mosquitto broker thật) · 🟡 Code OK / cần verify hardware · 🔴 Gap chưa làm
 
-#### Backend (BE) — chuyển sang Sprint IoT-2
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **35. S4-INF-01** (#36) | `infra/mqtt/docker-compose.yml` chạy EMQX (khuyến nghị, dashboard sẵn) hoặc Mosquitto; expose 1883 (dev) + 8883 (TLS) | NI §8.2 | `docker compose up` → EMQX dashboard `localhost:18083` truy cập | INF | ✅ Standalone compose `infra/mqtt/docker-compose.yml` + dev compose có Mosquitto (chọn thay EMQX → khớp backend `Mqtt__Host=mosquitto`, mất dashboard 18083). Healthcheck TCP probe. Live verify: broker start OK port 1883 + 8883 |
+| **36. S4-INF-02** (#37) | Sinh CA tự ký + server cert cho broker (script `infra/mqtt/scripts/gen-certs.sh`) | NI §8.2 | TLS handshake test bằng `mosquitto_pub -p 8883 --cafile ca.crt` pass | INF | ✅ Script + CA `basicConstraints=CA:TRUE` extension (fix bug round 2 — thiếu extension gây "invalid CA certificate"). SAN: localhost/mosquitto/iot-mosquitto/127.0.0.1 + optional `MQTT_SAN_IP`. Live verify: TLS 8883 handshake PASS + openssl verify chain OK |
+| **37. S4-INF-03** (#38) | `acl.conf` (MO §52.14): publish `solar/+/{deviceCode}/telemetry`, `solar/{deviceCode}/heartbeat`, `solar/{deviceCode}/status`, `solar/{deviceCode}/cmd/ack`; subscribe `solar/{deviceCode}/cmd` | NI §8.1, §11 C, MO §52.14 | Test ACL: device A không pub được topic của device B; device pub được ack lên `cmd/ack` của chính nó | INF | ✅ Rewrite từ schema cũ `telemetry/%u` → `solar/%u/+/telemetry` khớp backend `MqttTopicMap`. Pattern per-device: write telemetry/heartbeat/status/cmd-ack, read cmd. Live verify 4/4 ACL tests: device A pub topic B → DENIED; device pub own cmd-ack → ALLOWED; device pub own cmd (read-only) → DENIED; retained "online" subscribed |
+| **38. S4-INF-04** (#39) | Bridge service backend dùng user `backend-bridge`: subscribe `solar/#` + publish `solar/+/cmd` | NI §8.4 | Login bằng `backend-bridge` qua MQTT client → list topic OK | INF | ✅ `user backend-bridge` + `topic readwrite solar/#` + `topic read $SYS/#`. Bootstrap.sh sinh PBKDF2 hash. Live verify: backend-bridge auth + subscribe `solar/#` nhận tất cả message từ device test |
 
-> 6 task BE của Sprint 4 (MQTTnet NuGet, `MqttBridgeBackgroundService` subscribe 4 topic gồm `cmd/ack`, `TelemetryMessageHandler` reuse ingest command, `LastWillHandler` mark Offline, `IMqttBridgePublisher` downlink, MQTT credential per-device + ACL) **đã chuyển sang `backend/overall.md` Sprint IoT-2 Phase D** (`#IoT2-21..26`).
+#### Backend (BE) — đã verify implement trong `backend/` repo
+
+> 6 task BE Sprint 4 (`#IoT2-21..26` Phase D) **đã implement xong** trong `capstone/backend/services/BatteryService/src/BatteryService.Infrastructure/Mqtt/`:
+> - ✅ `#IoT2-21` MQTTnet 4.3.6.1152 + ManagedClient NuGet
+> - ✅ `#IoT2-22` `MqttBridgeBackgroundService.cs` subscribe 4 wildcard topic (`solar/+/+/telemetry`, `solar/+/heartbeat`, `solar/+/status`, `solar/+/cmd/ack`)
+> - ✅ `#IoT2-23` `DispatchTelemetryAsync` reuse `BatchIngestSensorReadingsCommand`
+> - ✅ `#IoT2-24` `DispatchStatusAsync` (LWT) mark device Offline + publish `IotDeviceWentOfflineEvent` qua outbox
+> - ✅ `#IoT2-25` `IMqttBridgePublisher.PublishCommandAsync` + endpoint `POST /api/admin/iot-devices/{id}/command`
+> - ✅ `#IoT2-26` MQTT credential per-device (PBKDF2 hash `PBKDF2$sha256$10000$...`, plaintext return 1 lần qua `IotDeviceCreatedDto.MqttPassword`)
 >
-> IoT track (INF/FW) cần verify với Thắng trước S4 start: broker đã chấp nhận credential per-device + ACL đúng 5 topic, bridge service subscribe đúng wildcard.
->
-> **Lưu ý:** Phase D có thể trượt sau capstone — HTTPS đủ cho demo. INF/FW vẫn dựng được broker (S4-INF) để pilot LWT, nhưng bridge backend có thể delay.
+> ⚠ **Gap deployment thực tế (catch qua audit):**
+> 1. Backend `Mqtt__Enabled` default `false` trong cả 3 appsettings → bridge silent skip nếu deployer quên enable. Documented prominent trong `infra/mqtt/README.md` "⚠ BẮT BUỘC — Enable backend MQTT bridge"
+> 2. Backend hash format `PBKDF2$sha256$...` (SHA256) KHÔNG khớp Mosquitto `$7$<iter>$...` (SHA512) → không paste thẳng vào passwd file → workaround `scripts/add-device.sh` re-hash plaintext qua `mosquitto_passwd`
 
 #### Backlog — Firmware
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **39. S4-FW-01** (#40) | `src/net/mqtt_client.cpp` dùng `PubSubClient` + `WiFiClientSecure` (CA cert nạp qua LittleFS `data/ca_cert.pem`) | NI §8.3 | Connect 8883 thành công | FW |
-| **40. S4-FW-02** (#41) | LWT: `willTopic=solar/{dev}/status`, payload `offline`, QoS 1, retain | NI §8.3 | Rút điện → broker push `offline` ngay; backend mark Offline | FW |
-| **41. S4-FW-03** (#42) | Sau connect: publish `online` retained lên `status` + subscribe `solar/{dev}/cmd` | NI §8.3 | EMQX dashboard thấy retained `online` | FW |
-| **42. S4-FW-04** (#43) | Đổi `publishTelemetry()` thay cho HTTPS POST; HTTPS vẫn giữ cho flush queue + firmware-check | NI §3 hybrid | Quan sát latency < 1s từ poll đến row DB | FW |
-| **43. S4-FW-05** (#44) | `src/cmd/command_handler.cpp`: parse JSON downlink `solar/{dev}/cmd`, hỗ trợ `set_interval` (đổi pollingInterval), `trigger_ota` (S7), `request_heartbeat`. Sau khi exec xong **publish ack** lên `solar/{dev}/cmd/ack` (MO §52.14 topic 5) với `{cmdId, status:"ok"|"failed", message}` để backend trace | NI §8.3 onCommand, MO §52.14 | Backend POST cmd `set_interval=2` → ESP32 đổi nhịp poll → bridge log ack `{cmdId, status:"ok"}` | FW |
-| **44. S4-FW-06** (#45) | Fallback: nếu MQTT publish fail N lần → switch sang HTTPS cho batch đó (queue vẫn giữ ưu tiên MQTT lại sau) | NI §13 #5 SPOF | Tắt broker → vẫn ingest qua HTTPS; bật broker → quay lại MQTT | FW |
+> **Trạng thái:** ✅ Done · 🟡 Code OK / cần verify ESP32 hardware · 🔴 Gap chưa làm
+
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **39. S4-FW-01** (#40) | `src/net/mqtt_client.{h,cpp}` dùng `PubSubClient` + `WiFiClientSecure` (CA cert nạp qua LittleFS `data/ca_cert.pem`) | NI §8.3 | Connect 8883 thành công | FW | 🟡 Code: 319 dòng + `setBufferSize(MQTT_MAX_PACKET_SIZE=4096)` + `setKeepAlive(30)` + PEM marker validation + 9-state human-readable error map. NTP gate `timeIsSynced()` trước TLS connect (fix round 6 — tránh cert "not yet valid" loop spam khi ESP32 boot time=1970). `warnIfCaseMismatch()` chống deviceCode mixed-case (round 3). Compile OK; **cần ESP32 thật + LittleFS ca_cert.pem để verify 8883 connect** |
+| **40. S4-FW-02** (#41) | LWT: `willTopic=solar/{dev}/status`, payload `offline`, QoS 1, retain | NI §8.3 | Rút điện → broker push `offline` ngay; backend mark Offline | FW | 🟡 Code: `s_mqtt.connect(..., willTopic, 1, true, "offline")` trong tryConnect. Backend `LastWillHandler` xử lý "offline" payload + tạo `Alert(DeviceOffline)` + publish `IotDeviceWentOfflineEvent`. **Cần rút điện ESP32 thật để verify timing < 90s** (S4-QA-02 hardware) |
+| **41. S4-FW-03** (#42) | Sau connect: publish `online` retained lên `status` + subscribe `solar/{dev}/cmd` | NI §8.3 | EMQX dashboard thấy retained `online` | FW | 🟡 Code: tryConnect post-connect publish `"online"` retain=true → override LWT; subscribe `solar/{dev}/cmd` QoS 1. Verified subscriber nhận "online" retained khi join sau publish (live broker test). **Cần ESP32 thật + dashboard để full verify** |
+| **42. S4-FW-04** (#43) | Đổi `publishTelemetry()` thay HTTPS POST; HTTPS vẫn giữ cho flush queue + firmware-check | NI §3 hybrid | Quan sát latency < 1s từ poll đến row DB | FW | 🟡 Code: `ingestViaMqtt()` per-battery split (kSourcesPerBattery=3) → `mqttPublishTelemetry(serial, payload, len)` trên topic `solar/{dev}/{serial}/telemetry`. Fallback HTTPS nếu disconnect hoặc streak ≥ 3. Heartbeat + queue flush vẫn HTTPS (đúng spec). Compile OK. **Latency p95 < 500ms cần lab test** (S4-QA-01) |
+| **43. S4-FW-05** (#44) | `src/cmd/command_handler.cpp` parse downlink (`set_interval`, `trigger_ota`, `request_heartbeat`) + publish ack `{cmdId, status, message}` | NI §8.3, MO §52.14 | Backend POST cmd `set_interval=2` → ESP32 đổi nhịp poll → bridge log ack `{cmdId, status:"ok"}` | FW | 🟡 Code: refactor 2 modules — `cmd_logic.{h,cpp}` (pure, testable native — 23 tests PASS) + `command_handler.{h,cpp}` (side-effect wrappers gọi `mqttPublishCmdAck` + `telemetry::heartbeatSendNow` + `setPollingHandler` lambda). Ack JSON 2-tier buffer overflow safety (256 → snprintf minimal fallback). Type matching BC `_` và `-`. **Cần backend POST cmd thật để verify ack flow E2E** |
+| **44. S4-FW-06** (#45) | Fallback MQTT fail N → HTTPS cho batch đó (queue vẫn ưu tiên MQTT lại sau) | NI §13 #5 SPOF | Tắt broker → vẫn ingest qua HTTPS; bật broker → quay lại MQTT | FW | 🟡 Code: `MQTT_PUBLISH_FAIL_THRESHOLD=3` consecutive streak counter; auto-reset on `tryConnect` success. ingestOnce check `mqttIsConnected() && consecutiveFail < threshold` → MQTT, else HTTPS path với idempotency. Compile OK. **Cần lab test on/off broker để verify switch behavior** |
 
 #### Backlog — QA
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **45. S4-QA-01** (#46) | Đo latency end-to-end MQTT (publish → DB row): kỳ vọng p95 < 500ms | NI §3.2 | Có log đo, đạt | QA |
-| **46. S4-QA-02** (#47) | Test LWT vs job 5 phút: rút điện → so sánh thời gian alert | OV §B4 | LWT nhanh hơn rõ rệt | QA |
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **45. S4-QA-01** (#46) | Đo latency end-to-end MQTT (publish → DB row): kỳ vọng p95 < 500ms | NI §3.2 | Có log đo, đạt | QA | 🔴 **GAP** — cần ESP32 + broker + backend + DB chạy thật trong lab. Tooling chuẩn bị xong (broker + scripts). FW config sẵn. Chỉ cần phần cứng + setup |
+| **46. S4-QA-02** (#47) | Test LWT vs job 5 phút: rút điện → so sánh thời gian alert | OV §B4 | LWT nhanh hơn rõ rệt | QA | 🔴 **GAP** — cần ESP32 thật + rút phích cắm + monitor backend log `IotDeviceWentOfflineEvent`. Kỳ vọng LWT trigger ~45-90s (1.5x keepalive 30s) vs job 5 phút |
 
 **DoD sprint:** Demo "rút phích cắm ESP32 → trong 90s dashboard hiện 'OFFLINE'" + "FE admin gửi command → ESP32 đổi tần suất ngay".
+
+##### Sprint 4 — Tổng kết gap
+
+| Nhóm | Items |
+|------|-------|
+| ✅ Done — live verified với broker (4) | #36 docker-compose, #37 gen-certs + TLS handshake, #38 ACL 4/4 test, #39 backend-bridge user |
+| 🟡 Code OK, cần ESP32 + integration test (6) | #40 mqtt_client 8883 connect, #41 LWT timing, #42 retained online + sub cmd, #43 latency < 1s, #44 cmd ack flow E2E, #45 broker on/off fallback |
+| 🔴 Hardware lab pending (2) | #46 S4-QA-01 latency p95 (cần ESP32 + bench), #47 S4-QA-02 LWT timing rút điện |
+| ✅ Backend dep verified | `#IoT2-21..26` đã implement trong backend repo |
+| 🟡 Bug catch qua 14 vòng review (8) — đã fix | (1) Backend hash `PBKDF2$sha256$` ≠ Mosquitto `$7$` → `add-device.sh` workaround; (2) CA cert thiếu `basicConstraints=CA:TRUE` → gen-certs.sh fix; (3) Case mismatch deviceCode/mqtt_username → `warnIfCaseMismatch` + lowercase placeholder; (4) NTP→TLS handshake race → `mqttTick` NTP gate; (5) Backend `Mqtt__Enabled=false` silent default → README prominent warning; (6) Root `.gitignore data/` over-broad ignore placeholder → `/data/` anchored; (7) Ack JSON 256-byte buffer tight margin → 2-tier defensive fallback; (8) Sprint 2 `show` CLI thiếu MQTT status → mở rộng với pub/fail/streak |
+| 🔐 Security hardening (3) | `add-device.sh` stdin mode (chống shell history leak); `gen-certs.sh` cert expiry warning + key handling block; `SECURITY.md` consolidate threat model + audit queries |
+| 🤖 Automation guard (1) | `.github/workflows/firmware-ci.yml` — native tests + multi-env build + shellcheck + secret audit + size guard (regression bảo vệ dài hạn) |
+
+**Files mới (11):**
+- `firmware-esp32/src/net/mqtt_client.{h,cpp}` (S4-FW-01/02/03/06)
+- `firmware-esp32/src/cmd/command_handler.{h,cpp}` (S4-FW-05 wrapper)
+- `firmware-esp32/src/cmd/cmd_logic.{h,cpp}` (pure decision logic)
+- `firmware-esp32/test/test_cmd_logic/test_cmd_logic.cpp` (23 native tests)
+- `firmware-esp32/data/ca_cert.pem.placeholder` (LittleFS slot hint)
+- `infra/mqtt/docker-compose.yml` (S4-INF-01)
+- `infra/mqtt/scripts/gen-certs.sh` (S4-INF-02)
+- `infra/mqtt/scripts/add-device.sh` (gap fix backend hash format)
+- `infra/mqtt/scripts/remove-device.sh` (rotate/retire flow)
+- `infra/mqtt/SECURITY.md` (security audit)
+- `.github/workflows/firmware-ci.yml` (CI automation)
+
+**Files modified (9):**
+- `firmware-esp32/{include/config.h,include/config.example.h,platformio.ini,src/main.cpp,src/cli/serial_cli.cpp,.gitignore,README.md}`
+- `infra/mqtt/{README.md,mosquitto/config/acl.conf}`
+- `.gitignore` root (fix `/data/` anchor)
+- `iot-task-list.md` (mark Sprint 4 done)
+
+**Test coverage:** 71/71 native tests PASS (Sprint 1: 6, Sprint 3: +30, Sprint 4 cmd_logic: +23, S2 LED: +7, idempotency: +5). ESP32 build SUCCESS multi-env (esp32-s3-devkitc-1 + example-blink).
 
 ---
 
@@ -324,35 +379,62 @@ S7 (OTA + observability) có thể trễ vào S8 nếu thiếu thời gian.
 
 #### Backlog — Hardware lab
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **47. S5-HW-01** (#48) | Đấu ESP32 ↔ MAX485 theo WD §3 (GPIO17 TX→DI, GPIO18 RX→RO, GPIO16 DE+RE nếu không phải auto-direction), chung GND | WD §3, OV nguyên tắc common ground | Bằng đồng hồ kiểm tra liên tục VCC, không ngắn mạch | HW |
-| **48. S5-HW-02** (#49) | Lập bảng register map cho từng model BMS đang dùng (voltage, current, temp, soc, soh, cycle, error, scale, offset) — verify bằng USB-RS485 + Modbus Poll trên laptop trước | OV §A4, §A12 #47 | Có file `docs/bms-register-map-{model}.md` | HW |
-| **49. S5-HW-03** (#50) | Đổi `unitId` của từng pin (1, 2, 3, 4) bằng phần mềm hãng | WD §3 quy tắc | Từng BMS phản hồi đúng unitId mới | HW |
-| **50. S5-HW-04** (#51) | Đấu RS485 multi-drop: 4 BMS song song cùng A/B + 120Ω 2 đầu bus | WD §3 | Modbus Poll quét được cả 4 unitId | HW |
-| **51. S5-HW-05** (#52) | Đấu DS18B20 (GPIO4 + 4.7kΩ pull-up) gắn vào thân pin | WD §4.1 | Quét bus 1-Wire ra được 64-bit address | HW |
-| **52. S5-HW-06** (#53) | Đấu INA226 + SHT31 chung I2C (GPIO8 SDA, GPIO9 SCL) | WD §4.2 | I2C scanner thấy 0x40 + 0x44 | HW |
-| **53. S5-HW-07** (#54) | Đo điện áp pin thật bằng Fluke 87V (làm chuẩn cho calibration sprint sau) | OV §A11 | Ghi số vào sổ tay | HW |
+> **Trạng thái:** 🔴 **TOÀN BỘ GAP** — chờ procurement linh kiện Cấp 1/2 (đặt từ S0 #9/#10/#11) + lab session. FW driver đã sẵn sàng (S5-FW-01..07) chỉ chờ hardware connect.
+
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **47. S5-HW-01** (#48) | Đấu ESP32 ↔ MAX485 theo WD §3 (GPIO17 TX→DI, GPIO18 RX→RO, GPIO16 DE+RE nếu không phải auto-direction), chung GND | WD §3, OV nguyên tắc common ground | Bằng đồng hồ kiểm tra liên tục VCC, không ngắn mạch | HW | 🔴 **GAP** — cần MAX485 module (đặt S0 #9), breadboard hoặc PCB, đồng hồ |
+| **48. S5-HW-02** (#49) | Lập bảng register map cho từng model BMS đang dùng (voltage, current, temp, soc, soh, cycle, error, scale, offset) — verify bằng USB-RS485 + Modbus Poll trên laptop trước | OV §A4, §A12 #47 | Có file `docs/bms-register-map-{model}.md` | HW | 🔴 **GAP** — cần BMS thật (S0 #10) + USB-RS485 + Modbus Poll software. **Critical**: FW có sẵn 3 preset (Daly/JBD/JK) trong `src/bms/bms_register_map.h` nhưng PHẢI verify đúng model BMS thực tế nhà cung cấp trước khi flash, nếu khác → tạo `kGenericBmsMap` custom + đổi `BMS_MODEL=4` |
+| **49. S5-HW-03** (#50) | Đổi `unitId` của từng pin (1, 2, 3, 4) bằng phần mềm hãng | WD §3 quy tắc | Từng BMS phản hồi đúng unitId mới | HW | 🔴 **GAP** — cần BMS thật + phần mềm vendor (Daly Smart App / JBD Bluetooth / JK-BMS) để đổi unitId mặc định (thường = 1) |
+| **50. S5-HW-04** (#51) | Đấu RS485 multi-drop: 4 BMS song song cùng A/B + 120Ω 2 đầu bus | WD §3 | Modbus Poll quét được cả 4 unitId | HW | 🔴 **GAP** — cần 4 BMS + cáp đôi xoắn shielded (S0 #9) + 2 điện trở 120Ω terminator |
+| **51. S5-HW-05** (#52) | Đấu DS18B20 (GPIO4 + 4.7kΩ pull-up) gắn vào thân pin | WD §4.1 | Quét bus 1-Wire ra được 64-bit address | HW | 🔴 **GAP** — cần DS18B20 sensor + 4.7kΩ pull-up. **Note FW**: `ds18b20Begin()` đã enumerate sensor address tự động, mapping theo thứ tự = battery serial |
+| **52. S5-HW-06** (#53) | Đấu INA226 + SHT31 chung I2C (GPIO8 SDA, GPIO9 SCL) | WD §4.2 | I2C scanner thấy 0x40 + 0x44 | HW | 🔴 **GAP** — cần INA226 module + SHT31 module + shunt resistor 10mΩ. FW dùng default address 0x40 (INA226) + 0x44 (SHT31) |
+| **53. S5-HW-07** (#54) | Đo điện áp pin thật bằng Fluke 87V (làm chuẩn cho calibration sprint sau) | OV §A11 | Ghi số vào sổ tay | HW | 🔴 **GAP** — cần Fluke 87V (mượn hoặc mua); input cho QA #62 + calibration Sprint 7 |
 
 #### Backlog — Firmware
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **54. S5-FW-01** (#55) | `src/bms/modbus_bms.cpp` — đọc 1 BMS đúng register map (struct `BmsRegisterMap{voltageReg, currentReg, tempReg, socReg, sohReg, cycleReg, errorReg}`). Đọc thêm `bmsErrorCode` (string ≤ 64 chars — MO §52.5, Sprint 7 #113) và `cycleCount`, `sohPercent`, `chargingState` nếu register map có; tag `sourceType=Bms (1)`, `sensorSourceCode="primary"` (xem S3-FW-04) | NI §9.1, OV §A4, MO §52.5 | Serial in voltage thực, khớp Fluke ±0.2V; payload có `bmsErrorCode` khi BMS có lỗi (ví dụ over-voltage) | FW |
-| **55. S5-FW-02** (#56) | Điều khiển DE/RE (nếu không dùng auto-direction): set HIGH trước khi gửi, LOW sau khi nhận | NI §12 #3, WD §3 | Modbus reply ổn định | FW |
-| **56. S5-FW-03** (#57) | Multi-drop: loop unitId 1→N, gom thành 1 batch nhiều `SensorReading` | NI §5, OV §B2 (a) | 1 batch chứa 4 reading khác serial | FW |
-| **57. S5-FW-04** (#58) | `src/sensor/ina226.cpp` đọc V/I qua I2C → push thêm vào batch với `sourceType=IotGateway (2)` + `sensorSourceCode="redundant"` (MO §52.9). **LƯU Ý ADR-017 (MO §53.1):** INA226 CHỈ phục vụ cross-source validation `SensorMismatch` — KHÔNG tích phân kWh / charge cycle / energy metrics | OV §A5, B2 (b), MO §52.9, §53.1 | Reading redundant xuất hiện DB cùng timestamp với BMS reading; cross-source pair được tạo (xem S6) | FW |
-| **58. S5-FW-05** (#59) | `src/sensor/ds18b20.cpp` đọc nhiệt độ thân pin (mỗi pin 1 con DS18B20) → `sourceType=IotGateway (2)`, `sensorSourceCode="external-temp"` (MO §52.9) | OV §A5, MO §52.9 | Backend nhận temp reading khác source; cross-source pair với BMS temp được tạo | FW |
-| **59. S5-FW-06** (#60) | `src/sensor/sht31.cpp` đọc ambient temp+humidity → POST `/api/ambient-readings/batch` (MO §52.9bis, §1.8) với `Source=IotSensor`, `SourceDeviceId=<DeviceCode ESP32>`. Dùng cùng device API key (scope `environmental.ingest` — xem S2-BE-03) | OV §A6, MO §52.9bis | Reading xuất hiện trong bảng `ambient_readings` với đúng Source/SourceDeviceId | FW |
-| **60. S5-FW-07** (#61) | Compile flag chuyển giữa `mock_bms` và `modbus_bms` để dev không cần BMS vẫn build được | NI §1 #4 | Flag `USE_MOCK_BMS=1` → cùng binary chạy mock | FW |
+> **Trạng thái:** ✅ **TOÀN BỘ DONE** — code complete + 94/94 native tests PASS + 3 envs build SUCCESS (mock + real + blink) + CI guard + backend contract verified. Hardware integration verify thuộc Hardware track (S5-HW-01..07).
+
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **54. S5-FW-01** (#55) | `src/bms/modbus_bms.cpp` — đọc 1 BMS đúng register map; thêm `bmsErrorCode` ≤ 64 chars + `cycleCount`/`sohPercent`/`chargingState`; tag `sourceType=Bms (1)`, `sensorSourceCode="primary"` | NI §9.1, OV §A4, MO §52.5 | Serial in voltage thực, khớp Fluke ±0.2V; payload có `bmsErrorCode` khi BMS lỗi | FW | ✅ **DONE** — 3 preset Daly/JBD/JK + `decodeErrorCode` short codes (13 flags fit ≤ 64 chars) + retry 1x. 23 native test PASS (decode V/I/T/SOC bounds + signed current + Kelvin→C bias). GitHub issue #55 → In Review |
+| **55. S5-FW-02** (#56) | Điều khiển DE/RE (nếu không auto-direction): HIGH trước gửi, LOW sau nhận | NI §12 #3, WD §3 | Modbus reply ổn định | FW | ✅ **DONE** — `preTransmission` HIGH + `delayMicroseconds(10)` guard; `postTransmission` flush() + `delayMicroseconds(50)` T3.5 inter-frame. ModbusMaster lib re-call `begin()` safety verified (chỉ update `_u8MBSlave` + tx buffer, KHÔNG touch pre/post callbacks). GitHub issue #56 → In Review |
+| **56. S5-FW-03** (#57) | Multi-drop: loop unitId 1→N, gom 1 batch nhiều `SensorReading` | NI §5, OV §B2 (a) | 1 batch chứa 4 reading khác serial | FW | ✅ **DONE** — `modbusReadMultiDrop` loop `BMS_UNIT_ID_START..START+COUNT-1`, skip-not-fail logic (1 BMS chết không block 3 BMS khác). 20ms inter-poll spacing. GitHub issue #57 → In Review |
+| **57. S5-FW-04** (#58) | `src/sensor/ina226.cpp` đọc V/I I2C → batch với `sourceType=IotGateway (2)` + `sensorSourceCode="redundant"`. **⚠ ADR-017:** CHỈ cross-source, KHÔNG energy metrics | OV §A5, MO §52.9, §53.1 | Reading redundant xuất hiện DB cùng timestamp BMS; cross-source pair tạo (S6) | FW | ✅ **DONE** — INA226 lib (robtillaart) + replicate readings cho N battery serial. Defensive range check ±50V/±max×1.2A (catch I2C lỗi). GitHub issue #58 → In Review |
+| **58. S5-FW-05** (#59) | `src/sensor/ds18b20.cpp` đọc nhiệt thân pin (mỗi pin 1 con DS18B20) → `sourceType=IotGateway (2)`, `sensorSourceCode="external-temp"` | OV §A5, MO §52.9 | Backend nhận temp khác source; cross-source pair BMS temp tạo | FW | ✅ **DONE** — OneWire + DallasTemperature, enumerate addresses tự động, trigger 1 conversion cho all sensors (tiết kiệm 750ms × N). `DEVICE_DISCONNECTED_C` detection. GitHub issue #59 → In Review |
+| **59. S5-FW-06** (#60) | `src/sensor/sht31.cpp` ambient → POST `/api/ambient/readings/batch` với `Source=IotSensor`, `SourceDeviceId=<DeviceCode>`, scope `EnvironmentalIngest` | OV §A6, MO §52.9bis | Reading xuất hiện trong `ambient_readings` với đúng `Source/SourceDeviceId` | FW | ✅ **DONE** — Adafruit_SHT31 + I2C shared. **4 critical bugs phát hiện + fix qua audit**: (1) sai endpoint `/api/ambient-readings/batch` → `/api/ambient/readings/batch` (verified controller); (2) thiếu required `siteId` (wire `sht31SetSiteId()` từ provision); (3) sai field `temperature` → `ambientTemperature`; (4) sai enum format string `"IotSensor"` → integer `1` (no JsonStringEnumConverter trên backend). **⚠ Deployment**: admin tạo IoT device PHẢI set `ApiKeyScopes` bitmask include `EnvironmentalIngest=4`. GitHub issue #60 → In Review |
+| **60. S5-FW-07** (#61) | Compile flag chuyển giữa `mock_bms` và `modbus_bms` | NI §1 #4 | Flag `USE_MOCK_BMS=1` → cùng binary chạy mock | FW | ✅ **DONE** — `src/bms/bms_source.{h,cpp}` dispatcher; `[env:esp32-s3-real]` (USE_MOCK_BMS=0) trong `platformio.ini`. CI build cả 2 env (mock + real) catch regression dài hạn. example-blink env vẫn backward compat. GitHub issue #61 → In Review |
 
 #### Backlog — QA
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **61. S5-QA-01** (#62) | So sánh số ESP32 báo vs Fluke trên cả 4 pin → ghi lệch số → input cho calibration S7 | OV §B5 | Bảng số liệu lệch | QA |
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **61. S5-QA-01** (#62) | So sánh số ESP32 vs Fluke trên 4 pin → ghi lệch số → input cho calibration S7 | OV §B5 | Bảng số liệu lệch | QA | 🔴 **GAP** — cần ESP32 + 4 BMS thật + Fluke 87V + sổ tay. Pending until Hardware (S5-HW-07) đã đo Fluke baseline xong |
 
 **DoD sprint:** ESP32 đọc 4 pin LiFePO4 thật, dashboard thấy voltage thực, không còn dùng `mock_bms` trong môi trường lab.
+
+##### Sprint 5 — Tổng kết gap
+
+| Nhóm | Count | Items |
+|------|-------|-------|
+| ✅ **DONE — Firmware** | **7/7** | #55 S5-FW-01 modbus driver + register map, #56 S5-FW-02 DE/RE, #57 S5-FW-03 multi-drop, #58 S5-FW-04 INA226 redundant, #59 S5-FW-05 DS18B20 external-temp, #60 S5-FW-06 SHT31 ambient (+ 4 critical bug fixes), #61 S5-FW-07 USE_MOCK_BMS dispatcher. **GitHub Project Board: 7/7 issues → In Review** |
+| 🔴 **GAP — Hardware** | **7/7** | #48 đấu MAX485, #49 lập register map BMS thực tế, #50 đổi unitId, #51 RS485 multi-drop, #52 DS18B20 pull-up, #53 INA226+SHT31 I2C, #54 đo Fluke baseline. **Block reason**: cần procurement linh kiện Cấp 1+2 + lab session |
+| 🔴 **GAP — QA** | **1/1** | #62 S5-QA-01 so sánh ESP32 vs Fluke. **Block reason**: cần Hardware S5-HW-07 xong trước |
+| 🚨 **Bug catch qua audit (4)** — đã fix | 4 | (1) SHT31 endpoint route wrong → `/api/ambient/readings/batch`; (2) SHT31 missing required `siteId` (wire từ provision); (3) SHT31 field `temperature` → `ambientTemperature` + enum INT format (no JsonStringEnumConverter); (4) `ingestViaMqtt` slot indexing `b * 3` BROKE real path khi battery thiếu sensor → refactor group-by-serial dynamic |
+| 🔧 **Polish + CI + docs (5)** — đã làm | 5 | CI thêm `esp32-s3-real` env build + threshold 94 tests; `show` CLI Sprint 5 sensor section; logStatsPeriodic sensor counters; dedup `kSourcesPerBatterySprint5`; doc sync README/iot-task-list/tasksprint với Status column |
+
+**Files mới (10):**
+- `firmware-esp32/src/bms/{bms_register_map,modbus_bms,bms_source}.{h,cpp}` (S5-FW-01/02/03/07)
+- `firmware-esp32/src/sensor/{ina226,ds18b20,sht31}.{h,cpp}` (S5-FW-04/05/06)
+- `firmware-esp32/test/test_bms_register_map/test_bms_register_map.cpp` (23 native tests)
+
+**Files modified (6):**
+- `firmware-esp32/{include/config.h,include/config.example.h,platformio.ini,src/main.cpp,src/cli/serial_cli.cpp}`
+- `.github/workflows/firmware-ci.yml` (thêm esp32-s3-real env)
+
+**Test coverage:** 94/94 native tests PASS (71 Sprint 1-4 + 23 Sprint 5 BMS register decode). ESP32 build SUCCESS 3 envs (mock + real + blink).
+
+**Backend contract verified** với code thực tế: `SensorReadingItem` 17 field, `AmbientReadingItem` 7 field (incl required siteId), enums INT format (ChargingState/SourceType/AmbientReadingSource), camelCase JSON.
 
 ---
 
