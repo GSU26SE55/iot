@@ -49,7 +49,13 @@
 // `DEVICE_CODE` — định danh device (placeholder theo tasksprint S1-FW-01).
 // Admin tạo trên web rồi đưa cho team firmware (Sprint 2 S2-BE-03).
 // Sprint 1: hard-code; Sprint 2 chuyển sang đọc từ NVS (S2-FW-01).
-#define DEVICE_CODE         "GW-ESP32-MVP-001"
+//
+// ⚠ Sprint 4 CONVENTION: DEVICE_CODE PHẢI LOWERCASE.
+//   Backend IotApiKeyService → mqtt_username = lowercase(DeviceCode).
+//   ACL `solar/%u/...` match username (lowercase). Nếu DeviceCode mixed-case,
+//   backend publish `solar/{DEV_RAW}/cmd` KHÔNG match ACL → mất downlink.
+//   FW boot warn nếu mismatch (mqtt_client::warnIfCaseMismatch).
+#define DEVICE_CODE         "gw-esp32-mvp-001"
 
 // `API_KEY` — API key plaintext (placeholder theo tasksprint S1-FW-01).
 // Format: "iotk_<base62>" (≥ 32 chars). Backend lưu hash.
@@ -76,6 +82,107 @@
 // Bỏ comment 1 dòng dưới để bật scenario (Sprint 6 alert detection test).
 // #define MOCK_SCENARIO_OVERHEAT
 // #define MOCK_SCENARIO_LOW_SOC
+
+// ============== Sprint 4 — MQTT broker (S4-FW-01..06) =================
+//
+// MQTT-over-TLS: broker info + per-device credential (cấp lúc admin create
+// device, backend trả 1 lần qua IotDeviceCreatedDto.MqttUsername/MqttPassword).
+//
+// Username/Password placeholder — Sprint 4 sẽ chuyển sang đọc từ NVS qua
+// `set mqttuser <username>` + `set mqttpass <password>` (Serial CLI), tương
+// tự apiKey/deviceCode (S2-FW-01). Hot-reload, không cần reflash.
+
+#define MQTT_BROKER_HOST    "10.0.0.10"      // hostname / IP broker (dev: laptop chạy mosquitto)
+#define MQTT_BROKER_PORT    8883             // 1883 plain | 8883 TLS
+#define MQTT_USE_TLS        1                // 0 = plain (chỉ dev), 1 = TLS (production)
+#define MQTT_USERNAME       "gw-esp32-mvp-001"   // backend lower-case deviceCode
+#define MQTT_PASSWORD       "mqtt_DEV_PLACEHOLDER_REPLACE_ME"   // backend trả 1 lần khi create device
+
+// Topic prefix theo overall.md §52.14 (backend MqttTopicMap). Đổi prefix
+// chỉ khi backend đồng bộ — bridge subscribe wildcard `solar/#`.
+#define MQTT_TOPIC_PREFIX   "solar"
+
+// Client ID — gửi cho broker. Đảm bảo unique trong cluster.
+#define MQTT_CLIENT_ID      DEVICE_CODE
+
+// Keep-alive (sec) — broker ngắt session sau ~1.5x giá trị này nếu không
+// nhận PING. Đặt 30s cho ESP32 (battery friendly + LWT trigger nhanh).
+#define MQTT_KEEPALIVE_SEC  30
+
+// CA cert path trên LittleFS (S4-FW-01): upload qua `pio run -t uploadfs`
+// sau khi `infra/mqtt/scripts/gen-certs.sh` xong. File text PEM.
+#define MQTT_CA_CERT_PATH   "/ca_cert.pem"
+
+// Max packet size — buffer PubSubClient phải đủ chứa payload telemetry.
+// Sprint 3 production payload ~384 bytes/reading × 3 sources/pin = 1152 + envelope ≈ 1.5KB.
+// Đặt 4096 để dư cho command payload hoặc burst response.
+#define MQTT_MAX_PACKET_SIZE 4096
+
+// Reconnect / backoff broker: nếu connect fail, thử lại sau N ms.
+// Sprint 3 net::Backoff dùng cho HTTP — MQTT có cơ chế riêng đơn giản hơn.
+#define MQTT_RECONNECT_INTERVAL_MS 5000UL
+
+// Fallback HTTPS — nếu MQTT publish telemetry FAIL liên tiếp `N` lần,
+// chuyển transport sang HTTPS cho batch đó (S4-FW-06). Queue luôn ưu tiên
+// MQTT trở lại sau khi reconnect.
+#define MQTT_PUBLISH_FAIL_THRESHOLD 3
+
+// ============== Sprint 5 — Hardware Integration (S5-FW-01..07) =================
+
+// Compile-time switch giữa mock_bms (Sprint 1) và modbus_bms (Sprint 5 real BMS).
+// USE_MOCK_BMS=1 → ESP32 generate mock readings (dev workflow không cần BMS).
+// USE_MOCK_BMS=0 → ESP32 đọc BMS thật qua RS485 + INA226 + DS18B20 + SHT31.
+// Override qua build_flag `-DUSE_MOCK_BMS=0` trong env riêng (`pio run -e esp32-s3-real`).
+#ifndef USE_MOCK_BMS
+  #define USE_MOCK_BMS  1
+#endif
+
+// --------- RS485 Modbus BMS pins (WD §3) ---------
+// ESP32-S3 DevKitC-1 → MAX485 XY-017:
+//   GPIO17 (TX2/U2TXD) → DI (driver input)
+//   GPIO18 (RX2/U2RXD) → RO (receiver output)
+//   GPIO16             → DE+RE tied (direction control). Set -1 nếu module auto-direction.
+//   GND chung
+#define BMS_RS485_TX_PIN     17
+#define BMS_RS485_RX_PIN     18
+#define BMS_RS485_DE_PIN     16        // -1 = auto-direction module (KHÔNG cần GPIO)
+#define BMS_RS485_BAUD       9600UL    // Daly/JBD default; JK-BMS có thể 19200
+
+// BMS model — chọn register map preset (xem src/bms/bms_register_map.h).
+//   1 = Daly Smart BMS (custom protocol — Sprint 5 chỉ stub, dùng JBD nếu thật sự cần)
+//   2 = JBD BMS (LiFePO4 phổ biến — register map chuẩn Modbus RTU)
+//   3 = JK-BMS (multi-cell — register map khác JBD)
+//   4 = Generic (user tự định nghĩa register trong bms_register_map_custom.h)
+#define BMS_MODEL            2          // JBD default
+
+// Multi-drop config (S5-FW-03): loop unitId từ kBmsUnitIdStart đến +Count-1.
+// Phải khớp số pin trong config/battery_mapping.h.
+#define BMS_UNIT_ID_START    1
+#define BMS_UNIT_ID_COUNT    4
+#define BMS_POLL_TIMEOUT_MS  500UL      // Modbus request timeout per battery
+#define BMS_POLL_RETRY       1          // retry 1 lần nếu timeout
+
+// --------- I2C bus shared INA226 + SHT31 (WD §4.2) ---------
+#define I2C_SDA_PIN          8
+#define I2C_SCL_PIN          9
+#define I2C_FREQUENCY_HZ     100000UL   // 100kHz standard (an toàn cable dài)
+
+// INA226 (S5-FW-04) — current + voltage redundant
+#define INA226_I2C_ADDRESS   0x40       // default; AD0=GND, AD1=GND
+#define INA226_SHUNT_OHM     0.1f       // shunt resistor value (10mΩ phổ biến với pin nhỏ)
+#define INA226_MAX_CURRENT_A 20.0f      // expected max current — calc current LSB
+
+// --------- DS18B20 1-Wire (WD §4.1) ---------
+#define DS18B20_GPIO         4
+#define DS18B20_RESOLUTION   12         // bits: 9-12, càng cao càng chính xác + chậm
+#define DS18B20_MAX_SENSORS  8          // max sensors trên bus (≥ BMS_UNIT_ID_COUNT)
+
+// --------- SHT31 ambient (WD §4.2 cùng I2C) ---------
+#define SHT31_I2C_ADDRESS    0x44       // default; ADDR=GND
+#define SHT31_POLL_INTERVAL_MS 60000UL  // 1 phút (ambient không cần realtime)
+// Backend route thật: `[Route("api/ambient")] + [HttpPost("readings/batch")]`
+// → full path `/api/ambient/readings/batch` (verified với AmbientReadingsController.cs).
+#define BACKEND_AMBIENT_PATH "/api/ambient/readings/batch"
 
 // --------- Firmware metadata ---------
 #ifndef FW_VERSION

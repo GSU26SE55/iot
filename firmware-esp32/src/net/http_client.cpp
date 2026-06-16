@@ -56,7 +56,8 @@ size_t copyResponseFull(HTTPClient& http,
 PostResult postJsonInternal(const char* path,
                             const char* body, size_t bodyLen,
                             char* respBuf, size_t respBufLen,
-                            size_t* outRespBytes) {
+                            size_t* outRespBytes,
+                            const char* idempotencyKey = nullptr) {
   PostResult res{};
   res.httpCode      = -1;
   res.requestBytes  = bodyLen;
@@ -88,6 +89,11 @@ PostResult postJsonInternal(const char* path,
   http.addHeader("X-Api-Key",      identity::apiKey());
   http.addHeader("X-Device-Code",  identity::deviceCode());
   http.addHeader("Accept",         "application/json");
+
+  // Sprint 3 (S3-FW-02): Idempotency-Key cho ingest endpoint — dedup backend §IoT2-16.
+  if (idempotencyKey && idempotencyKey[0] != '\0') {
+    http.addHeader("Idempotency-Key", idempotencyKey);
+  }
 
   int code = http.POST(reinterpret_cast<uint8_t*>(const_cast<char*>(body)),
                        bodyLen);
@@ -137,6 +143,12 @@ PostResult httpPostJsonRecv(const char* path,
                             char* respBuf, size_t respBufLen,
                             size_t* outRespBytes) {
   return postJsonInternal(path, body, bodyLen, respBuf, respBufLen, outRespBytes);
+}
+
+PostResult httpPostJsonWithIdempotency(const char* path,
+                                       const char* body, size_t bodyLen,
+                                       const char* idempotencyKey) {
+  return postJsonInternal(path, body, bodyLen, nullptr, 0, nullptr, idempotencyKey);
 }
 
 }  // namespace net
