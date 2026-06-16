@@ -11,3 +11,9 @@ include/config.h
 *.bin
 *.elf
 *.map
+
+# Sprint 4 — CA cert thật trên LittleFS (user copy từ infra/mqtt/mosquitto/certs/ca.crt).
+# Cert chứa public key — không phải secret, nhưng project-specific nên không commit.
+data/ca_cert.pem
+# Giữ placeholder để hint setup steps.
+!data/ca_cert.pem.placeholder

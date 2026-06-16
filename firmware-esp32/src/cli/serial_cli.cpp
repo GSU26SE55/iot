@@ -6,8 +6,15 @@
 #include <Arduino.h>
 #include <string.h>
 
+#if __has_include("config.h")
+  #include "config.h"
+#else
+  #include "config.example.h"
+#endif
+
 #include "config/device_identity.h"
 #include "config/nvs_store.h"
+#include "net/mqtt_client.h"
 
 namespace cli {
 
@@ -18,14 +25,14 @@ char     s_buf[kMaxLineLen];
 size_t   s_idx = 0;
 
 void printHelp() {
-  Serial.println("---- Sprint 2 Serial CLI ----");
-  Serial.println("  show              — in trạng thái identity");
+  Serial.println("---- Serial CLI (Sprint 2 + Sprint 4) ----");
+  Serial.println("  show              — in trạng thái identity + MQTT (Sprint 4)");
   Serial.println("  set apikey <K>    — đổi API key (lưu NVS, hot reload)");
   Serial.println("  set devcode <C>   — đổi device code");
   Serial.println("  clear             — erase NVS, fallback compile-time");
   Serial.println("  reboot            — ESP.restart()");
   Serial.println("  help              — in help này");
-  Serial.println("-----------------------------");
+  Serial.println("------------------------------------------");
 }
 
 const char* skipSpace(const char* p) {
@@ -52,6 +59,18 @@ void executeCommand(const char* line) {
     Serial.printf("  free heap  = %u bytes\n", static_cast<unsigned>(ESP.getFreeHeap()));
     Serial.printf("  NVS free   = %u entries\n",
                   static_cast<unsigned>(storage::nvsFreeEntries()));
+    // Sprint 4 — MQTT broker status.
+    Serial.println("  -- MQTT (Sprint 4) --");
+    Serial.printf("  connected  = %s\n", net::mqttIsConnected() ? "YES" : "NO");
+    Serial.printf("  reconnects = %lu\n",
+                  static_cast<unsigned long>(net::mqttConnectCount()));
+    Serial.printf("  pub ok     = %lu\n",
+                  static_cast<unsigned long>(net::mqttPublishOkCount()));
+    Serial.printf("  pub fail   = %lu\n",
+                  static_cast<unsigned long>(net::mqttPublishFailCount()));
+    Serial.printf("  fail streak= %lu (threshold %d → fallback HTTPS)\n",
+                  static_cast<unsigned long>(net::mqttConsecutiveFailCount()),
+                  static_cast<int>(MQTT_PUBLISH_FAIL_THRESHOLD));
     return;
   }
   if (strcmp(line, "clear") == 0) {

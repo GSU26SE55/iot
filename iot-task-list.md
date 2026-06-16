@@ -107,23 +107,33 @@
 
 ## Sprint 4 — MQTT Broker & Bridge (12 task)
 
-### Infra (4)
-- [ ] **S4-INF-01** — `infra/mqtt/docker-compose.yml` chạy EMQX (hoặc Mosquitto); expose 1883 + 8883
-- [ ] **S4-INF-02** — Sinh CA tự ký + server cert (`infra/mqtt/scripts/gen-certs.sh`)
-- [ ] **S4-INF-03** — `acl.conf` per-device: pub `solar/+/{dev}/telemetry`, `heartbeat`, `status`, `cmd/ack`; sub `solar/{dev}/cmd`
-- [ ] **S4-INF-04** — Bridge backend user `backend-bridge`: sub `solar/#` + pub `solar/+/cmd`
+### Infra (4) — ✅ Done (live verified with broker)
+- [x] **S4-INF-01** — `infra/mqtt/docker-compose.yml` chạy Mosquitto (chọn thay EMQX); expose 1883 + 8883
+- [x] **S4-INF-02** — Sinh CA tự ký + server cert (`infra/mqtt/scripts/gen-certs.sh`) — fix CA `basicConstraints=CA:TRUE`
+- [x] **S4-INF-03** — `acl.conf` per-device: pub `solar/%u/+/telemetry`, `heartbeat`, `status`, `cmd/ack`; sub `solar/%u/cmd` — verified 4 ACL tests PASS
+- [x] **S4-INF-04** — Bridge backend user `backend-bridge`: `topic readwrite solar/#` + `topic read $SYS/#`
 
-### Firmware (6)
-- [ ] **S4-FW-01** — `src/net/mqtt_client.cpp` dùng `PubSubClient` + `WiFiClientSecure` (CA cert LittleFS)
-- [ ] **S4-FW-02** — LWT: `willTopic=solar/{dev}/status`, payload `offline`, QoS 1, retain
-- [ ] **S4-FW-03** — Sau connect: publish `online` retained + subscribe `solar/{dev}/cmd`
-- [ ] **S4-FW-04** — Đổi `publishTelemetry()` thay HTTPS POST (HTTPS giữ cho flush queue + firmware-check)
-- [ ] **S4-FW-05** — `src/cmd/command_handler.cpp` parse downlink (`set_interval`, `trigger_ota`, `request_heartbeat`) + publish ack lên `solar/{dev}/cmd/ack`
-- [ ] **S4-FW-06** — Fallback MQTT fail N lần → switch sang HTTPS cho batch đó
+### Firmware (6) — ✅ Done (compile + native tests; ESP32 hardware verify pending)
+- [x] **S4-FW-01** — `src/net/mqtt_client.{h,cpp}` PubSubClient + WiFiClientSecure + CA cert LittleFS `/ca_cert.pem` + NTP gate
+- [x] **S4-FW-02** — LWT: `willTopic=solar/{dev}/status`, payload `offline`, QoS 1, retain=true
+- [x] **S4-FW-03** — Sau connect: publish `online` retained + subscribe `solar/{dev}/cmd` QoS 1
+- [x] **S4-FW-04** — `ingestViaMqtt()` per-battery publish — HTTPS giữ cho queue flush + firmware-check (S7)
+- [x] **S4-FW-05** — `src/cmd/command_handler.{h,cpp}` + `cmd_logic.{h,cpp}` (pure) parse downlink + publish ack `{cmdId,status,error}` — 23 native tests
+- [x] **S4-FW-06** — Fallback MQTT consecutive fail ≥ `MQTT_PUBLISH_FAIL_THRESHOLD=3` → HTTPS; auto-reset on reconnect
 
-### QA (2)
+### QA (2) — ⏳ Pending lab (cần ESP32 + broker + backend + admin dashboard)
 - [ ] **S4-QA-01** — Đo latency end-to-end MQTT (publish → DB row), kỳ vọng p95 < 500ms
 - [ ] **S4-QA-02** — Test LWT vs job 5 phút: rút điện → so sánh thời gian alert
+
+### Out-of-spec gaps đã fix qua audit (11 vòng review)
+- ⚠ Backend hash `PBKDF2$sha256$...` ≠ Mosquitto `$7$` → `scripts/add-device.sh` re-hash plaintext + SIGHUP
+- ⚠ Backend `Mqtt:Enabled=false` default → silent fail; documented prominent trong README
+- ⚠ Case mismatch deviceCode/mqtt_username phá downlink → `warnIfCaseMismatch()` + lowercase placeholder convention
+- ⚠ TLS handshake trước NTP sync → `mqtt_client::mqttTick()` NTP gate
+- ⚠ Root `.gitignore` `data/` over-broad ignore `firmware-esp32/data/ca_cert.pem.placeholder` → đổi `/data/` anchored
+- 🔐 Security guidance consolidate trong `infra/mqtt/SECURITY.md` (file classification + threat model + audit queries)
+- 🔐 `add-device.sh` thêm stdin mode (tránh password vào shell history)
+- 🔐 `gen-certs.sh` cert expiry awareness + key handling warnings
 
 ---
 

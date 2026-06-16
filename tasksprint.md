@@ -291,40 +291,83 @@ S7 (OTA + observability) có thể trễ vào S8 nếu thiếu thời gian.
 
 #### Backlog — Infra
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **35. S4-INF-01** (#36) | `infra/mqtt/docker-compose.yml` chạy EMQX (khuyến nghị, dashboard sẵn) hoặc Mosquitto; expose 1883 (dev) + 8883 (TLS) | NI §8.2 | `docker compose up` → EMQX dashboard `localhost:18083` truy cập | INF |
-| **36. S4-INF-02** (#37) | Sinh CA tự ký + server cert cho broker (script `infra/mqtt/scripts/gen-certs.sh`) | NI §8.2 | TLS handshake test bằng `mosquitto_pub -p 8883 --cafile ca.crt` pass | INF |
-| **37. S4-INF-03** (#38) | `acl.conf` (MO §52.14 topic design): rule `username = deviceCode` — publish chỉ `solar/+/{deviceCode}/telemetry`, `solar/{deviceCode}/heartbeat`, `solar/{deviceCode}/status`, `solar/{deviceCode}/cmd/ack`; subscribe chỉ `solar/{deviceCode}/cmd` | NI §8.1, §11 C, MO §52.14 | Test ACL: device A không pub được topic của device B; device pub được ack lên `cmd/ack` của chính nó | INF |
-| **38. S4-INF-04** (#39) | Bridge service backend dùng user riêng `backend-bridge` có quyền subscribe `solar/#` + publish `solar/+/cmd` | NI §8.4 | Login bằng `backend-bridge` qua MQTT client → list topic OK | INF |
+> **Trạng thái:** ✅ Done (live verified với Mosquitto broker thật) · 🟡 Code OK / cần verify hardware · 🔴 Gap chưa làm
 
-#### Backend (BE) — chuyển sang Sprint IoT-2
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **35. S4-INF-01** (#36) | `infra/mqtt/docker-compose.yml` chạy EMQX (khuyến nghị, dashboard sẵn) hoặc Mosquitto; expose 1883 (dev) + 8883 (TLS) | NI §8.2 | `docker compose up` → EMQX dashboard `localhost:18083` truy cập | INF | ✅ Standalone compose `infra/mqtt/docker-compose.yml` + dev compose có Mosquitto (chọn thay EMQX → khớp backend `Mqtt__Host=mosquitto`, mất dashboard 18083). Healthcheck TCP probe. Live verify: broker start OK port 1883 + 8883 |
+| **36. S4-INF-02** (#37) | Sinh CA tự ký + server cert cho broker (script `infra/mqtt/scripts/gen-certs.sh`) | NI §8.2 | TLS handshake test bằng `mosquitto_pub -p 8883 --cafile ca.crt` pass | INF | ✅ Script + CA `basicConstraints=CA:TRUE` extension (fix bug round 2 — thiếu extension gây "invalid CA certificate"). SAN: localhost/mosquitto/iot-mosquitto/127.0.0.1 + optional `MQTT_SAN_IP`. Live verify: TLS 8883 handshake PASS + openssl verify chain OK |
+| **37. S4-INF-03** (#38) | `acl.conf` (MO §52.14): publish `solar/+/{deviceCode}/telemetry`, `solar/{deviceCode}/heartbeat`, `solar/{deviceCode}/status`, `solar/{deviceCode}/cmd/ack`; subscribe `solar/{deviceCode}/cmd` | NI §8.1, §11 C, MO §52.14 | Test ACL: device A không pub được topic của device B; device pub được ack lên `cmd/ack` của chính nó | INF | ✅ Rewrite từ schema cũ `telemetry/%u` → `solar/%u/+/telemetry` khớp backend `MqttTopicMap`. Pattern per-device: write telemetry/heartbeat/status/cmd-ack, read cmd. Live verify 4/4 ACL tests: device A pub topic B → DENIED; device pub own cmd-ack → ALLOWED; device pub own cmd (read-only) → DENIED; retained "online" subscribed |
+| **38. S4-INF-04** (#39) | Bridge service backend dùng user `backend-bridge`: subscribe `solar/#` + publish `solar/+/cmd` | NI §8.4 | Login bằng `backend-bridge` qua MQTT client → list topic OK | INF | ✅ `user backend-bridge` + `topic readwrite solar/#` + `topic read $SYS/#`. Bootstrap.sh sinh PBKDF2 hash. Live verify: backend-bridge auth + subscribe `solar/#` nhận tất cả message từ device test |
 
-> 6 task BE của Sprint 4 (MQTTnet NuGet, `MqttBridgeBackgroundService` subscribe 4 topic gồm `cmd/ack`, `TelemetryMessageHandler` reuse ingest command, `LastWillHandler` mark Offline, `IMqttBridgePublisher` downlink, MQTT credential per-device + ACL) **đã chuyển sang `backend/overall.md` Sprint IoT-2 Phase D** (`#IoT2-21..26`).
+#### Backend (BE) — đã verify implement trong `backend/` repo
+
+> 6 task BE Sprint 4 (`#IoT2-21..26` Phase D) **đã implement xong** trong `capstone/backend/services/BatteryService/src/BatteryService.Infrastructure/Mqtt/`:
+> - ✅ `#IoT2-21` MQTTnet 4.3.6.1152 + ManagedClient NuGet
+> - ✅ `#IoT2-22` `MqttBridgeBackgroundService.cs` subscribe 4 wildcard topic (`solar/+/+/telemetry`, `solar/+/heartbeat`, `solar/+/status`, `solar/+/cmd/ack`)
+> - ✅ `#IoT2-23` `DispatchTelemetryAsync` reuse `BatchIngestSensorReadingsCommand`
+> - ✅ `#IoT2-24` `DispatchStatusAsync` (LWT) mark device Offline + publish `IotDeviceWentOfflineEvent` qua outbox
+> - ✅ `#IoT2-25` `IMqttBridgePublisher.PublishCommandAsync` + endpoint `POST /api/admin/iot-devices/{id}/command`
+> - ✅ `#IoT2-26` MQTT credential per-device (PBKDF2 hash `PBKDF2$sha256$10000$...`, plaintext return 1 lần qua `IotDeviceCreatedDto.MqttPassword`)
 >
-> IoT track (INF/FW) cần verify với Thắng trước S4 start: broker đã chấp nhận credential per-device + ACL đúng 5 topic, bridge service subscribe đúng wildcard.
->
-> **Lưu ý:** Phase D có thể trượt sau capstone — HTTPS đủ cho demo. INF/FW vẫn dựng được broker (S4-INF) để pilot LWT, nhưng bridge backend có thể delay.
+> ⚠ **Gap deployment thực tế (catch qua audit):**
+> 1. Backend `Mqtt__Enabled` default `false` trong cả 3 appsettings → bridge silent skip nếu deployer quên enable. Documented prominent trong `infra/mqtt/README.md` "⚠ BẮT BUỘC — Enable backend MQTT bridge"
+> 2. Backend hash format `PBKDF2$sha256$...` (SHA256) KHÔNG khớp Mosquitto `$7$<iter>$...` (SHA512) → không paste thẳng vào passwd file → workaround `scripts/add-device.sh` re-hash plaintext qua `mosquitto_passwd`
 
 #### Backlog — Firmware
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **39. S4-FW-01** (#40) | `src/net/mqtt_client.cpp` dùng `PubSubClient` + `WiFiClientSecure` (CA cert nạp qua LittleFS `data/ca_cert.pem`) | NI §8.3 | Connect 8883 thành công | FW |
-| **40. S4-FW-02** (#41) | LWT: `willTopic=solar/{dev}/status`, payload `offline`, QoS 1, retain | NI §8.3 | Rút điện → broker push `offline` ngay; backend mark Offline | FW |
-| **41. S4-FW-03** (#42) | Sau connect: publish `online` retained lên `status` + subscribe `solar/{dev}/cmd` | NI §8.3 | EMQX dashboard thấy retained `online` | FW |
-| **42. S4-FW-04** (#43) | Đổi `publishTelemetry()` thay cho HTTPS POST; HTTPS vẫn giữ cho flush queue + firmware-check | NI §3 hybrid | Quan sát latency < 1s từ poll đến row DB | FW |
-| **43. S4-FW-05** (#44) | `src/cmd/command_handler.cpp`: parse JSON downlink `solar/{dev}/cmd`, hỗ trợ `set_interval` (đổi pollingInterval), `trigger_ota` (S7), `request_heartbeat`. Sau khi exec xong **publish ack** lên `solar/{dev}/cmd/ack` (MO §52.14 topic 5) với `{cmdId, status:"ok"|"failed", message}` để backend trace | NI §8.3 onCommand, MO §52.14 | Backend POST cmd `set_interval=2` → ESP32 đổi nhịp poll → bridge log ack `{cmdId, status:"ok"}` | FW |
-| **44. S4-FW-06** (#45) | Fallback: nếu MQTT publish fail N lần → switch sang HTTPS cho batch đó (queue vẫn giữ ưu tiên MQTT lại sau) | NI §13 #5 SPOF | Tắt broker → vẫn ingest qua HTTPS; bật broker → quay lại MQTT | FW |
+> **Trạng thái:** ✅ Done · 🟡 Code OK / cần verify ESP32 hardware · 🔴 Gap chưa làm
+
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **39. S4-FW-01** (#40) | `src/net/mqtt_client.{h,cpp}` dùng `PubSubClient` + `WiFiClientSecure` (CA cert nạp qua LittleFS `data/ca_cert.pem`) | NI §8.3 | Connect 8883 thành công | FW | 🟡 Code: 319 dòng + `setBufferSize(MQTT_MAX_PACKET_SIZE=4096)` + `setKeepAlive(30)` + PEM marker validation + 9-state human-readable error map. NTP gate `timeIsSynced()` trước TLS connect (fix round 6 — tránh cert "not yet valid" loop spam khi ESP32 boot time=1970). `warnIfCaseMismatch()` chống deviceCode mixed-case (round 3). Compile OK; **cần ESP32 thật + LittleFS ca_cert.pem để verify 8883 connect** |
+| **40. S4-FW-02** (#41) | LWT: `willTopic=solar/{dev}/status`, payload `offline`, QoS 1, retain | NI §8.3 | Rút điện → broker push `offline` ngay; backend mark Offline | FW | 🟡 Code: `s_mqtt.connect(..., willTopic, 1, true, "offline")` trong tryConnect. Backend `LastWillHandler` xử lý "offline" payload + tạo `Alert(DeviceOffline)` + publish `IotDeviceWentOfflineEvent`. **Cần rút điện ESP32 thật để verify timing < 90s** (S4-QA-02 hardware) |
+| **41. S4-FW-03** (#42) | Sau connect: publish `online` retained lên `status` + subscribe `solar/{dev}/cmd` | NI §8.3 | EMQX dashboard thấy retained `online` | FW | 🟡 Code: tryConnect post-connect publish `"online"` retain=true → override LWT; subscribe `solar/{dev}/cmd` QoS 1. Verified subscriber nhận "online" retained khi join sau publish (live broker test). **Cần ESP32 thật + dashboard để full verify** |
+| **42. S4-FW-04** (#43) | Đổi `publishTelemetry()` thay HTTPS POST; HTTPS vẫn giữ cho flush queue + firmware-check | NI §3 hybrid | Quan sát latency < 1s từ poll đến row DB | FW | 🟡 Code: `ingestViaMqtt()` per-battery split (kSourcesPerBattery=3) → `mqttPublishTelemetry(serial, payload, len)` trên topic `solar/{dev}/{serial}/telemetry`. Fallback HTTPS nếu disconnect hoặc streak ≥ 3. Heartbeat + queue flush vẫn HTTPS (đúng spec). Compile OK. **Latency p95 < 500ms cần lab test** (S4-QA-01) |
+| **43. S4-FW-05** (#44) | `src/cmd/command_handler.cpp` parse downlink (`set_interval`, `trigger_ota`, `request_heartbeat`) + publish ack `{cmdId, status, message}` | NI §8.3, MO §52.14 | Backend POST cmd `set_interval=2` → ESP32 đổi nhịp poll → bridge log ack `{cmdId, status:"ok"}` | FW | 🟡 Code: refactor 2 modules — `cmd_logic.{h,cpp}` (pure, testable native — 23 tests PASS) + `command_handler.{h,cpp}` (side-effect wrappers gọi `mqttPublishCmdAck` + `telemetry::heartbeatSendNow` + `setPollingHandler` lambda). Ack JSON 2-tier buffer overflow safety (256 → snprintf minimal fallback). Type matching BC `_` và `-`. **Cần backend POST cmd thật để verify ack flow E2E** |
+| **44. S4-FW-06** (#45) | Fallback MQTT fail N → HTTPS cho batch đó (queue vẫn ưu tiên MQTT lại sau) | NI §13 #5 SPOF | Tắt broker → vẫn ingest qua HTTPS; bật broker → quay lại MQTT | FW | 🟡 Code: `MQTT_PUBLISH_FAIL_THRESHOLD=3` consecutive streak counter; auto-reset on `tryConnect` success. ingestOnce check `mqttIsConnected() && consecutiveFail < threshold` → MQTT, else HTTPS path với idempotency. Compile OK. **Cần lab test on/off broker để verify switch behavior** |
 
 #### Backlog — QA
 
-| ID | Task | Spec | Acceptance | Track |
-|----|------|------|-----------|-------|
-| **45. S4-QA-01** (#46) | Đo latency end-to-end MQTT (publish → DB row): kỳ vọng p95 < 500ms | NI §3.2 | Có log đo, đạt | QA |
-| **46. S4-QA-02** (#47) | Test LWT vs job 5 phút: rút điện → so sánh thời gian alert | OV §B4 | LWT nhanh hơn rõ rệt | QA |
+| ID | Task | Spec | Acceptance | Track | Status |
+|----|------|------|-----------|-------|--------|
+| **45. S4-QA-01** (#46) | Đo latency end-to-end MQTT (publish → DB row): kỳ vọng p95 < 500ms | NI §3.2 | Có log đo, đạt | QA | 🔴 **GAP** — cần ESP32 + broker + backend + DB chạy thật trong lab. Tooling chuẩn bị xong (broker + scripts). FW config sẵn. Chỉ cần phần cứng + setup |
+| **46. S4-QA-02** (#47) | Test LWT vs job 5 phút: rút điện → so sánh thời gian alert | OV §B4 | LWT nhanh hơn rõ rệt | QA | 🔴 **GAP** — cần ESP32 thật + rút phích cắm + monitor backend log `IotDeviceWentOfflineEvent`. Kỳ vọng LWT trigger ~45-90s (1.5x keepalive 30s) vs job 5 phút |
 
 **DoD sprint:** Demo "rút phích cắm ESP32 → trong 90s dashboard hiện 'OFFLINE'" + "FE admin gửi command → ESP32 đổi tần suất ngay".
+
+##### Sprint 4 — Tổng kết gap
+
+| Nhóm | Items |
+|------|-------|
+| ✅ Done — live verified với broker (4) | #36 docker-compose, #37 gen-certs + TLS handshake, #38 ACL 4/4 test, #39 backend-bridge user |
+| 🟡 Code OK, cần ESP32 + integration test (6) | #40 mqtt_client 8883 connect, #41 LWT timing, #42 retained online + sub cmd, #43 latency < 1s, #44 cmd ack flow E2E, #45 broker on/off fallback |
+| 🔴 Hardware lab pending (2) | #46 S4-QA-01 latency p95 (cần ESP32 + bench), #47 S4-QA-02 LWT timing rút điện |
+| ✅ Backend dep verified | `#IoT2-21..26` đã implement trong backend repo |
+| 🟡 Bug catch qua 14 vòng review (8) — đã fix | (1) Backend hash `PBKDF2$sha256$` ≠ Mosquitto `$7$` → `add-device.sh` workaround; (2) CA cert thiếu `basicConstraints=CA:TRUE` → gen-certs.sh fix; (3) Case mismatch deviceCode/mqtt_username → `warnIfCaseMismatch` + lowercase placeholder; (4) NTP→TLS handshake race → `mqttTick` NTP gate; (5) Backend `Mqtt__Enabled=false` silent default → README prominent warning; (6) Root `.gitignore data/` over-broad ignore placeholder → `/data/` anchored; (7) Ack JSON 256-byte buffer tight margin → 2-tier defensive fallback; (8) Sprint 2 `show` CLI thiếu MQTT status → mở rộng với pub/fail/streak |
+| 🔐 Security hardening (3) | `add-device.sh` stdin mode (chống shell history leak); `gen-certs.sh` cert expiry warning + key handling block; `SECURITY.md` consolidate threat model + audit queries |
+| 🤖 Automation guard (1) | `.github/workflows/firmware-ci.yml` — native tests + multi-env build + shellcheck + secret audit + size guard (regression bảo vệ dài hạn) |
+
+**Files mới (11):**
+- `firmware-esp32/src/net/mqtt_client.{h,cpp}` (S4-FW-01/02/03/06)
+- `firmware-esp32/src/cmd/command_handler.{h,cpp}` (S4-FW-05 wrapper)
+- `firmware-esp32/src/cmd/cmd_logic.{h,cpp}` (pure decision logic)
+- `firmware-esp32/test/test_cmd_logic/test_cmd_logic.cpp` (23 native tests)
+- `firmware-esp32/data/ca_cert.pem.placeholder` (LittleFS slot hint)
+- `infra/mqtt/docker-compose.yml` (S4-INF-01)
+- `infra/mqtt/scripts/gen-certs.sh` (S4-INF-02)
+- `infra/mqtt/scripts/add-device.sh` (gap fix backend hash format)
+- `infra/mqtt/scripts/remove-device.sh` (rotate/retire flow)
+- `infra/mqtt/SECURITY.md` (security audit)
+- `.github/workflows/firmware-ci.yml` (CI automation)
+
+**Files modified (9):**
+- `firmware-esp32/{include/config.h,include/config.example.h,platformio.ini,src/main.cpp,src/cli/serial_cli.cpp,.gitignore,README.md}`
+- `infra/mqtt/{README.md,mosquitto/config/acl.conf}`
+- `.gitignore` root (fix `/data/` anchor)
+- `iot-task-list.md` (mark Sprint 4 done)
+
+**Test coverage:** 71/71 native tests PASS (Sprint 1: 6, Sprint 3: +30, Sprint 4 cmd_logic: +23, S2 LED: +7, idempotency: +5). ESP32 build SUCCESS multi-env (esp32-s3-devkitc-1 + example-blink).
 
 ---
 

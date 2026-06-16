@@ -1,0 +1,149 @@
+# ==================================================================
+# Sprint 4 — Firmware CI
+#
+# Tự động chạy mỗi PR + push lên dev/main:
+#   1. Native unit tests (71 cases — Sprint 1-4 logic)
+#   2. ESP32-S3 main env build
+#   3. Sprint 0 example-blink env build (backward compat guard)
+#
+# Trigger:
+#   - PR target dev / main (block merge nếu fail)
+#   - Push trực tiếp lên dev / main
+#
+# Phạm vi: chỉ chạy khi có thay đổi liên quan firmware/CI để tránh waste CI quota.
+# ==================================================================
+name: firmware-ci
+
+on:
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - 'firmware-esp32/**'
+      - '.github/workflows/firmware-ci.yml'
+  push:
+    branches: [dev, main]
+    paths:
+      - 'firmware-esp32/**'
+      - '.github/workflows/firmware-ci.yml'
+  workflow_dispatch:    # cho phép manual trigger từ GitHub UI
+
+jobs:
+  native-tests:
+    name: Native unit tests (Sprint 1-4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python (PlatformIO requires Python)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            firmware-esp32/.pio
+          key: ${{ runner.os }}-pio-native-${{ hashFiles('firmware-esp32/platformio.ini') }}
+          restore-keys: ${{ runner.os }}-pio-native-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Run native test suite
+        working-directory: firmware-esp32
+        run: pio test -e native --verbose
+
+      - name: Verify minimum test count (regression guard)
+        working-directory: firmware-esp32
+        run: |
+          # Sprint 1: 6, Sprint 3: +30, Sprint 4: +23, S2 LED: +7 → tổng ≥ 71.
+          # Nếu drop tests xuống, fail CI để tránh ai đó comment out test.
+          OUTPUT=$(pio test -e native 2>&1 | tail -5)
+          COUNT=$(echo "$OUTPUT" | grep -oE '[0-9]+ test cases:' | grep -oE '^[0-9]+' || echo "0")
+          echo "Test cases run: $COUNT"
+          if [ "$COUNT" -lt 71 ]; then
+            echo "::error::Test count dropped below 71 (Sprint 4 baseline). Was $COUNT."
+            exit 1
+          fi
+
+  esp32-build:
+    name: ESP32-S3 firmware build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+            firmware-esp32/.pio
+          key: ${{ runner.os }}-pio-esp32-${{ hashFiles('firmware-esp32/platformio.ini') }}
+          restore-keys: ${{ runner.os }}-pio-esp32-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Stub config.h (CI dùng config.example.h placeholders)
+        working-directory: firmware-esp32
+        run: cp include/config.example.h include/config.h
+
+      - name: Build esp32-s3-devkitc-1 (main env)
+        working-directory: firmware-esp32
+        run: pio run -e esp32-s3-devkitc-1
+
+      - name: Build example-blink (Sprint 0 backward compat)
+        working-directory: firmware-esp32
+        run: pio run -e example-blink
+
+      - name: Report binary size
+        working-directory: firmware-esp32
+        run: |
+          ls -la .pio/build/esp32-s3-devkitc-1/firmware.bin
+          # Sprint 4 baseline: ~975KB. Fail nếu > 2MB (suspicious bloat).
+          SIZE=$(stat -c%s .pio/build/esp32-s3-devkitc-1/firmware.bin)
+          echo "Firmware size: $SIZE bytes"
+          if [ "$SIZE" -gt 2097152 ]; then
+            echo "::error::Firmware > 2MB — investigate bloat."
+            exit 1
+          fi
+
+  infra-lint:
+    name: Infra config sanity (Sprint 4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose syntax
+        run: |
+          docker compose -f infra/docker-compose.dev.yml config > /dev/null
+          docker compose -f infra/mqtt/docker-compose.yml config > /dev/null
+
+      - name: Shellcheck Sprint 4 scripts
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y shellcheck
+          shellcheck infra/mqtt/scripts/gen-certs.sh
+          shellcheck infra/mqtt/scripts/add-device.sh
+          shellcheck infra/mqtt/scripts/remove-device.sh
+          shellcheck infra/mqtt/mosquitto/bootstrap.sh
+
+      - name: Verify secrets NOT committed
+        run: |
+          # Audit query từ infra/mqtt/SECURITY.md §6
+          if git log --all --diff-filter=A --name-only | grep -E '\.key$|^infra/mqtt/mosquitto/passwd$' | head -1; then
+            echo "::error::Private key hoặc passwd file đã từng commit vào git history!"
+            exit 1
+          fi
+          echo "✓ Không có key/passwd nào commit vào git"

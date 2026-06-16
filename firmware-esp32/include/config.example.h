@@ -49,7 +49,13 @@
 // `DEVICE_CODE` — định danh device (placeholder theo tasksprint S1-FW-01).
 // Admin tạo trên web rồi đưa cho team firmware (Sprint 2 S2-BE-03).
 // Sprint 1: hard-code; Sprint 2 chuyển sang đọc từ NVS (S2-FW-01).
-#define DEVICE_CODE         "GW-ESP32-MVP-001"
+//
+// ⚠ Sprint 4 CONVENTION: DEVICE_CODE PHẢI LOWERCASE.
+//   Backend IotApiKeyService → mqtt_username = lowercase(DeviceCode).
+//   ACL `solar/%u/...` match username (lowercase). Nếu DeviceCode mixed-case,
+//   backend publish `solar/{DEV_RAW}/cmd` KHÔNG match ACL → mất downlink.
+//   FW boot warn nếu mismatch (mqtt_client::warnIfCaseMismatch).
+#define DEVICE_CODE         "gw-esp32-mvp-001"
 
 // `API_KEY` — API key plaintext (placeholder theo tasksprint S1-FW-01).
 // Format: "iotk_<base62>" (≥ 32 chars). Backend lưu hash.
@@ -76,6 +82,50 @@
 // Bỏ comment 1 dòng dưới để bật scenario (Sprint 6 alert detection test).
 // #define MOCK_SCENARIO_OVERHEAT
 // #define MOCK_SCENARIO_LOW_SOC
+
+// ============== Sprint 4 — MQTT broker (S4-FW-01..06) =================
+//
+// MQTT-over-TLS: broker info + per-device credential (cấp lúc admin create
+// device, backend trả 1 lần qua IotDeviceCreatedDto.MqttUsername/MqttPassword).
+//
+// Username/Password placeholder — Sprint 4 sẽ chuyển sang đọc từ NVS qua
+// `set mqttuser <username>` + `set mqttpass <password>` (Serial CLI), tương
+// tự apiKey/deviceCode (S2-FW-01). Hot-reload, không cần reflash.
+
+#define MQTT_BROKER_HOST    "10.0.0.10"      // hostname / IP broker (dev: laptop chạy mosquitto)
+#define MQTT_BROKER_PORT    8883             // 1883 plain | 8883 TLS
+#define MQTT_USE_TLS        1                // 0 = plain (chỉ dev), 1 = TLS (production)
+#define MQTT_USERNAME       "gw-esp32-mvp-001"   // backend lower-case deviceCode
+#define MQTT_PASSWORD       "mqtt_DEV_PLACEHOLDER_REPLACE_ME"   // backend trả 1 lần khi create device
+
+// Topic prefix theo overall.md §52.14 (backend MqttTopicMap). Đổi prefix
+// chỉ khi backend đồng bộ — bridge subscribe wildcard `solar/#`.
+#define MQTT_TOPIC_PREFIX   "solar"
+
+// Client ID — gửi cho broker. Đảm bảo unique trong cluster.
+#define MQTT_CLIENT_ID      DEVICE_CODE
+
+// Keep-alive (sec) — broker ngắt session sau ~1.5x giá trị này nếu không
+// nhận PING. Đặt 30s cho ESP32 (battery friendly + LWT trigger nhanh).
+#define MQTT_KEEPALIVE_SEC  30
+
+// CA cert path trên LittleFS (S4-FW-01): upload qua `pio run -t uploadfs`
+// sau khi `infra/mqtt/scripts/gen-certs.sh` xong. File text PEM.
+#define MQTT_CA_CERT_PATH   "/ca_cert.pem"
+
+// Max packet size — buffer PubSubClient phải đủ chứa payload telemetry.
+// Sprint 3 production payload ~384 bytes/reading × 3 sources/pin = 1152 + envelope ≈ 1.5KB.
+// Đặt 4096 để dư cho command payload hoặc burst response.
+#define MQTT_MAX_PACKET_SIZE 4096
+
+// Reconnect / backoff broker: nếu connect fail, thử lại sau N ms.
+// Sprint 3 net::Backoff dùng cho HTTP — MQTT có cơ chế riêng đơn giản hơn.
+#define MQTT_RECONNECT_INTERVAL_MS 5000UL
+
+// Fallback HTTPS — nếu MQTT publish telemetry FAIL liên tiếp `N` lần,
+// chuyển transport sang HTTPS cho batch đó (S4-FW-06). Queue luôn ưu tiên
+// MQTT trở lại sau khi reconnect.
+#define MQTT_PUBLISH_FAIL_THRESHOLD 3
 
 // --------- Firmware metadata ---------
 #ifndef FW_VERSION

@@ -1,22 +1,24 @@
 // ==================================================================
-// Sprint 1 + Sprint 2 + Sprint 3 — Main loop
+// Sprint 1 + Sprint 2 + Sprint 3 + Sprint 4 — Main loop
 //
 // Pipeline:
 //   setup():
 //     WiFi → NTP → NVS → identity → provisioned config → HTTP → mock → heartbeat
-//     → CLI → queue (Sprint 3) → LED (Sprint 3)
+//     → CLI → queue (Sprint 3) → LED (Sprint 3) → MQTT + cmd handler (Sprint 4)
 //
 //   loop():
-//     wifi tick → ntp tick → cli tick
+//     wifi tick → ntp tick → cli tick → mqtt tick (Sprint 4)
 //     → ensureProvisioned
-//     → ingest (pollingInterval): mock multi-source → build production payload
-//                                 → POST với Idempotency-Key
-//                                 → fail → enqueue + backoff
-//     → flushQueue: nếu queue có data + backoff allows → flush oldest
-//     → heartbeat (heartbeatInterval)
+//     → ingest (pollingInterval):
+//          mock multi-source → split per battery
+//          MQTT primary: publish solar/{dev}/{serial}/telemetry per battery
+//          fallback HTTPS nếu MQTT disconnect / consecutive fail ≥ threshold (S4-FW-06)
+//          fail → enqueue + backoff (luôn HTTPS cho flush queue)
+//     → flushQueue: HTTPS-only (idempotency dedup ở backend)
+//     → heartbeat (heartbeatInterval) — HTTPS POST
 //     → updateStatusLed
 //
-// Tham chiếu: tasksprint S1-FW-* + S2-FW-* + S3-FW-*
+// Tham chiếu: tasksprint S1-FW-* + S2-FW-* + S3-FW-* + S4-FW-*
 // ==================================================================
 #include <Arduino.h>
 
@@ -28,11 +30,13 @@
 #endif
 
 #include "cli/serial_cli.h"
+#include "cmd/command_handler.h"
 #include "config/device_identity.h"
 #include "config/nvs_store.h"
 #include "net/wifi_manager.h"
 #include "net/time_sync.h"
 #include "net/http_client.h"
+#include "net/mqtt_client.h"
 #include "net/backoff.h"
 #include "bms/mock_bms.h"
 #include "core/payload.h"
@@ -145,14 +149,91 @@ PostOutcome postBatch(const char* body, size_t bodyLen, const char* idempKey) {
   return transient ? PostOutcome::TransientFailure : PostOutcome::PermanentFailure;
 }
 
+// Sprint 4 (S4-FW-04): MQTT-first publish path.
+// Sinh readings 1 lần, split theo battery, publish từng pin trên topic riêng.
+// Trả true nếu TẤT CẢ pin publish OK; false nếu ANY pin fail → caller fallback HTTPS.
+//
+// Note: build payload PER battery (count=kSourcesPerBattery) — KHÔNG dùng full
+// batch buffer s_payloadBuf để tránh xung đột với HTTPS path khi fallback.
+bool ingestViaMqtt(const char* isoTs, size_t batteryCount,
+                   const core::SensorReading* readings, size_t readingCount) {
+  if (!net::mqttIsConnected()) return false;
+
+  // Buffer per-battery: 3 source × ~384B = ~1.2KB + envelope.
+  static char perPinBuf[core::payloadBufferSize(bms::kSourcesPerBattery) + 128];
+
+  size_t allOk = 0;
+  for (size_t b = 0; b < batteryCount; ++b) {
+    const size_t off = b * bms::kSourcesPerBattery;
+    if (off + bms::kSourcesPerBattery > readingCount) break;
+
+    const core::SensorReading* pinReadings = &readings[off];
+    const char* serial = pinReadings[0].serial;
+    if (!serial || serial[0] == '\0') {
+      Serial.printf("[mqtt-ingest] battery #%u thiếu serial — skip\n",
+                    static_cast<unsigned>(b));
+      continue;
+    }
+
+    size_t bodyLen = core::buildProductionBatchPayload(
+        pinReadings, bms::kSourcesPerBattery, isoTs, identity::deviceCode(),
+        perPinBuf, sizeof(perPinBuf));
+    if (bodyLen == 0) {
+      Serial.printf("[mqtt-ingest] battery #%u payload build FAIL\n",
+                    static_cast<unsigned>(b));
+      return false;
+    }
+
+    bool pubOk = net::mqttPublishTelemetry(serial, perPinBuf, bodyLen);
+    Serial.printf("[mqtt-ingest] pub %s (%u bytes) → %s\n",
+                  serial, static_cast<unsigned>(bodyLen),
+                  pubOk ? "OK" : "FAIL");
+    if (!pubOk) return false;
+    allOk++;
+  }
+  return allOk == batteryCount;
+}
+
 bool ingestOnce() {
   char ts[24];
   if (!net::isoNow(ts, sizeof(ts))) {
     Serial.println("[ingest] NTP not synced — skip");
     return false;
   }
-  size_t n = 0;
-  size_t bodyLen = buildBatchPayload(ts, &n);
+
+  // Sinh readings 1 lần (dùng chung cho cả MQTT + HTTPS fallback).
+  core::SensorReading readings[kMaxReadings];
+  const size_t nBat = MOCK_BATTERY_COUNT > bms::kMockMaxBatteries
+                      ? bms::kMockMaxBatteries
+                      : MOCK_BATTERY_COUNT;
+  const size_t n = bms::mockGenerateMultiSource(readings, nBat);
+  if (n == 0) return false;
+
+  // ---- Sprint 4 (S4-FW-04 + S4-FW-06): chọn transport ----
+  // Ưu tiên MQTT trừ khi: chưa connect / streak fail ≥ threshold.
+  // mqtt_client tự reset streak khi reconnect thành công.
+  bool tryMqtt = net::mqttIsConnected() &&
+                 (net::mqttConsecutiveFailCount() < MQTT_PUBLISH_FAIL_THRESHOLD);
+
+  if (tryMqtt) {
+    if (ingestViaMqtt(ts, nBat, readings, n)) {
+      s_backoff.reset();
+      Serial.printf("[ingest] MQTT posted %u readings across %u pin\n",
+                    static_cast<unsigned>(n), static_cast<unsigned>(nBat));
+      return true;
+    }
+    Serial.printf("[ingest] MQTT FAIL (streak=%lu) → fallback HTTPS\n",
+                  static_cast<unsigned long>(net::mqttConsecutiveFailCount()));
+  } else if (net::mqttConsecutiveFailCount() >= MQTT_PUBLISH_FAIL_THRESHOLD) {
+    Serial.printf("[ingest] skip MQTT (streak=%lu ≥ %u) → HTTPS\n",
+                  static_cast<unsigned long>(net::mqttConsecutiveFailCount()),
+                  static_cast<unsigned>(MQTT_PUBLISH_FAIL_THRESHOLD));
+  }
+
+  // ---- Fallback HTTPS path (giữ idempotency + queue logic Sprint 3) ----
+  size_t bodyLen = core::buildProductionBatchPayload(
+      readings, n, ts, identity::deviceCode(),
+      s_payloadBuf, sizeof(s_payloadBuf));
   if (bodyLen == 0) return false;
 
   // Sprint 3 (S3-FW-02): sinh Idempotency-Key UUIDv4 cho batch này.
@@ -164,7 +245,8 @@ bool ingestOnce() {
   PostOutcome outcome = postBatch(s_payloadBuf, bodyLen, s_idempBuf);
   if (outcome == PostOutcome::Success) {
     s_backoff.reset();
-    Serial.printf("[ingest] posted %u readings (multi-source)\n", static_cast<unsigned>(n));
+    Serial.printf("[ingest] HTTPS posted %u readings (multi-source)\n",
+                  static_cast<unsigned>(n));
     return true;
   }
 
@@ -175,7 +257,7 @@ bool ingestOnce() {
     return false;
   }
 
-  // Transient → enqueue + backoff để retry sau
+  // Transient → enqueue + backoff để retry sau (queue luôn flush qua HTTPS)
   uint32_t epoch = net::timeEpoch();
   if (epoch != 0 && queue::queueEnqueue(epoch, s_payloadBuf, bodyLen, s_idempBuf)) {
     s_queuedCount++;
@@ -247,6 +329,8 @@ void logStatsPeriodic() {
   s_lastStatsMs = now;
   Serial.printf("[stats] uptime=%lus ingest ok=%lu fail=%lu queued=%lu flushed=%lu / "
                 "hb ok=%lu fail=%lu / queue=%u backoff_attempt=%lu / "
+                "mqtt conn=%s cn=%lu pubok=%lu pubfail=%lu streak=%lu / "
+                "cmd rx=%lu ok=%lu fail=%lu unk=%lu / "
                 "heap=%u rssi=%ddBm wifi=%s prov=%s\n",
                 static_cast<unsigned long>(now / 1000),
                 static_cast<unsigned long>(s_okCount),
@@ -257,6 +341,15 @@ void logStatsPeriodic() {
                 static_cast<unsigned long>(telemetry::heartbeatFailCount()),
                 static_cast<unsigned>(queue::queueSize()),
                 static_cast<unsigned long>(s_backoff.attemptCount()),
+                net::mqttIsConnected() ? "UP" : "DOWN",
+                static_cast<unsigned long>(net::mqttConnectCount()),
+                static_cast<unsigned long>(net::mqttPublishOkCount()),
+                static_cast<unsigned long>(net::mqttPublishFailCount()),
+                static_cast<unsigned long>(net::mqttConsecutiveFailCount()),
+                static_cast<unsigned long>(cmd::cmdReceivedCount()),
+                static_cast<unsigned long>(cmd::cmdAckOkCount()),
+                static_cast<unsigned long>(cmd::cmdAckFailedCount()),
+                static_cast<unsigned long>(cmd::cmdUnknownTypeCount()),
                 static_cast<unsigned>(ESP.getFreeHeap()),
                 net::wifiRssi(),
                 net::wifiIsConnected() ? "UP" : "DOWN",
@@ -296,6 +389,22 @@ void setup() {
   // Sprint 3
   queue::queueBegin();
 
+  // Sprint 4 (S4-FW-01/02/03/05): MQTT broker client + downlink handler.
+  // mqttBegin() load CA cert từ LittleFS (queue đã mount LittleFS lúc queueBegin
+  // — share an toàn vì LittleFS API idempotent).
+  if (net::mqttBegin()) {
+    cmd::handlerBegin();
+    // S4-FW-05: wire polling setter — cmd `set_interval` cập nhật s_provCfg.
+    cmd::setPollingHandler([](uint32_t newMs) -> bool {
+      s_provCfg.pollingIntervalMs = newMs;
+      Serial.printf("[main] polling interval đã đổi runtime → %lums\n",
+                    static_cast<unsigned long>(newMs));
+      return true;
+    });
+  } else {
+    Serial.println("[setup] MQTT init FAIL — chạy HTTPS-only (S4-FW-06 fallback)");
+  }
+
   Serial.println("[setup] done — entering loop()");
 }
 
@@ -303,6 +412,8 @@ void loop() {
   net::wifiTick();
   net::timeSyncTick();
   cli::cliTick();
+  // Sprint 4: MQTT tick (reconnect + poll inbound cmd). Tự skip nếu wifi down.
+  net::mqttTick();
 
   ensureProvisioned();
 

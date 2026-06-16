@@ -1,13 +1,51 @@
 # firmware-esp32 — ESP32-S3 firmware
 
 Roadmap firmware:
-- **Sprint 0** — skeleton + 2 sketch demo (blink, NTP sync)
-- **Sprint 1** ← **HIỆN TẠI** — MVP Mock HTTPS ingest (mock BMS → HTTPS POST → backend)
-- Sprint 2 — provision + heartbeat (load API key từ NVS)
-- Sprint 3 — production contract + local queue + idempotency
-- Sprint 4 — MQTT-over-TLS
+- **Sprint 0** ✅ — skeleton + 2 sketch demo (blink, NTP sync)
+- **Sprint 1** ✅ — MVP Mock HTTPS ingest (mock BMS → HTTPS POST → backend)
+- **Sprint 2** ✅ — provision + heartbeat (load API key từ NVS)
+- **Sprint 3** ✅ — production contract + local queue + idempotency
+- **Sprint 4** ← **HIỆN TẠI** — MQTT-over-TLS + LWT + downlink command + HTTPS fallback
 - Sprint 5 — BMS thật qua RS485 + sensor phụ
 - Sprint 7 — OTA
+
+## Sprint 4 quick reference
+
+```
+MQTT publish (FW → backend):
+  solar/{deviceCode}/{batterySerial}/telemetry    retain false
+  solar/{deviceCode}/status                       retain true  (LWT + connect "online")
+  solar/{deviceCode}/cmd/ack                      retain false
+
+MQTT subscribe (backend → FW):
+  solar/{deviceCode}/cmd                          QoS 1
+```
+
+**Setup MQTT broker + cert (1 lần):**
+```bash
+cd ../infra/mqtt
+./mosquitto/bootstrap.sh                                    # tạo passwd backend-bridge
+./scripts/gen-certs.sh                                      # sinh CA + server cert
+./scripts/add-device.sh <username> <plaintext-password>     # plaintext từ IotDeviceCreatedDto
+
+cp mosquitto/certs/ca.crt ../../firmware-esp32/data/ca_cert.pem
+cd ../../firmware-esp32
+pio run -t uploadfs                                         # upload LittleFS chứa CA cert
+pio run -t upload                                           # flash firmware
+```
+
+**Config bắt buộc trong `include/config.h`:**
+- `DEVICE_CODE` — **PHẢI LOWERCASE** (xem `warnIfCaseMismatch` trong `src/net/mqtt_client.cpp`)
+- `MQTT_BROKER_HOST/PORT/USE_TLS`
+- `MQTT_USERNAME = lowercase(DEVICE_CODE)`, `MQTT_PASSWORD = plaintext` từ admin (trả 1 lần)
+
+**Behavior matrix:**
+
+| State | Telemetry transport | Heartbeat | Queue flush |
+|-------|--------------------|-----------|-------------|
+| MQTT connected, streak < 3 fail | **MQTT** (< 1s latency) | HTTPS | HTTPS |
+| MQTT disconnected hoặc streak ≥ 3 fail | HTTPS + idempotency | HTTPS | HTTPS |
+| MQTT reconnect | Streak reset → quay lại MQTT | HTTPS | HTTPS |
 
 ## Yêu cầu môi trường
 
