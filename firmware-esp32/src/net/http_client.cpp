@@ -124,6 +124,114 @@ PostResult postJsonInternal(const char* path,
 }
 }  // namespace
 
+PostResult httpGetJsonRecv(const char* path,
+                           char* respBuf, size_t respBufLen,
+                           size_t* outRespBytes) {
+  PostResult res{};
+  res.httpCode      = -1;
+  res.requestBytes  = 0;
+  res.responseBytes = 0;
+  res.responseSnippet[0] = '\0';
+  if (outRespBytes) *outRespBytes = 0;
+
+  if (!s_tlsConfigured) httpClientBegin();
+
+  String url;
+  url.reserve(96 + (path ? strlen(path) : 0));
+  url += BACKEND_URL;
+  url += path;
+
+  HTTPClient http;
+  http.setReuse(true);
+  http.setTimeout(HTTP_TIMEOUT_MS);
+  http.setConnectTimeout(HTTP_TIMEOUT_MS);
+
+  uint32_t t0 = millis();
+  if (!http.begin(s_tlsClient, url)) {
+    Serial.printf("[http] GET begin() failed url=%s\n", url.c_str());
+    res.durationMs = millis() - t0;
+    return res;
+  }
+
+  http.addHeader("X-Api-Key",     identity::apiKey());
+  http.addHeader("X-Device-Code", identity::deviceCode());
+  http.addHeader("Accept",        "application/json");
+
+  int code = http.GET();
+  res.httpCode   = code;
+  res.durationMs = millis() - t0;
+
+  if (code > 0) {
+    size_t n = copyResponseFull(http,
+                                res.responseSnippet, sizeof(res.responseSnippet),
+                                respBuf, respBufLen);
+    res.responseBytes = n;
+    if (outRespBytes) *outRespBytes = n;
+    Serial.printf("[http] GET %s → %d (%lums, %u bytes resp)\n",
+                  path, code,
+                  static_cast<unsigned long>(res.durationMs),
+                  static_cast<unsigned>(n));
+  } else {
+    Serial.printf("[http] GET %s FAIL (%lums) err=%s\n",
+                  path,
+                  static_cast<unsigned long>(res.durationMs),
+                  http.errorToString(code).c_str());
+  }
+
+  http.end();
+  return res;
+}
+
+PostResult httpPutJson(const char* path, const char* body, size_t bodyLen) {
+  PostResult res{};
+  res.httpCode      = -1;
+  res.requestBytes  = bodyLen;
+  res.responseBytes = 0;
+  res.responseSnippet[0] = '\0';
+
+  if (!s_tlsConfigured) httpClientBegin();
+
+  String url;
+  url.reserve(96 + (path ? strlen(path) : 0));
+  url += BACKEND_URL;
+  url += path;
+
+  HTTPClient http;
+  http.setReuse(true);
+  http.setTimeout(HTTP_TIMEOUT_MS);
+  http.setConnectTimeout(HTTP_TIMEOUT_MS);
+
+  uint32_t t0 = millis();
+  if (!http.begin(s_tlsClient, url)) {
+    Serial.printf("[http] PUT begin() failed url=%s\n", url.c_str());
+    res.durationMs = millis() - t0;
+    return res;
+  }
+
+  http.addHeader("Content-Type",  "application/json");
+  http.addHeader("X-Api-Key",     identity::apiKey());
+  http.addHeader("X-Device-Code", identity::deviceCode());
+  http.addHeader("Accept",        "application/json");
+
+  int code = http.PUT(reinterpret_cast<uint8_t*>(const_cast<char*>(body)), bodyLen);
+  res.httpCode   = code;
+  res.durationMs = millis() - t0;
+
+  if (code > 0) {
+    res.responseBytes = copyResponseFull(http, res.responseSnippet,
+                                         sizeof(res.responseSnippet), nullptr, 0);
+    Serial.printf("[http] PUT %s → %d (%lums)\n", path, code,
+                  static_cast<unsigned long>(res.durationMs));
+  } else {
+    Serial.printf("[http] PUT %s FAIL (%lums) err=%s\n", path,
+                  static_cast<unsigned long>(res.durationMs),
+                  http.errorToString(code).c_str());
+  }
+
+  http.end();
+  return res;
+}
+
 void httpClientBegin() {
   if (s_tlsConfigured) return;
   // PILOT: bỏ qua verify CA. Sprint 3+ phải set root CA.

@@ -11,6 +11,7 @@
 #endif
 
 #include "config/battery_mapping.h"
+#include "core/source_tags.h"   // S6-FW-03 (#65): canonical cross-source tags
 
 #include <Arduino.h>
 #include <DallasTemperature.h>
@@ -112,8 +113,10 @@ size_t ds18b20BuildExternalTempReadings(const char* const* serials, size_t n,
     r.temperature = t;
     r.socPercent  = 0.0f;
 
-    r.sourceType = core::SourceType::IotGateway;
-    strncpy(r.sensorSourceCode, "external-temp", sizeof(r.sensorSourceCode) - 1);
+    // S6-FW-03 (#65): canonical constant — IotGateway + "external-temp" để cross-source
+    // pair với BMS primary (temperature mismatch detection §7.6).
+    r.sourceType = core::kSourceTypeExternalTemp;
+    strncpy(r.sensorSourceCode, core::kSourceCodeExternalTemp, sizeof(r.sensorSourceCode) - 1);
 
     r.hasSoh = false;
     r.hasChargingState = false;

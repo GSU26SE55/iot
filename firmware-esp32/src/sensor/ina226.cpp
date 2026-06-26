@@ -12,6 +12,7 @@
 #endif
 
 #include "config/battery_mapping.h"
+#include "core/source_tags.h"   // S6-FW-03 (#65): canonical cross-source tags
 
 #include <Arduino.h>
 #include <INA226.h>
@@ -122,8 +123,10 @@ size_t ina226BuildRedundantReadings(const char* const* serials, size_t n,
     r.temperature = 0.0f;
     r.socPercent  = 0.0f;   // INA226 không trả SOC
 
-    r.sourceType = core::SourceType::IotGateway;
-    strncpy(r.sensorSourceCode, "redundant", sizeof(r.sensorSourceCode) - 1);
+    // S6-FW-03 (#65): canonical constant — IotGateway + "redundant" để cross-source
+    // pair với BMS primary cùng battery (SensorMismatch detection).
+    r.sourceType = core::kSourceTypeRedundant;
+    strncpy(r.sensorSourceCode, core::kSourceCodeRedundant, sizeof(r.sensorSourceCode) - 1);
 
     // Optional fields KHÔNG có (sensor ngoài không biết SOH/charging/error).
     r.hasSoh = false;
