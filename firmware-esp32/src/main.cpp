@@ -44,8 +44,12 @@
 #include "sensor/sht31.h"
 #include "sensor/ina226.h"
 #include "sensor/ds18b20.h"
+#include "sensor/mq2.h"                 // Sprint 6 (S6-FW-01)
+#include "sensor/water_leak.h"          // Sprint 6 (S6-FW-02)
+#include "sensor/environmental_incident.h"  // Sprint 6 — shared reporter
 #include "core/payload.h"
 #include "core/idempotency_key.h"
+#include "ota/ota_update.h"             // Sprint 7 (S7-FW-01/02)
 #include "queue/local_queue.h"
 #include "provision/provision.h"
 #include "telemetry/heartbeat.h"
@@ -93,6 +97,8 @@ void ensureProvisioned() {
     s_provisionDone = true;
     // Sprint 5 (S5-FW-06): siteId now available — wire vào SHT31.
     sensor::sht31SetSiteId(s_provCfg.siteId);
+    // Sprint 6 (S6-FW-01/02): siteId dùng chung cho MQ-2 + water leak reporter.
+    sensor::envIncidentSetSiteId(s_provCfg.siteId);
     return;
   }
   if (!net::wifiIsConnected() || !net::timeIsSynced()) return;
@@ -107,6 +113,8 @@ void ensureProvisioned() {
     telemetry::heartbeatSetInterval(s_provCfg.heartbeatIntervalMs);
     // S5-FW-06: provision response chứa siteId → wire vào SHT31.
     sensor::sht31SetSiteId(s_provCfg.siteId);
+    // S6-FW-01/02: siteId dùng chung cho MQ-2 + water leak reporter.
+    sensor::envIncidentSetSiteId(s_provCfg.siteId);
   } else {
     s_nextAttemptMs = millis() + 30000;
     Serial.println("[main] provision fail — retry sau 30s");
@@ -407,6 +415,22 @@ void logStatsPeriodic() {
                 static_cast<unsigned long>(sensor::sht31PostOkCount()),
                 static_cast<unsigned long>(sensor::sht31PostFailCount()));
 #endif
+
+  // Sprint 6 (S6-FW-01/02): environmental incident sensors (chạy cả mock + real mode).
+  Serial.printf("[s6-env] mq2 raw=%lu reports=%lu / water wet=%s reports=%lu / "
+                "incident http ok=%lu fail=%lu\n",
+                static_cast<unsigned long>(sensor::mq2LastRaw()),
+                static_cast<unsigned long>(sensor::mq2ReportCount()),
+                sensor::waterLeakIsWet() ? "yes" : "no",
+                static_cast<unsigned long>(sensor::waterLeakReportCount()),
+                static_cast<unsigned long>(sensor::envIncidentReportOkCount()),
+                static_cast<unsigned long>(sensor::envIncidentReportFailCount()));
+
+  // Sprint 7 (S7-FW-01/02): OTA status.
+  Serial.printf("[s7-ota] verify_mode=%s checks=%lu updates_ok=%lu\n",
+                ota::otaInVerifyMode() ? "yes" : "no",
+                static_cast<unsigned long>(ota::otaCheckCount()),
+                static_cast<unsigned long>(ota::otaUpdateOkCount()));
 }
 
 }  // namespace
@@ -435,6 +459,13 @@ void setup() {
   }
 
   net::httpClientBegin();
+
+  // Sprint 7 (S7-FW-01/02): OTA — gọi SỚM (sau nvsBegin+identityBegin+httpClientBegin,
+  // TRƯỚC các init rủi ro bms/sensor/mqtt). Lý do: boot-counter self-healing phải
+  // tăng được ngay cả khi FW mới crash trong các init đó → mới rollback được (B2).
+  // Nếu vừa boot sau OTA → verify-mode; nếu boot-loop → rollback ngay (reboot).
+  ota::otaBegin();
+
   // Sprint 5 (S5-FW-07): bms_source init thay cho mockBegin trực tiếp.
   // Mock mode → delegate mock_bms; Real mode → init Modbus + INA226 + DS18B20 + SHT31.
   bms::bmsSourceBegin();
@@ -445,6 +476,17 @@ void setup() {
   // provision flow xong + main.cpp re-set qua sht31SetSiteId.
   if (s_provCfg.provisioned) {
     sensor::sht31SetSiteId(s_provCfg.siteId);
+  }
+
+  // Sprint 6 (S6-FW-01/02): environmental sensors MQ-2 (khói) + water leak.
+  // Độc lập USE_MOCK_BMS (cảm biến môi trường, không liên quan BMS). Begin luôn —
+  // tự no-op nếu MQ2_ENABLED / WATER_LEAK_ENABLED = 0.
+  sensor::mq2Begin();
+  sensor::waterLeakBegin();
+  // siteId dùng chung cho cả 2 reporter — set ngay nếu đã provisioned (loaded từ NVS),
+  // nếu chưa thì ensureProvisioned() set sau khi provision flow xong.
+  if (s_provCfg.provisioned) {
+    sensor::envIncidentSetSiteId(s_provCfg.siteId);
   }
 
   telemetry::heartbeatBegin(s_provCfg.heartbeatIntervalMs);
@@ -500,6 +542,10 @@ void loop() {
   // Sprint 3: flush queue khi backoff allow
   tryFlushQueue();
 
+  // Sprint 7 (S7-FW-01/02): OTA tick — UNCONDITIONAL (verify-mode cần chạy cả khi
+  // offline để bắt deadline rollback). Network ops tự gate bên trong.
+  ota::otaTick();
+
   // Sprint 2: heartbeat
   if (net::wifiIsConnected() && net::timeIsSynced()) {
     telemetry::heartbeatTick();
@@ -509,6 +555,11 @@ void loop() {
   // Tự skip nếu USE_MOCK_BMS=1 (sht31Begin() chưa init nên Tick no-op).
   if (net::wifiIsConnected() && net::timeIsSynced()) {
     sensor::sht31Tick();
+    // Sprint 6 (S6-FW-01/02): poll MQ-2 + water leak → report incident khi vượt.
+    // Gate online giống sht31: offline → tick dừng, IncidentTrigger đóng băng;
+    // reconnect + điều kiện còn → cạnh lên re-detect → report.
+    sensor::mq2Tick();
+    sensor::waterLeakTick();
   }
 
   updateStatusLed();

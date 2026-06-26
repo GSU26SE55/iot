@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "config/battery_mapping.h"
+#include "core/source_tags.h"   // S6-FW-03 (#65): canonical cross-source tags
 
 namespace bms {
 
@@ -178,8 +179,8 @@ size_t mockGenerateMultiSource(core::SensorReading* out, size_t batteryCount) {
     {
       core::SensorReading& r = out[outIdx++];
       fillBaseFields(r, i, bmsSample);
-      copyStr(r.sensorSourceCode, sizeof(r.sensorSourceCode), "primary");
-      r.sourceType    = core::SourceType::Bms;
+      copyStr(r.sensorSourceCode, sizeof(r.sensorSourceCode), core::kSourceCodePrimary);
+      r.sourceType    = core::kSourceTypePrimary;
       r.chargingState = inferChargingState(bmsSample.current, bmsSample.socPercent);
       r.hasChargingState = true;
       // SOH slow degradation: -0.0001% per tick (cosmetic)
@@ -208,8 +209,8 @@ size_t mockGenerateMultiSource(core::SensorReading* out, size_t batteryCount) {
       inaSample.socPercent  = bmsSample.socPercent;    // required field — mirror BMS
 
       fillBaseFields(r, i, inaSample);
-      copyStr(r.sensorSourceCode, sizeof(r.sensorSourceCode), "redundant");
-      r.sourceType       = core::SourceType::IotGateway;
+      copyStr(r.sensorSourceCode, sizeof(r.sensorSourceCode), core::kSourceCodeRedundant);
+      r.sourceType       = core::kSourceTypeRedundant;
       // KHÔNG set chargingState/sohPercent/bmsErrorCode — sensor ngoài không biết.
       r.hasSoh           = false;
       r.hasChargingState = false;
@@ -229,8 +230,8 @@ size_t mockGenerateMultiSource(core::SensorReading* out, size_t batteryCount) {
       dsSample.socPercent  = bmsSample.socPercent;     // required — mirror BMS
 
       fillBaseFields(r, i, dsSample);
-      copyStr(r.sensorSourceCode, sizeof(r.sensorSourceCode), "external-temp");
-      r.sourceType       = core::SourceType::IotGateway;
+      copyStr(r.sensorSourceCode, sizeof(r.sensorSourceCode), core::kSourceCodeExternalTemp);
+      r.sourceType       = core::kSourceTypeExternalTemp;
       r.hasSoh           = false;
       r.hasChargingState = false;
       r.hasBmsError      = false;

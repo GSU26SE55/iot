@@ -46,6 +46,19 @@ PostResult httpPostJsonRecv(const char* path,
                             size_t      respBufLen,
                             size_t*     outRespBytes);
 
+// Sprint 7 (S7-FW-01): GET `BACKEND_URL + path` (path đã gồm query string nếu có).
+// Thêm header X-Api-Key + X-Device-Code (giống POST). Response body ghi vào `respBuf`
+// (truncate + null-terminate nếu nhỏ hơn). Số byte ghi trả qua `outRespBytes`.
+// Dùng cho firmware-check (response JSON nhỏ).
+PostResult httpGetJsonRecv(const char* path,
+                           char*       respBuf,
+                           size_t      respBufLen,
+                           size_t*     outRespBytes);
+
+// Sprint 7 (S7-FW-02): PUT JSON lên `BACKEND_URL + path` (firmware-update-log status).
+// Headers X-Api-Key + X-Device-Code. Response chỉ cần status code (snippet cho debug).
+PostResult httpPutJson(const char* path, const char* body, size_t bodyLen);
+
 // Sprint 3 (S3-FW-02): POST với `Idempotency-Key` header.
 // Backend §IoT2-16 dedup theo (deviceCode, idempotencyKey) TTL 24h.
 // `idempotencyKey` null/empty → KHÔNG set header (legacy mode).
