@@ -184,6 +184,65 @@
 // → full path `/api/ambient/readings/batch` (verified với AmbientReadingsController.cs).
 #define BACKEND_AMBIENT_PATH "/api/ambient/readings/batch"
 
+// ============== Sprint 6 — Environmental incidents (S6-FW-01/02) =================
+//
+// MQ-2 (khói/gas) + water leak → report `EnvironmentalIncident` lên backend qua
+// REST `POST /api/environmental-incidents` (KHÔNG qua MQTT — backend MQTT bridge chỉ
+// subscribe telemetry/heartbeat/status/cmd-ack, không có topic incident).
+//
+// ⚠ DEPLOYMENT: ApiKey của device PHẢI có scope `EnvironmentalIngest` (bitmask=4),
+//   giống SHT31 (S5-FW-06). Thiếu scope → backend trả 403.
+#define BACKEND_ENV_INCIDENT_PATH "/api/environmental-incidents"
+
+// --------- MQ-2 smoke/gas (S6-FW-01, WD §4.3) ---------
+// Analog AO → ADC GPIO1 (ADC1_CH0). ⚠ MQ-2 chạy 5V → chân AO PHẢI qua bộ chia áp
+// về ≤3.3V trước khi vào GPIO1, nếu không hỏng chân ADC ESP32.
+#define MQ2_ENABLED              1          // 0 = tắt (vd dev mock không gắn sensor)
+#define MQ2_ADC_PIN              1          // GPIO1 = ADC1_CH0
+#define MQ2_THRESHOLD_RAW        2000       // 0-4095 (12-bit); raw > = phát hiện khói
+                                            // Calibrate: đọc raw không khói rồi đặt cao hơn ~500
+#define MQ2_WARMUP_MS            30000UL    // 30s warm-up sau cấp nguồn mới đọc tin cậy
+#define MQ2_POLL_INTERVAL_MS     1000UL     // đọc ADC mỗi 1s
+#define MQ2_REARM_COOLDOWN_MS    300000UL   // 5 phút tối thiểu giữa 2 report (chống spam)
+
+// --------- Water leak (S6-FW-02, WD §4.3) ---------
+// Digital DO/AO → GPIO2. Module comparator onboard: có loại ướt→HIGH, loại ướt→LOW.
+// ⚠ Firmware dùng INPUT_PULLUP (chân idle = HIGH khi sensor chưa cắm) → mặc định
+//   ACTIVE_HIGH=0 (ướt→LOW) để sensor rút ra không bị đọc nhầm "ướt" (false alarm).
+//   Đa số module nước/mưa LM393 xuất DO LOW khi ướt → khớp mặc định này.
+//   Chỉ đổi sang 1 nếu đo đồng hồ thấy module xuất HIGH khi ướt.
+#define WATER_LEAK_ENABLED            1
+#define WATER_LEAK_GPIO               2
+#define WATER_LEAK_ACTIVE_HIGH        0        // 0 = ướt→LOW (mặc định); 1 = ướt→HIGH
+#define WATER_LEAK_POLL_INTERVAL_MS   500UL
+#define WATER_LEAK_REARM_COOLDOWN_MS  300000UL // 5 phút
+
+// ============== Sprint 7 — OTA firmware update (S7-FW-01/02) =================
+//
+// ESP32 định kỳ GET firmware-check → nếu có bản mới: download .bin qua HTTPS →
+// verify SHA-256 → ghi OTA partition → reboot. Nếu firmware mới fail health trong
+// 2 phút → tự rollback về partition cũ + report (S7-FW-02).
+//
+// ⚠ Backend route THẬT KHÔNG có `/v1/` (verified controller — khớp provision/heartbeat).
+// ⚠ ApiKey device PHẢI có scope `FirmwareCheck` (bitmask=8) — đã nằm trong EdgeDeviceDefault.
+// ⚠ Partition `default_16MB.csv` đã có OTA slots (app0/app1) — không cần đổi.
+// ⚠⚠ QUAN TRỌNG khi release: `FW_VERSION` (build flag -DFW_VERSION trong platformio.ini)
+//    PHẢI khớp CHÍNH XÁC `Version` của firmware release đăng ký trên backend. Vì:
+//    (1) firmware-check so version bằng chuỗi tuyệt đối — lệch thì offer update vô hạn;
+//    (2) sau OTA, verify-mode so FW_VERSION với target — lệch → báo Failed dù flash OK.
+#define OTA_ENABLED            1
+#define BACKEND_FW_CHECK_PATH  "/api/iot-devices/firmware-check"       // + ?currentVersion=
+#define BACKEND_FW_LOG_PATH    "/api/iot-devices/firmware-update-log/" // + {updateLogId}
+#define OTA_CHECK_INTERVAL_MS  3600000UL   // poll mỗi 1h
+#define OTA_HEALTH_TIMEOUT_MS  120000UL    // 2 phút health-check sau OTA → quá thì rollback
+#define OTA_HTTP_TIMEOUT_MS    20000UL     // timeout check/log + connect download
+// Chống boot-loop brick (S7-FW-02): FW mới boot quá N lần mà chưa confirm health
+// (vd crash trong setup trước khi tới verify) → rollback ngay ở lần boot kế.
+#define OTA_MAX_BOOT_ATTEMPTS  5
+// 1 version fail verify N chu kỳ OTA→rollback → mark bad (phân biệt mất mạng transient
+// vs binary thực sự hỏng kết nối → chống re-OTA loop vô hạn).
+#define OTA_MAX_VERSION_FAILS  3
+
 // --------- Firmware metadata ---------
 #ifndef FW_VERSION
   #define FW_VERSION "unknown"

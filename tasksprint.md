@@ -454,24 +454,24 @@ S7 (OTA + observability) có thể trễ vào S8 nếu thiếu thời gian.
 
 | ID | Task | Spec | Acceptance | Track |
 |----|------|------|-----------|-------|
-| **62. S6-FW-01** (#63) | `src/sensor/mq2.cpp` đọc ADC GPIO1, threshold lấy từ config → publish event qua MQTT khi vượt | WD §4.3, OV §A6 | Hơ bật lửa gần → backend nhận | FW |
-| **63. S6-FW-02** (#64) | `src/sensor/water_leak.cpp` đọc GPIO2 (digital); thay đổi cạnh → publish event | WD §4.3 | Nhúng đầu cảm biến vào nước → backend nhận | FW |
-| **64. S6-FW-03** (#65) | Đảm bảo INA226 + DS18B20 reading có `sensorSourceCode` đúng để cross-source pair với BMS | OV §B2 (o) | DB query có cặp `primary` + `redundant`/`external-temp` cùng battery + cùng phút | FW |
+| **62. S6-FW-01** (#63) | `src/sensor/mq2.cpp` đọc ADC GPIO1, threshold lấy từ config → publish event qua MQTT khi vượt | WD §4.3, OV §A6 | Hơ bật lửa gần → backend nhận | FW | ✅ **DONE** — `mq2.cpp`: warm-up 30s → ADC GPIO1 (ADC1_CH0, không xung đột WiFi) → threshold config → `IncidentTrigger` (rising edge + cooldown 5') → reporter HTTPS `POST /api/environmental-incidents` (Smoke=1, Critical=3) + pending-retry. **⚠ dùng HTTPS thay MQTT** (backend MQTT bridge không có topic incident — verified). Contract verified với backend thật `ReportEnvironmentalIncidentCommand`. Test `test_incident_trigger`. Native 107/107 + build esp32 ×2 PASS. GitHub #63 → In Review |
+| **63. S6-FW-02** (#64) | `src/sensor/water_leak.cpp` đọc GPIO2 (digital); thay đổi cạnh → publish event | WD §4.3 | Nhúng đầu cảm biến vào nước → backend nhận | FW | ✅ **DONE** — `water_leak.h/.cpp`: digital GPIO2 (`ACTIVE_HIGH=0` + `INPUT_PULLUP` → sensor rút ra không false-alarm) → `IncidentTrigger` → reporter Flood=4/Critical (dùng chung reporter + siteId với MQ-2). Build esp32 ×2 + native PASS. GitHub #64 → In Review |
+| **64. S6-FW-03** (#65) | Đảm bảo INA226 + DS18B20 reading có `sensorSourceCode` đúng để cross-source pair với BMS | OV §B2 (o) | DB query có cặp `primary` + `redundant`/`external-temp` cùng battery + cùng phút | FW | ✅ **DONE** — `source_tags.h` (SSOT) áp vào `modbus_bms`/`ina226`/`ds18b20`/`mock_bms` (sourceType Bms=1 vs IotGateway=2, chống typo). **Verified end-to-end với backend thật**: `payload.cpp` serialize `sourceType`+`sensorSourceCode` → `CrossSourceValidationService.cs:70` ghép cặp theo `SourceType` khác nhau trong cửa sổ 60s → `SensorMismatch=15`. Test `test_source_tags`. GitHub #65 → In Review |
 
 #### Backlog — FE
 
 | ID | Task | Spec | Acceptance | Track |
 |----|------|------|-----------|-------|
-| **65. S6-FE-01** (#66) | Trang Alert/Ticket: filter theo `AnomalyType`, hiển thị icon riêng cho SensorMismatch, DeviceOffline, Overheat, LowSoc, Smoke, WaterLeak | OV §B3 | UX rõ ràng | FE |
-| **66. S6-FE-02** (#67) | Mobile push test (Expo) khi Critical | OV §B3 #4 | Nhận notification trên điện thoại | FE |
+| **65. S6-FE-01** (#66) | Trang Alert/Ticket: filter theo `AnomalyType`, hiển thị icon riêng cho SensorMismatch, DeviceOffline, Overheat, LowSoc, Smoke, WaterLeak | OV §B3 | UX rõ ràng | FE | 🔴 **GAP** — chưa bắt đầu (`status: init`). Track FE. |
+| **66. S6-FE-02** (#67) | Mobile push test (Expo) khi Critical | OV §B3 #4 | Nhận notification trên điện thoại | FE | 🔴 **GAP** — chưa bắt đầu (`status: init`). Track FE/Mobile. |
 
 #### Backlog — QA
 
 | ID | Task | Spec | Acceptance | Track |
 |----|------|------|-----------|-------|
-| **67. S6-QA-01** (#68) | Kịch bản "overheat → alert → ticket → push" end-to-end < 30s | OV §B3 | Pass có timing | QA |
-| **68. S6-QA-02** (#69) | Kịch bản SensorMismatch: cấu hình INA226 báo lệch BMS → alert xuất hiện | NI §7.6 | Pass | QA |
-| **69. S6-QA-03** (#70) | Kịch bản Smoke: trigger MQ-2 → EnvironmentalIncident + push | OV §A6 | Pass | QA |
+| **67. S6-QA-01** (#68) | Kịch bản "overheat → alert → ticket → push" end-to-end < 30s | OV §B3 | Pass có timing | QA | 🔴 **GAP** — chưa bắt đầu (`status: init`). Track QA; phụ thuộc BE threshold + Alert–Ticket Saga. |
+| **68. S6-QA-02** (#69) | Kịch bản SensorMismatch: cấu hình INA226 báo lệch BMS → alert xuất hiện | NI §7.6 | Pass | QA | 🔴 **GAP** — chưa bắt đầu (`status: init`). Track QA; FW #65 cross-source đã ready (chờ merge + deploy). |
+| **69. S6-QA-03** (#70) | Kịch bản Smoke: trigger MQ-2 → EnvironmentalIncident + push | OV §A6 | Pass | QA | 🔴 **GAP** — chưa bắt đầu (`status: init`). Track QA; FW #63 MQ-2 đã ready (chờ merge + deploy). |
 
 **DoD sprint:** Một loạt kịch bản anomaly trong checklist demo đều ra alert + ticket + notification đúng.
 
@@ -496,23 +496,23 @@ S7 (OTA + observability) có thể trễ vào S8 nếu thiếu thời gian.
 
 | ID | Task | Spec | Acceptance | Track |
 |----|------|------|-----------|-------|
-| **70. S7-FE-01** (#71) | UI Calibration: form nhập (sensorMetric, offset, scale, validUntil, standard), bảng list, badge "sắp hết hạn" | NI §7.3 | UX hoạt động | FE |
-| **71. S7-QA-01** (#72) | Quy trình calibration thực địa: đo Fluke → nhập web → reading khớp Fluke ±0.05V | OV §B5 | Pass | QA |
+| **70. S7-FE-01** (#71) | UI Calibration: form nhập (sensorMetric, offset, scale, validUntil, standard), bảng list, badge "sắp hết hạn" | NI §7.3 | UX hoạt động | FE | 🔴 **GAP** — chưa bắt đầu (`status: init`). Track FE; BE calibration #IoT2-32/33/34 đã sẵn. |
+| **71. S7-QA-01** (#72) | Quy trình calibration thực địa: đo Fluke → nhập web → reading khớp Fluke ±0.05V | OV §B5 | Pass | QA | 🔴 **GAP** — chưa bắt đầu (`status: init`). Track QA; cần đồng hồ Fluke + thiết bị thật. |
 
 #### Backlog — OTA
 
 | ID | Task | Spec | Acceptance | Track |
 |----|------|------|-----------|-------|
-| **72. S7-FW-01** (#73) | `src/ota/ota_update.cpp` dùng `esp_https_ota` — download, verify sha256, write OTA partition, reboot | NI §9.1, OV §B6 | OTA chạy thành công; reboot vào firmware mới | FW |
-| **73. S7-FW-02** (#74) | Rollback: nếu boot mới fail health (không connect WiFi/broker trong 2 phút) → tự rollback partition cũ + report | OV §B6 #6 | Cố tình build firmware lỗi → rollback đúng | FW |
-| **74. S7-FE-02** (#75) | UI upload firmware + bảng firmware-update-log per device | NI §11 E | UX hoạt động | FE |
+| **72. S7-FW-01** (#73) | `src/ota/ota_update.cpp` dùng `esp_https_ota` — download, verify sha256, write OTA partition, reboot | NI §9.1, OV §B6 | OTA chạy thành công; reboot vào firmware mới | FW | ✅ **DONE** — `ota/ota_update.cpp` + `ota_decision.h`: `GET firmware-check` → so version → stream `.bin` HTTPS + tính SHA-256 (mbedTLS) song song → so checksum → `Update.end()` (đã verify từ source lib: gọi `esp_ota_set_boot_partition`) → reboot. **⚠ dùng `Update` lib + mbedTLS thủ công thay `esp_https_ota`** (để verify SHA-256 từ backend trước khi commit boot — đúng intent spec). Contract verified với backend thật. `httpGetJsonRecv`/`httpPutJson` thêm vào http_client. Test `test_ota_decision`. Native 118/118 + build esp32 ×2 PASS. GitHub #73 → In Review |
+| **73. S7-FW-02** (#74) | Rollback: nếu boot mới fail health (không connect WiFi/broker trong 2 phút) → tự rollback partition cũ + report | OV §B6 #6 | Cố tình build firmware lỗi → rollback đúng | FW | ✅ **DONE** — Rollback app-level (Arduino không bật bootloader-rollback): verify-mode health-check 2' (WiFi+NTP+MQTT, HTTPS fallback) → khỏe: `esp_ota_mark_app_valid` + Success; fail: `esp_ota_set_boot_partition(slot cũ)` + reboot. **Self-healing**: boot-counter chống boot-loop brick + đếm fail per-version (phân biệt mất-mạng-transient vs binary-hỏng → chống re-OTA loop) + report RolledBack sau khi online lại. State persist qua reboot bằng NVS. Qua 5 vòng adversarial review (4 vòng sửa lỗi thật). Build esp32 ×2 PASS. **Rollback THẬT cần ESP32 vật lý (QA #72)**. GitHub #74 → In Review |
+| **74. S7-FE-02** (#75) | UI upload firmware + bảng firmware-update-log per device | NI §11 E | UX hoạt động | FE | 🔴 **GAP** — chưa bắt đầu (`status: init`). Track FE; BE #IoT2-35/37 đã sẵn. |
 
 #### Backlog — Observability
 
 | ID | Task | Spec | Acceptance | Track |
 |----|------|------|-----------|-------|
-| **75. S7-INF-01** (#76) | `infra/grafana/` compose + dashboard JSON: 6 panel (online count, ingest rate, reject reasons, latency p95, heartbeat freshness, firmware status) | NI §11 F | Dashboard load đẹp | INF |
-| **76. S7-FE-03** (#77) | Trang "Gateway dashboard" trên admin: list device + online/offline, queue depth, heartbeat history sparkline, uptime % | NI §11 E | UX hoạt động | FE |
+| **75. S7-INF-01** (#76) | `infra/grafana/` compose + dashboard JSON: 6 panel (online count, ingest rate, reject reasons, latency p95, heartbeat freshness, firmware status) | NI §11 F | Dashboard load đẹp | INF | 🔴 **GAP** — chưa bắt đầu (`status: init`). Track INF; BE Prometheus metrics #IoT2-38 đã sẵn. |
+| **76. S7-FE-03** (#77) | Trang "Gateway dashboard" trên admin: list device + online/offline, queue depth, heartbeat history sparkline, uptime % | NI §11 E | UX hoạt động | FE | 🔴 **GAP** — chưa bắt đầu (`status: init`). Track FE. |
 
 **DoD sprint:** Admin upload firmware mới → ESP32 trong lab tự update; Grafana hiện 6 panel với số liệu thực.
 

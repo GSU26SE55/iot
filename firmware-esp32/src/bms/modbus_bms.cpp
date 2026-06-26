@@ -10,6 +10,7 @@
 #endif
 
 #include "config/battery_mapping.h"
+#include "core/source_tags.h"   // S6-FW-03 (#65): canonical cross-source tags
 
 #include <Arduino.h>
 #include <HardwareSerial.h>
@@ -166,8 +167,10 @@ bool modbusReadOne(uint8_t unitId,
   out.socPercent  = decodeSoc(map, raw);
 
   // Sprint 3 production tags — BMS primary source.
-  out.sourceType = core::SourceType::Bms;
-  strncpy(out.sensorSourceCode, "primary", sizeof(out.sensorSourceCode) - 1);
+  // S6-FW-03 (#65): dùng canonical constant (single source of truth) — tránh typo
+  // làm vỡ cross-source pairing với INA226/DS18B20 (sourceType phải KHÁC IotGateway).
+  out.sourceType = core::kSourceTypePrimary;
+  strncpy(out.sensorSourceCode, core::kSourceCodePrimary, sizeof(out.sensorSourceCode) - 1);
 
   // Optional fields — chỉ điền nếu BMS map support.
   if (hasSoh(map)) {
