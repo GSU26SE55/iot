@@ -2,7 +2,7 @@
 // Sprint 6 — S6-FW-01 (#63): MQ-2 smoke/gas sensor implementation.
 //
 // Pipeline: warm-up → đọc ADC GPIO1 → so threshold → IncidentTrigger (edge +
-// cooldown) → environmental_incident reporter (HTTPS, type=Smoke).
+// cooldown) → environmental_incident reporter (HTTPS, type=GasLeak — NS-24 #664).
 //
 // Xem mq2.h cho hardware note + chống spam. Reporter dùng chung với water_leak.
 // ==================================================================
@@ -94,7 +94,7 @@ void mq2Tick() {
   if (s_trigger.update(active, now)) {
     s_pendingReport = true;
     s_pendingRaw    = raw;
-    Serial.printf("[mq2] SMOKE detected raw=%d > thr=%d → report\n",
+    Serial.printf("[mq2] GAS detected raw=%d > thr=%d → report\n",
                   raw, static_cast<int>(MQ2_THRESHOLD_RAW));
   }
 
@@ -105,7 +105,10 @@ void mq2Tick() {
     snprintf(notes, sizeof(notes), "MQ-2 raw=%d > thr=%d (GPIO%d)",
              s_pendingRaw, static_cast<int>(MQ2_THRESHOLD_RAW),
              static_cast<int>(MQ2_ADC_PIN));
-    if (envIncidentReport(IncidentType::Smoke, IncidentSeverity::Critical, notes)) {
+    // Sprint Bonus NS-24 (#664, E4, Q10=B): MQ-2 bản chất là cảm biến GAS (LPG/propane/methane/
+    // khói khí cháy) → report GasLeak thay vì Smoke. `Smoke` giữ cho cảm biến khói quang học tương
+    // lai. Đồng bộ IncidentType::GasLeak = 3 với backend EnvironmentalIncidentTypeEnum.GasLeak.
+    if (envIncidentReport(IncidentType::GasLeak, IncidentSeverity::Critical, notes)) {
       s_pendingReport = false;
       s_reportCount++;
     }

@@ -1,8 +1,8 @@
 // ==================================================================
 // Sprint 6 — S6-FW-01/02 (#63/#64): Environmental incident reporter.
 //
-// Reporter DÙNG CHUNG cho MQ-2 (smoke) + water leak: build payload và POST sang
-// backend `POST /api/environmental-incidents`.
+// Reporter DÙNG CHUNG cho MQ-2 (gas — báo GasLeak, xem NS-24 #664) + water leak
+// (Flood): build payload và POST sang backend `POST /api/environmental-incidents`.
 //
 // ⚠ Vì sao HTTPS chứ không MQTT (dù tasksprint ghi "publish qua MQTT"):
 //   Backend MQTT bridge (MqttBridgeBackgroundService) CHỈ subscribe 4 wildcard
