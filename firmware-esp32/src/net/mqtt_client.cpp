@@ -11,6 +11,7 @@
 
 #include "config/device_identity.h"
 #include "net/time_sync.h"
+#include "net/ca_cert_embedded.h"
 
 #include <Arduino.h>
 #include <LittleFS.h>
@@ -69,6 +70,24 @@ void onMessage(char* topic, byte* payload, unsigned int length) {
 
 bool loadCaCert() {
 #if MQTT_USE_TLS
+  // Ưu tiên CA nhúng trong firmware. LittleFS không dùng được cho việc này:
+  // local_queue và chính file này đều gọi LittleFS.begin(true) tức
+  // format-nếu-mount-lỗi, mà ảnh mklittlefs không mount được nên phân vùng
+  // bị xoá sạch mỗi lần boot, cuốn theo ca_cert.pem.
+  if (kMqttCaCert[0] != '\0') {
+    // KHÔNG trim(): mbedTLS đòi PEM kết thúc bằng ký tự xuống dòng sau dòng
+    // -----END CERTIFICATE-----. Cắt mất nó là bắt tay hỏng với lỗi -9984
+    // "X509 Certificate verification failed", rất dễ tưởng nhầm sai CA.
+    s_caCert = String(kMqttCaCert);
+    if (s_caCert.indexOf("-----BEGIN CERTIFICATE-----") >= 0) {
+      s_wifiClient.setCACert(s_caCert.c_str());
+      Serial.printf("[mqtt] CA cert nhúng trong firmware (%u bytes)\n",
+                    static_cast<unsigned>(s_caCert.length()));
+      return true;
+    }
+    Serial.println("[mqtt] CA nhúng sai format — thử đọc từ LittleFS");
+  }
+
   if (!LittleFS.begin(true /*formatOnFail*/)) {
     Serial.println("[mqtt] LittleFS mount FAIL — không load được CA cert");
     return false;

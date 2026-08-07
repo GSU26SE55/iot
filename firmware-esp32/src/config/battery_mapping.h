@@ -28,10 +28,14 @@ struct BatteryMapping {
 // Sprint 3: backend resolve `batteryAssetSerial` → BatteryAssetId qua endpoint #IoT2-18.
 //           Nếu backend chưa seed serial, fallback `batteryAssetId` Guid (Sprint 1 mode).
 inline constexpr BatteryMapping kBatteryMappings[] = {
-  {"11111111-1111-4111-8111-000000000001", "BAT-MOCK-001", "BAT-MOCK-001", 1, 100},
-  {"11111111-1111-4111-8111-000000000002", "BAT-MOCK-002", "BAT-MOCK-002", 2, 112},
-  {"11111111-1111-4111-8111-000000000003", "BAT-MOCK-003", "BAT-MOCK-003", 3, 124},
-  {"11111111-1111-4111-8111-000000000004", "BAT-MOCK-004", "BAT-MOCK-004", 4, 136},
+  // 4 slot đầu khớp serial seed thật trong battery_assets của backend local.
+  // Sai serial thì backend vẫn trả 201 nhưng bỏ qua reading, DB trống trơn.
+  // Slot 1 = pack THẬT (JK-BMS 8S 24V 30Ah), unitId 1, khớp BMS_UNIT_ID_COUNT=1.
+  // Các slot dưới chỉ dùng ở chế độ mock (MOCK_BATTERY_COUNT).
+  {"11111111-1111-4111-8111-000000000001", "BAT-2026-REAL-001", "BAT-2026-REAL-001", 1, 0},
+  {"11111111-1111-4111-8111-000000000002", "BAT-2026-002", "BAT-2026-002", 2, 112},
+  {"11111111-1111-4111-8111-000000000003", "BAT-2026-003", "BAT-2026-003", 3, 124},
+  {"11111111-1111-4111-8111-000000000004", "BAT-2026-004", "BAT-2026-004", 4, 136},
   {"11111111-1111-4111-8111-000000000005", "BAT-MOCK-005", "BAT-MOCK-005", 5, 148},
   {"11111111-1111-4111-8111-000000000006", "BAT-MOCK-006", "BAT-MOCK-006", 6, 160},
   {"11111111-1111-4111-8111-000000000007", "BAT-MOCK-007", "BAT-MOCK-007", 7, 172},

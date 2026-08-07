@@ -23,6 +23,7 @@ namespace {
 
 bool     s_inited       = false;
 bool     s_wet          = false;
+bool     s_hasSample    = false;
 uint32_t s_lastPollMs   = 0;
 uint32_t s_reportCount  = 0;
 
@@ -42,6 +43,7 @@ bool waterLeakBegin() {
   // INPUT_PULLUP tránh chân float khi sensor chưa cắm (đọc nhiễu → false trigger).
   pinMode(WATER_LEAK_GPIO, INPUT_PULLUP);
   s_inited      = true;
+  s_hasSample   = false;
   s_lastPollMs  = 0;
   Serial.printf("[water] init OK pin=GPIO%d active=%s poll=%lums\n",
                 static_cast<int>(WATER_LEAK_GPIO),
@@ -59,7 +61,16 @@ void waterLeakTick() {
   s_lastPollMs = now;
 
   const int level = digitalRead(WATER_LEAK_GPIO);
-  s_wet = (level == (WATER_LEAK_ACTIVE_HIGH ? HIGH : LOW));
+  const bool wet = (level == (WATER_LEAK_ACTIVE_HIGH ? HIGH : LOW));
+
+  // Log ngay mẫu đầu tiên và mỗi lần đổi trạng thái để kiểm tra mạch trực tiếp.
+  // Không log mọi 100 ms, tránh làm nghẽn UART khi cảm biến giữ nguyên mức.
+  if (!s_hasSample || wet != s_wet) {
+    Serial.printf("[water] GPIO%d level=%d state=%s\n",
+                  static_cast<int>(WATER_LEAK_GPIO), level, wet ? "WET" : "DRY");
+  }
+  s_wet = wet;
+  s_hasSample = true;
 
   // Cạnh khô→ướt → cần report (1 lần / cooldown).
   if (s_trigger.update(s_wet, now)) {

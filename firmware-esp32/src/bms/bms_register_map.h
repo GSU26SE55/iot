@@ -75,6 +75,19 @@ struct BmsRegisterMap {
 // Sentinel cho field không support.
 constexpr uint16_t kRegMissing = 0xFFFF;
 
+// JK-BMS RS485 Modbus Generic Protocol V1.1 realtime registers. Unlike JBD,
+// JK exposes pack telemetry as sparse blocks, with 32-bit values and packed
+// UINT8 pairs. The driver reads these addresses separately.
+inline constexpr uint16_t kJkMosTemperatureAddress = 0x128A;
+inline constexpr uint16_t kJkPackVoltageAddress    = 0x1290;
+inline constexpr uint16_t kJkPackCurrentAddress    = 0x1298;
+inline constexpr uint16_t kJkBatteryTempsAddress   = 0x129C;
+inline constexpr uint16_t kJkAlarmAddress          = 0x12A0;
+inline constexpr uint16_t kJkSocAddress            = 0x12A6;
+inline constexpr uint16_t kJkCycleCountAddress     = 0x12B0;
+inline constexpr uint16_t kJkSohAddress            = 0x12B8;
+inline constexpr uint16_t kJkSwitchStatusAddress   = 0x12C0;
+
 // ============== Preset register maps ==============
 
 // JBD BMS (LiFePO4 phổ biến) — verify on JBD-SP04S028 (4S 100A).
@@ -102,29 +115,29 @@ inline constexpr BmsRegisterMap kJbdBmsMap = {
   /* errorCodeOffset */   5,            // 0x0005: protection status bitmask
 };
 
-// JK-BMS — register layout khác JBD.
-// Reference: JK-BMS Modbus protocol v3.x.
-// Verify on JK-B2A24S20P.
+// JK-BMS metadata. Realtime data is not one contiguous generic block; see the
+// kJk*Address constants and dedicated decoders below.
+// Reference: Jikong BMS RS485 Modbus Generic Protocol V1.1.
 inline constexpr BmsRegisterMap kJkBmsMap = {
-  /* name */              "JK-BMS",
+  /* name */              "JK-BMS Modbus V1.1",
   /* functionCode */      ModbusFunc::HoldingRegisters,
   /* startAddress */      0x1200,
   /* registerCount */     16,
-  /* voltageOffset */     0,            // 0x1200: total voltage × 0.001V
-  /* voltageScale */      0.001f,
-  /* currentOffset */     2,            // 0x1202: total current × 0.001A (int32 — chỉ đọc low 16 bit cho Sprint 5)
-  /* currentScale */      0.001f,
+  /* voltageOffset */     kRegMissing,  // dedicated UINT32 read at 0x1290
+  /* voltageScale */      1.0f,
+  /* currentOffset */     kRegMissing,  // dedicated INT32 read at 0x1298
+  /* currentScale */      1.0f,
   /* currentSigned */     true,
-  /* temperatureOffset */ 6,            // 0x1206: MOS temp °C × 0.1
-  /* temperatureScale */  0.1f,
+  /* temperatureOffset */ kRegMissing,  // dedicated INT16 read at 0x128A
+  /* temperatureScale */  1.0f,
   /* temperatureBias */   0.0f,
-  /* socOffset */         8,            // 0x1208: SOC %
+  /* socOffset */         kRegMissing,  // packed low byte at 0x12A6
   /* socScale */          1.0f,
-  /* sohOffset */         9,            // 0x1209: SOH %
+  /* sohOffset */         kRegMissing,  // packed high byte at 0x12B8
   /* sohScale */          1.0f,
-  /* cycleOffset */       10,
-  /* chargingStateOffset */ 12,         // 0x120C: state enum (cần map sang ChargingStateEnum)
-  /* errorCodeOffset */   14,
+  /* cycleOffset */       kRegMissing,  // dedicated UINT32 read at 0x12B0
+  /* chargingStateOffset */ kRegMissing,
+  /* errorCodeOffset */   kRegMissing,  // dedicated UINT32 read at 0x12A0
 };
 
 // Daly — Daly dùng custom protocol (NOT chuẩn Modbus RTU). Stub này dùng cho
@@ -176,6 +189,16 @@ float decodeVoltage    (const BmsRegisterMap& m, const uint16_t* raw);
 float decodeCurrent    (const BmsRegisterMap& m, const uint16_t* raw);
 float decodeTemperature(const BmsRegisterMap& m, const uint16_t* raw);
 float decodeSoc        (const BmsRegisterMap& m, const uint16_t* raw);
+
+// JK-BMS V1.1 pure decoders. 32-bit fields arrive most-significant word first.
+uint32_t decodeJkUnsigned32(uint16_t highWord, uint16_t lowWord);
+int32_t  decodeJkSigned32  (uint16_t highWord, uint16_t lowWord);
+float    decodeJkPackVoltage(uint16_t highWord, uint16_t lowWord);  // mV -> V
+float    decodeJkPackCurrent(uint16_t highWord, uint16_t lowWord);  // mA -> A
+float    decodeJkTemperature(uint16_t raw);                          // 0.1 C
+float    decodeJkSoc(uint16_t packedBalanceAndSoc);                  // low byte
+float    decodeJkSoh(uint16_t packedSohAndPrecharge);                // high byte
+uint8_t  decodeJkChargingState(uint16_t packedSwitches, float currentAmps);
 
 // Returns true nếu map có field (offset != kRegMissing).
 inline bool hasSoh           (const BmsRegisterMap& m) { return m.sohOffset           != kRegMissing; }

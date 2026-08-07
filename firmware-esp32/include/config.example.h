@@ -214,7 +214,7 @@
 #define WATER_LEAK_ENABLED            1
 #define WATER_LEAK_GPIO               2
 #define WATER_LEAK_ACTIVE_HIGH        0        // 0 = ướt→LOW (mặc định); 1 = ướt→HIGH
-#define WATER_LEAK_POLL_INTERVAL_MS   500UL
+#define WATER_LEAK_POLL_INTERVAL_MS   100UL
 #define WATER_LEAK_REARM_COOLDOWN_MS  300000UL // 5 phút
 
 // ============== Sprint 7 — OTA firmware update (S7-FW-01/02) =================
