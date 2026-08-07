@@ -69,6 +69,106 @@ const char* unitIdToSerial(uint8_t unitId) {
   return nullptr;
 }
 
+void initializeReading(const char* batteryAssetSerial, core::SensorReading& out) {
+  memset(&out, 0, sizeof(out));
+
+  if (batteryAssetSerial) {
+    strncpy(out.serial, batteryAssetSerial, sizeof(out.serial) - 1);
+  }
+  for (const auto& m : config::kBatteryMappings) {
+    if (strcmp(m.serial, out.serial) == 0) {
+      strncpy(out.batteryAssetId, m.batteryAssetId, sizeof(out.batteryAssetId) - 1);
+      out.cycleCount = m.initialCycleCount;
+      break;
+    }
+  }
+}
+
+void tagPrimarySource(core::SensorReading& out) {
+  out.sourceType = core::kSourceTypePrimary;
+  strncpy(out.sensorSourceCode, core::kSourceCodePrimary,
+          sizeof(out.sensorSourceCode) - 1);
+}
+
+bool readJkRegisters(uint16_t address, uint16_t count, uint16_t* out) {
+  uint8_t result = s_modbus.readHoldingRegisters(address, count);
+  for (uint8_t retry = 0;
+       retry < BMS_POLL_RETRY && result != s_modbus.ku8MBSuccess;
+       ++retry) {
+    delay(20);
+    result = s_modbus.readHoldingRegisters(address, count);
+  }
+
+  if (result != s_modbus.ku8MBSuccess) {
+    Serial.printf("[modbus-jk] addr=0x%04X count=%u FAIL code=0x%02X\n",
+                  address, count, result);
+    return false;
+  }
+
+  for (uint16_t i = 0; i < count; ++i) {
+    out[i] = s_modbus.getResponseBuffer(i);
+  }
+  return true;
+}
+
+bool readJkRealtime(core::SensorReading& out) {
+  uint16_t mosTemp[1] = {0};
+  uint16_t voltage[2] = {0};
+  uint16_t current[2] = {0};
+  uint16_t batteryTemps[2] = {0};
+  uint16_t soc[1] = {0};
+
+  if (!readJkRegisters(kJkMosTemperatureAddress, 1, mosTemp) ||
+      !readJkRegisters(kJkPackVoltageAddress, 2, voltage) ||
+      !readJkRegisters(kJkPackCurrentAddress, 2, current) ||
+      !readJkRegisters(kJkBatteryTempsAddress, 2, batteryTemps) ||
+      !readJkRegisters(kJkSocAddress, 1, soc)) {
+    return false;
+  }
+
+  out.voltage = decodeJkPackVoltage(voltage[0], voltage[1]);
+  out.current = decodeJkPackCurrent(current[0], current[1]);
+  out.temperature = decodeJkTemperature(mosTemp[0]);
+  out.socPercent = decodeJkSoc(soc[0]);
+
+  uint16_t cycleCount[2] = {0};
+  if (readJkRegisters(kJkCycleCountAddress, 2, cycleCount)) {
+    uint32_t cycles = decodeJkUnsigned32(cycleCount[0], cycleCount[1]);
+    out.cycleCount = cycles > 0xFFFFu ? 0xFFFFu : static_cast<uint16_t>(cycles);
+  }
+
+  uint16_t soh[1] = {0};
+  if (readJkRegisters(kJkSohAddress, 1, soh)) {
+    out.sohPercent = decodeJkSoh(soh[0]);
+    if (out.sohPercent > 100.0f) out.sohPercent = 100.0f;
+    out.hasSoh = true;
+  }
+
+  uint16_t switches[1] = {0};
+  if (readJkRegisters(kJkSwitchStatusAddress, 1, switches)) {
+    out.chargingState = static_cast<core::ChargingState>(
+        decodeJkChargingState(switches[0], out.current));
+    out.hasChargingState = true;
+  }
+
+  uint16_t alarm[2] = {0};
+  if (readJkRegisters(kJkAlarmAddress, 2, alarm)) {
+    uint32_t alarmRaw = decodeJkUnsigned32(alarm[0], alarm[1]);
+    if (alarmRaw != 0) {
+      snprintf(out.bmsErrorCode, sizeof(out.bmsErrorCode),
+               "JK:0x%08lX", static_cast<unsigned long>(alarmRaw));
+      out.hasBmsError = true;
+    }
+  }
+
+  Serial.printf("[modbus-jk] Tmos=%.1f T1=%.1f T2=%.1f SOC=%.0f%%\n",
+                out.temperature,
+                decodeJkTemperature(batteryTemps[0]),
+                decodeJkTemperature(batteryTemps[1]),
+                out.socPercent);
+  return true;
+}
+
 }  // namespace
 
 bool modbusBegin() {
@@ -111,6 +211,21 @@ bool modbusReadOne(uint8_t unitId,
   // re-call begin() với slave mới (mainstream lib cách thường dùng).
   s_modbus.begin(unitId, s_rs485Serial);
 
+#if BMS_MODEL == 3
+  initializeReading(batteryAssetSerial, out);
+  if (!readJkRealtime(out)) {
+    s_pollFail++;
+    return false;
+  }
+  tagPrimarySource(out);
+
+  s_pollOk++;
+  Serial.printf("[modbus] unitId=%u OK V=%.3f I=%.3f T=%.1f SOC=%.1f%%%s\n",
+                unitId, out.voltage, out.current, out.temperature, out.socPercent,
+                out.hasBmsError ? " ⚠ ERR" : "");
+  return true;
+#endif
+
   // Issue read theo function code.
   uint8_t result;
   if (map.functionCode == ModbusFunc::HoldingRegisters) {
@@ -145,20 +260,7 @@ bool modbusReadOne(uint8_t unitId,
   }
 
   // ---- Fill SensorReading ----
-  memset(&out, 0, sizeof(out));
-
-  // Identity — batteryAssetId placeholder (backend sẽ resolve serial → Id).
-  if (batteryAssetSerial) {
-    strncpy(out.serial, batteryAssetSerial, sizeof(out.serial) - 1);
-  }
-  // Lookup batteryAssetId từ mapping (fallback nếu serial chưa seed backend).
-  for (const auto& m : config::kBatteryMappings) {
-    if (strcmp(m.serial, out.serial) == 0) {
-      strncpy(out.batteryAssetId, m.batteryAssetId, sizeof(out.batteryAssetId) - 1);
-      out.cycleCount = m.initialCycleCount;
-      break;
-    }
-  }
+  initializeReading(batteryAssetSerial, out);
 
   // Decode physical units.
   out.voltage     = decodeVoltage(map, raw);
@@ -169,8 +271,7 @@ bool modbusReadOne(uint8_t unitId,
   // Sprint 3 production tags — BMS primary source.
   // S6-FW-03 (#65): dùng canonical constant (single source of truth) — tránh typo
   // làm vỡ cross-source pairing với INA226/DS18B20 (sourceType phải KHÁC IotGateway).
-  out.sourceType = core::kSourceTypePrimary;
-  strncpy(out.sensorSourceCode, core::kSourceCodePrimary, sizeof(out.sensorSourceCode) - 1);
+  tagPrimarySource(out);
 
   // Optional fields — chỉ điền nếu BMS map support.
   if (hasSoh(map)) {

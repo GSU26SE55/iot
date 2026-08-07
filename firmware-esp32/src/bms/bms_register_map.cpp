@@ -63,6 +63,45 @@ float decodeSoc(const BmsRegisterMap& m, const uint16_t* raw) {
   return soc;
 }
 
+uint32_t decodeJkUnsigned32(uint16_t highWord, uint16_t lowWord) {
+  return (static_cast<uint32_t>(highWord) << 16) |
+         static_cast<uint32_t>(lowWord);
+}
+
+int32_t decodeJkSigned32(uint16_t highWord, uint16_t lowWord) {
+  return static_cast<int32_t>(decodeJkUnsigned32(highWord, lowWord));
+}
+
+float decodeJkPackVoltage(uint16_t highWord, uint16_t lowWord) {
+  return static_cast<float>(decodeJkUnsigned32(highWord, lowWord)) / 1000.0f;
+}
+
+float decodeJkPackCurrent(uint16_t highWord, uint16_t lowWord) {
+  return static_cast<float>(decodeJkSigned32(highWord, lowWord)) / 1000.0f;
+}
+
+float decodeJkTemperature(uint16_t raw) {
+  return static_cast<float>(static_cast<int16_t>(raw)) / 10.0f;
+}
+
+float decodeJkSoc(uint16_t packedBalanceAndSoc) {
+  return static_cast<float>(packedBalanceAndSoc & 0x00FFu);
+}
+
+float decodeJkSoh(uint16_t packedSohAndPrecharge) {
+  return static_cast<float>((packedSohAndPrecharge >> 8) & 0x00FFu);
+}
+
+uint8_t decodeJkChargingState(uint16_t packedSwitches, float currentAmps) {
+  const bool chargeEnabled = ((packedSwitches >> 8) & 0x00FFu) != 0;
+  const bool dischargeEnabled = (packedSwitches & 0x00FFu) != 0;
+  constexpr float kActiveCurrentAmps = 0.05f;
+
+  if (chargeEnabled && currentAmps > kActiveCurrentAmps) return 2;
+  if (dischargeEnabled && currentAmps < -kActiveCurrentAmps) return 3;
+  return 1;
+}
+
 uint8_t decodeChargingState(uint16_t raw) {
   // Mapping tùy BMS — Sprint 5 dùng heuristic chung:
   //   0/1 = Idle

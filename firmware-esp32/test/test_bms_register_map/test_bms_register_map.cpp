@@ -88,6 +88,34 @@ void test_daly_temperature_with_offset() {
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 25.0f, t);
 }
 
+// ---- JK-BMS Modbus V1.1 realtime decode (captured from real hardware) ----
+
+void test_jk_realtime_values_match_hardware_capture() {
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 26.243f,
+                           decodeJkPackVoltage(0x0000, 0x6683));
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f,
+                           decodeJkPackCurrent(0x0000, 0x0000));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 31.5f, decodeJkTemperature(0x013B));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 30.1f, decodeJkTemperature(0x012D));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 29.9f, decodeJkTemperature(0x012B));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 42.0f, decodeJkSoc(0x002A));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 100.0f, decodeJkSoh(0x6400));
+  TEST_ASSERT_EQUAL_UINT32(12617u, decodeJkUnsigned32(0x0000, 0x3149));
+  TEST_ASSERT_EQUAL_UINT32(30000u, decodeJkUnsigned32(0x0000, 0x7530));
+}
+
+void test_jk_signed_current_decode() {
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, -0.001f,
+                           decodeJkPackCurrent(0xFFFF, 0xFFFF));
+}
+
+void test_jk_charging_state_uses_switches_and_current_direction() {
+  TEST_ASSERT_EQUAL_UINT8(1, decodeJkChargingState(0x0101, 0.0f));
+  TEST_ASSERT_EQUAL_UINT8(2, decodeJkChargingState(0x0101, 1.0f));
+  TEST_ASSERT_EQUAL_UINT8(3, decodeJkChargingState(0x0101, -1.0f));
+  TEST_ASSERT_EQUAL_UINT8(1, decodeJkChargingState(0x0000, 1.0f));
+}
+
 // ---- Charging state mapping ----
 
 void test_charging_state_idle() {
@@ -173,11 +201,14 @@ void test_jbd_has_cycle_but_no_soh() {
   TEST_ASSERT_TRUE (hasErrorCode(kJbdBmsMap));
 }
 
-void test_jk_has_all_fields() {
-  TEST_ASSERT_TRUE(hasSoh(kJkBmsMap));
-  TEST_ASSERT_TRUE(hasCycle(kJkBmsMap));
-  TEST_ASSERT_TRUE(hasChargingState(kJkBmsMap));
-  TEST_ASSERT_TRUE(hasErrorCode(kJkBmsMap));
+void test_jk_uses_dedicated_sparse_layout() {
+  TEST_ASSERT_FALSE(hasSoh(kJkBmsMap));
+  TEST_ASSERT_FALSE(hasCycle(kJkBmsMap));
+  TEST_ASSERT_FALSE(hasChargingState(kJkBmsMap));
+  TEST_ASSERT_FALSE(hasErrorCode(kJkBmsMap));
+  TEST_ASSERT_EQUAL_HEX16(0x1290, kJkPackVoltageAddress);
+  TEST_ASSERT_EQUAL_HEX16(0x1298, kJkPackCurrentAddress);
+  TEST_ASSERT_EQUAL_HEX16(0x12A6, kJkSocAddress);
 }
 
 void test_daly_has_minimal_fields() {
@@ -216,6 +247,11 @@ int main(int, char**) {
   // Daly decode
   RUN_TEST(test_daly_temperature_with_offset);
 
+  // JK-BMS Modbus V1.1 decode
+  RUN_TEST(test_jk_realtime_values_match_hardware_capture);
+  RUN_TEST(test_jk_signed_current_decode);
+  RUN_TEST(test_jk_charging_state_uses_switches_and_current_direction);
+
   // Charging state
   RUN_TEST(test_charging_state_idle);
   RUN_TEST(test_charging_state_charging);
@@ -233,7 +269,7 @@ int main(int, char**) {
 
   // Has* helpers
   RUN_TEST(test_jbd_has_cycle_but_no_soh);
-  RUN_TEST(test_jk_has_all_fields);
+  RUN_TEST(test_jk_uses_dedicated_sparse_layout);
   RUN_TEST(test_daly_has_minimal_fields);
 
   // Preset name
