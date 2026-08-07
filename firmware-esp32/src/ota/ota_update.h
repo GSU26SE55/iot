@@ -36,6 +36,17 @@ void otaTick();
 // True nếu đang trong verify-mode sau OTA (chưa confirm health).
 bool otaInVerifyMode();
 
+/// GH-745 — yêu cầu chạy firmware-check ở tick kế tiếp (bỏ qua khoảng chờ định kỳ).
+/// Dùng cho lệnh từ xa `trigger_ota`.
+///
+/// Trả false khi KHÔNG nhận được yêu cầu: OTA tắt bằng cấu hình, hoặc đang xác minh bản
+/// vừa flash (tải chồng bản mới lúc đó là mất đường lùi nếu bản mới hỏng).
+/// Caller PHẢI phản ánh đúng giá trị này vào ACK — trước đây ACK luôn "ok" dù không làm gì.
+bool otaRequestCheck();
+
+/// Lý do từ chối gần nhất của otaRequestCheck() — để ACK nói rõ nguyên nhân.
+const char* otaLastRejectReason();
+
 uint32_t otaCheckCount();      // số lần đã gọi firmware-check
 uint32_t otaUpdateOkCount();   // số firmware đã apply + confirm Success
 

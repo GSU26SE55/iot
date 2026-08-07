@@ -3,6 +3,9 @@
 // ==================================================================
 #include "cli/serial_cli.h"
 
+#include "core/identity_change_policy.h"
+#include "net/mqtt_client.h"
+
 #include <Arduino.h>
 #include <string.h>
 
@@ -22,6 +25,14 @@
 #include "sensor/sht31.h"
 
 namespace cli {
+
+namespace {
+// GH-747 — firmware này LUÔN dùng MQTT (config chỉ có MQTT_USE_TLS để chọn plain/TLS, không
+// có cờ bật/tắt). Giữ hằng số tường minh thay vì hằng `true` trần: nếu sau này thêm
+// MQTT_ENABLED thì đây là đúng một chỗ phải sửa, và policy đã nhận sẵn tham số này.
+constexpr bool kMqttEnabled = true;
+}  // namespace
+
 
 namespace {
 constexpr size_t kMaxLineLen = 128;
@@ -131,8 +142,26 @@ void executeCommand(const char* line) {
       Serial.println("[cli] thiếu giá trị. Usage: set devcode <code>");
       return;
     }
+    // GH-747 — kiểm TRƯỚC khi ghi. Đổi sang một deviceCode không khớp username MQTT sẽ
+    // làm thiết bị câm cả hai chiều (publish bị ACL từ chối, downlink về topic cũ) mà log
+    // vẫn báo "hot reloaded". Thà từ chối còn hơn để thiết bị chết câm ngoài hiện trường.
+    const auto decision = core::decideDeviceCodeChange(val, MQTT_USERNAME, kMqttEnabled);
+    if (decision == core::IdentityChangeDecision::RejectInvalid) {
+      Serial.println("[cli] TỪ CHỐI: deviceCode rỗng hoặc quá dài (tối đa 64 ký tự)");
+      return;
+    }
+    if (decision == core::IdentityChangeDecision::RejectAclMismatch) {
+      Serial.printf("[cli] TỪ CHỐI: '%s' không khớp MQTT_USERNAME='%s'.\n", val, MQTT_USERNAME);
+      Serial.println("[cli]   Backend đặt mqtt_username = lowercase(deviceCode), nên đổi code");
+      Serial.println("[cli]   mà không đổi credential là mất cả uplink lẫn downlink.");
+      Serial.println("[cli]   → provision lại thiết bị (lấy MqttUsername/MqttPassword mới) rồi flash.");
+      return;
+    }
+
     if (identity::setDeviceCode(val)) {
       Serial.println("[cli] deviceCode saved → hot reloaded");
+      // Ngắt phiên MQTT cũ để tick kế dựng lại LWT + topic + subscribe theo code mới.
+      net::mqttOnIdentityChanged();
     } else {
       Serial.println("[cli] setDeviceCode FAILED");
     }

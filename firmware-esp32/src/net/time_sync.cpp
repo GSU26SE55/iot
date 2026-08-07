@@ -97,4 +97,30 @@ bool isoNow(char* outBuf, size_t outBufLen) {
   return true;
 }
 
+bool isoNowMinus(uint32_t secondsAgo, char* outBuf, size_t outBufLen) {
+  if (secondsAgo == 0) return isoNow(outBuf, outBufLen);
+  if (outBufLen < 21 || outBuf == nullptr) return false;
+  outBuf[0] = '\0';
+
+  // Kiểm đồng bộ qua chính isoNow(): tránh lặp lại điều kiện "year >= kMinYear" ở hai chỗ
+  // rồi lệch nhau về sau.
+  char probe[24];
+  if (!isoNow(probe, sizeof(probe))) return false;
+
+  time_t nowEpoch = time(nullptr);
+  if (nowEpoch <= 0) return false;
+
+  // Lùi về thời điểm phát hiện. Không cho lùi quá xa: sai lệch lớn gần như luôn là do
+  // millis() bị hiểu sai chứ không phải sự cố xảy ra từ đời nào.
+  constexpr uint32_t kMaxBackdateSeconds = 7U * 24U * 3600U;   // 7 ngày
+  const uint32_t clamped = secondsAgo > kMaxBackdateSeconds ? kMaxBackdateSeconds : secondsAgo;
+
+  time_t at = nowEpoch - static_cast<time_t>(clamped);
+  struct tm tmAt;
+  if (gmtime_r(&at, &tmAt) == nullptr) return false;
+
+  strftime(outBuf, outBufLen, "%Y-%m-%dT%H:%M:%SZ", &tmAt);
+  return true;
+}
+
 }  // namespace net

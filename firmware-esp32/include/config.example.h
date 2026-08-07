@@ -113,6 +113,20 @@
 // sau khi `infra/mqtt/scripts/gen-certs.sh` xong. File text PEM.
 #define MQTT_CA_CERT_PATH   "/ca_cert.pem"
 
+// GH-735 — CA cert dùng chung cho HTTPS ingest + OTA (trước đây hai đường này gọi
+// setInsecure(), chấp nhận MỌI chứng chỉ). Mặc định trỏ cùng file với MQTT.
+#ifndef TLS_CA_CERT_PATH
+#define TLS_CA_CERT_PATH    MQTT_CA_CERT_PATH
+#endif
+
+// Lối thoát cho dev: 1 = cho phép TLS không verify khi KHÔNG nạp được CA.
+// PHẢI là 0 ở mọi bản build thật. Bật lên thì firmware in cảnh báo mỗi request.
+// Cố ý làm nó "đắt và có dấu vết": không có lối thoát thì người ta sẽ xoá thẳng
+// phần verify khi bị kẹt, và lần đó không để lại dấu gì.
+#ifndef TLS_ALLOW_INSECURE
+#define TLS_ALLOW_INSECURE  0
+#endif
+
 // Max packet size — buffer PubSubClient phải đủ chứa payload telemetry.
 // Sprint 3 production payload ~384 bytes/reading × 3 sources/pin = 1152 + envelope ≈ 1.5KB.
 // Đặt 4096 để dư cho command payload hoặc burst response.

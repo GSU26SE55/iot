@@ -260,6 +260,17 @@ bool mqttBegin() {
   return true;
 }
 
+void mqttOnIdentityChanged() {
+  if (!s_inited) return;
+  if (s_mqtt.connected()) {
+    Serial.println("[mqtt] deviceCode đổi → ngắt kết nối để dựng lại LWT/topic/subscribe");
+    s_mqtt.disconnect();
+  }
+  // Cho phép kết nối lại NGAY, không phải đợi hết MQTT_RECONNECT_INTERVAL_MS: thiết bị đang
+  // câm downlink cho tới khi subscribe lại được.
+  s_lastReconnectMs = 0;
+}
+
 void mqttTick() {
   if (!s_inited) return;
   if (!WiFi.isConnected()) return;
@@ -302,20 +313,18 @@ void mqttSetCommandCallback(CommandCallback cb) {
 // ---- Publish helpers ----
 
 namespace {
-bool publishWithStats(const char* topic, const char* payload, size_t len,
-                     uint8_t qos, bool retain) {
+// GH-746 — ĐÃ BỎ tham số `qos`: PubSubClient v2.8 không có overload QoS, nên trước đây tham
+// số này bị vứt ngay bằng một dòng cast-to-void — một tham số giả khiến call site tưởng mình
+// đang chọn QoS 1. (Test test_mqtt_qos_contract chặn dòng cast đó quay lại; vì guard so chuỗi
+// thô nên comment ở đây cố ý KHÔNG viết lại nguyên văn token đó.)
+bool publishWithStats(const char* topic, const char* payload, size_t len, bool retain) {
   if (!s_mqtt.connected()) {
     s_pubFail++;
     s_consecutiveFail++;
     return false;
   }
-  // PubSubClient::publish overload: (topic, payload, length, retain).
-  // Lưu ý: không có overload nhận QoS publish cho v2.8 — QoS 0 mặc định.
-  // Để giữ "QoS 1" spec, dùng beginPublish/write/endPublish (tự set QoS).
-  // → Sprint 4: dùng publish (QoS 0) cho telemetry/heartbeat (acceptable per spec
-  //   "publish/subscribe QoS 0..1"); LWT vẫn được set QoS 1 ở connect().
-  //   Production có thể nâng cấp lên MQTTnet hoặc esp-mqtt nếu cần QoS 1 strict.
-  (void)qos;
+  // PubSubClient::publish overload duy nhất: (topic, payload, length, retain) → QoS 0.
+  // `ok` = "đã đẩy được vào socket TCP", KHÔNG phải "broker đã nhận" (xem kPublishGuarantee).
   bool ok = s_mqtt.publish(topic,
                            reinterpret_cast<const uint8_t*>(payload),
                            len, retain);
@@ -343,28 +352,28 @@ bool mqttPublishTelemetry(const char* batterySerial,
   static char topicBuf[kTopicBufLen];
   snprintf(topicBuf, kTopicBufLen, "%s/%s/%s/telemetry",
            MQTT_TOPIC_PREFIX, identity::deviceCode(), batterySerial);
-  return publishWithStats(topicBuf, payload, payloadLen, 1, false);
+  return publishWithStats(topicBuf, payload, payloadLen, false);
 }
 
 bool mqttPublishHeartbeat(const char* payload, size_t payloadLen) {
   static char topicBuf[kTopicBufLen];
   snprintf(topicBuf, kTopicBufLen, "%s/%s/heartbeat",
            MQTT_TOPIC_PREFIX, identity::deviceCode());
-  return publishWithStats(topicBuf, payload, payloadLen, 1, false);
+  return publishWithStats(topicBuf, payload, payloadLen, false);
 }
 
 bool mqttPublishStatus(const char* payload, size_t payloadLen) {
   static char topicBuf[kTopicBufLen];
   snprintf(topicBuf, kTopicBufLen, "%s/%s/status",
            MQTT_TOPIC_PREFIX, identity::deviceCode());
-  return publishWithStats(topicBuf, payload, payloadLen, 1, true);
+  return publishWithStats(topicBuf, payload, payloadLen, true);
 }
 
 bool mqttPublishCmdAck(const char* payload, size_t payloadLen) {
   static char topicBuf[kTopicBufLen];
   snprintf(topicBuf, kTopicBufLen, "%s/%s/cmd/ack",
            MQTT_TOPIC_PREFIX, identity::deviceCode());
-  return publishWithStats(topicBuf, payload, payloadLen, 1, false);
+  return publishWithStats(topicBuf, payload, payloadLen, false);
 }
 
 // ---- Stats ----
