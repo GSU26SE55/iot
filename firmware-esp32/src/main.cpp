@@ -51,6 +51,9 @@
 #include "core/idempotency_key.h"
 #include "ota/ota_update.h"             // Sprint 7 (S7-FW-01/02)
 #include "queue/local_queue.h"
+#include "core/ingest_policy.h"
+#include "core/reading_filter.h"
+#include "core/ingest_result.h"
 #include "provision/provision.h"
 #include "telemetry/heartbeat.h"
 #include "ui/status_led.h"
@@ -66,6 +69,7 @@ uint32_t s_lastIngestMs    = 0;
 uint32_t s_batchSeq        = 0;
 uint32_t s_okCount         = 0;
 uint32_t s_failCount       = 0;
+uint32_t s_partialIngestCount = 0;   // GH-748
 uint32_t s_queuedCount     = 0;
 uint32_t s_flushedCount    = 0;
 
@@ -156,6 +160,22 @@ PostOutcome postBatch(const char* body, size_t bodyLen, const char* idempKey) {
                   res.httpCode,
                   static_cast<unsigned long>(res.durationMs),
                   idempKey ? idempKey : "(none)");
+
+    // GH-748 — 2xx KHÔNG có nghĩa cả batch đã vào. Backend trả
+    // { totalReceived, inserted, skipped }; trước đây firmware không hề đọc, nên việc bỏ
+    // số đo (sai mapping asset, giá trị ngoài dải) diễn ra trong im lặng.
+    //
+    // KHÔNG gửi lại phần bị bỏ: `skipped` của backend là mapping_invalid + outlier — cả hai
+    // vĩnh viễn, gửi lại đúng dữ liệu đó chỉ ra đúng kết quả đó. Cái cần cứu là TÍN HIỆU.
+    const core::IngestResult ing =
+        core::parseIngestResult(res.responseSnippet, strlen(res.responseSnippet));
+    if (ing.isPartial()) {
+      s_partialIngestCount++;
+      Serial.printf("[ingest] ⚠ NHẬN THIẾU: %d/%d reading vào được, %d bị bỏ.\n",
+                    ing.inserted, ing.totalReceived, ing.skipped);
+      Serial.println("[ingest]   Nguyên nhân thường gặp: serial pin chưa được map cho thiết bị");
+      Serial.println("[ingest]   này, hoặc giá trị ngoài dải vật lý. Kiểm tra provisioning/hiệu chuẩn.");
+    }
     return PostOutcome::Success;
   }
   bool transient = net::isTransientFailure(res.httpCode);
@@ -175,8 +195,12 @@ PostOutcome postBatch(const char* body, size_t bodyLen, const char* idempKey) {
 // 1 hoặc 2 reading thay vì 3. Slot indexing cũ `b * 3` sẽ misgroup.
 //
 // Returns true nếu TẤT CẢ battery có ≥ 1 reading publish OK; false nếu ANY fail.
+// GH-740 — báo lại serial ĐÃ publish để caller loại chúng khỏi fallback HTTPS.
+// `outPublished` nhận con trỏ vào chính `readings[i].serial` (sống hết vòng gọi).
 bool ingestViaMqtt(const char* isoTs, size_t batteryCount,
-                   const core::SensorReading* readings, size_t readingCount) {
+                   const core::SensorReading* readings, size_t readingCount,
+                   const char** outPublished, size_t outCap, size_t* outPublishedCount) {
+  if (outPublishedCount) *outPublishedCount = 0;
   (void)batteryCount;  // không còn dùng — group by serial dynamic
   if (!net::mqttIsConnected()) return false;
   if (readings == nullptr || readingCount == 0) return false;
@@ -232,10 +256,58 @@ bool ingestViaMqtt(const char* isoTs, size_t batteryCount,
                   serial, static_cast<unsigned>(nGroup),
                   static_cast<unsigned>(bodyLen),
                   pubOk ? "OK" : "FAIL");
-    if (!pubOk) return false;
+    if (!pubOk) {
+      // GH-740 — dừng tại đây, NHƯNG danh sách serial đã gửi vẫn được trả về để fallback
+      // HTTPS bỏ qua chúng. Trước đây chỉ `return false` nên caller gửi lại cả batch.
+      return false;
+    }
+    if (outPublished && outPublishedCount && *outPublishedCount < outCap) {
+      outPublished[(*outPublishedCount)++] = serial;
+    }
     okCount++;
   }
   return okCount == nUnique;
+}
+
+// GH-737 — LẤY MẪU + XẾP HÀNG KHI KHÔNG CÓ MẠNG.
+//
+// Trước đây main loop mất Wi-Fi thì chỉ `s_failCount++`: không đọc BMS, không ghi gì vào
+// hàng đợi. Hàng đợi CHỈ được nạp từ nhánh lỗi tạm thời của ingestOnce() — mà nhánh đó đòi
+// phải online trước đã. Hệ quả: toàn bộ telemetry trong khoảng mất mạng biến mất, trái cam
+// kết "không mất dữ liệu 5 phút" (README §88, overall.iot.md §403-413).
+//
+// Hàm này cố ý lặp lại các bước dựng payload của ingestOnce() thay vì tái cấu trúc hàm đó:
+// ingestOnce() còn phải giữ `readings` cho đường MQTT, tách ra sẽ đụng cả nhánh đang chạy tốt.
+//
+// Mốc thời gian: đồng hồ hệ thống ESP32 vẫn chạy sau khi mất Wi-Fi (NTP chỉ ĐẶT giờ một lần),
+// nên isoNow()/timeEpoch() vẫn đúng trong lúc offline. Chỉ trường hợp CHƯA TỪNG sync NTP mới
+// không tạo được bản ghi hợp lệ — khi đó trả false và caller đếm fail.
+bool sampleAndQueueOffline() {
+  char ts[24];
+  if (!net::isoNow(ts, sizeof(ts))) return false;
+
+  core::SensorReading readings[kMaxReadings];
+  const size_t nBat = MOCK_BATTERY_COUNT > bms::kMockMaxBatteries
+                      ? bms::kMockMaxBatteries
+                      : MOCK_BATTERY_COUNT;
+  const size_t n = bms::bmsSourcePollAll(readings, nBat);
+  if (n == 0) return false;
+
+  const size_t bodyLen = core::buildProductionBatchPayload(
+      readings, n, ts, identity::deviceCode(),
+      s_payloadBuf, sizeof(s_payloadBuf));
+  if (bodyLen == 0) return false;
+
+  // Khoá idempotency sinh NGAY LÚC LẤY MẪU và đi cùng bản ghi vào hàng đợi: khi đẩy bù sau
+  // reconnect, backend nhận đúng khoá đó nên gửi lại nhiều lần cũng không sinh bản ghi trùng.
+  if (!core::generateIdempotencyKeyV4(s_idempBuf, sizeof(s_idempBuf))) return false;
+
+  const uint32_t epoch = net::timeEpoch();
+  if (epoch == 0) return false;
+
+  // queueEnqueue dùng epoch GIÂY làm tên file ⇒ hai lần đẩy trong cùng một giây sẽ đè nhau.
+  // Hàm này chỉ được gọi theo nhịp poll (mặc định 5s) nên khoá luôn duy nhất.
+  return queue::queueEnqueue(epoch, s_payloadBuf, bodyLen, s_idempBuf);
 }
 
 bool ingestOnce() {
@@ -260,8 +332,13 @@ bool ingestOnce() {
   bool tryMqtt = net::mqttIsConnected() &&
                  (net::mqttConsecutiveFailCount() < MQTT_PUBLISH_FAIL_THRESHOLD);
 
+  // GH-740 — serial đã publish qua MQTT, để loại khỏi fallback HTTPS.
+  const char* mqttPublished[bms::kMockMaxBatteries] = {nullptr};
+  size_t      mqttPublishedCount = 0;
+
   if (tryMqtt) {
-    if (ingestViaMqtt(ts, nBat, readings, n)) {
+    if (ingestViaMqtt(ts, nBat, readings, n,
+                      mqttPublished, bms::kMockMaxBatteries, &mqttPublishedCount)) {
       s_backoff.reset();
       Serial.printf("[ingest] MQTT posted %u readings across %u pin\n",
                     static_cast<unsigned>(n), static_cast<unsigned>(nBat));
@@ -276,8 +353,25 @@ bool ingestOnce() {
   }
 
   // ---- Fallback HTTPS path (giữ idempotency + queue logic Sprint 3) ----
+  // GH-740 — chỉ gửi phần MQTT CHƯA đẩy được. Publish một phần rồi fallback toàn bộ batch
+  // là ghi trùng những nhóm đã vào backend qua MQTT (khoá idempotency HTTPS không cứu được,
+  // vì bản ghi kia vào bằng đường khác với hình dạng payload khác).
+  core::SensorReading remaining[kMaxReadings];
+  const size_t nRemaining = core::filterOutPublished(
+      readings, n, mqttPublished, mqttPublishedCount, remaining, kMaxReadings);
+
+  if (nRemaining == 0) {
+    Serial.println("[ingest] MQTT đã đẩy hết — không cần fallback HTTPS");
+    return true;
+  }
+  if (nRemaining < n) {
+    Serial.printf("[ingest] fallback HTTPS %u/%u reading (bỏ %u đã publish qua MQTT)\n",
+                  static_cast<unsigned>(nRemaining), static_cast<unsigned>(n),
+                  static_cast<unsigned>(n - nRemaining));
+  }
+
   size_t bodyLen = core::buildProductionBatchPayload(
-      readings, n, ts, identity::deviceCode(),
+      remaining, nRemaining, ts, identity::deviceCode(),
       s_payloadBuf, sizeof(s_payloadBuf));
   if (bodyLen == 0) return false;
 
@@ -291,7 +385,7 @@ bool ingestOnce() {
   if (outcome == PostOutcome::Success) {
     s_backoff.reset();
     Serial.printf("[ingest] HTTPS posted %u readings (multi-source)\n",
-                  static_cast<unsigned>(n));
+                  static_cast<unsigned>(nRemaining));
     return true;
   }
 
@@ -539,12 +633,29 @@ void appLoopBody() {
   if (now - s_lastIngestMs >= pollInterval) {
     s_lastIngestMs = now;
 
-    if (!net::wifiIsConnected()) {
-      s_failCount++;
-    } else if (!net::timeIsSynced()) {
-      s_failCount++;
-    } else {
+    // GH-737 — quyết định tách sang core::ingestAction() (hàm thuần, test ở env:native).
+    switch (core::ingestAction(net::wifiIsConnected(), net::timeIsSynced())) {
+    case core::IngestAction::PostOnline:
       if (ingestOnce()) s_okCount++; else s_failCount++;
+      break;
+
+    case core::IngestAction::QueueOffline: {
+      // GH-737 — mất mạng nhưng đồng hồ vẫn chạy: VẪN đọc BMS và xếp hàng, để đẩy bù
+      // sau khi có mạng lại. Trước đây nhánh này chỉ tăng bộ đếm lỗi ⇒ mất trắng dữ liệu.
+      if (sampleAndQueueOffline()) {
+        s_queuedCount++;
+        Serial.printf("[ingest] offline → queued (depth=%u)\n",
+                      static_cast<unsigned>(queue::queueSize()));
+      } else {
+        s_failCount++;
+      }
+      break;
+    }
+
+    case core::IngestAction::SkipNoClock:
+      // Chưa từng sync NTP ⇒ không có mốc thời gian hợp lệ để ghi bản ghi.
+      s_failCount++;
+      break;
     }
   }
 
@@ -563,13 +674,23 @@ void appLoopBody() {
   // Sprint 5 (S5-FW-06): SHT31 ambient post mỗi SHT31_POLL_INTERVAL_MS (60s default).
   // Tự skip nếu USE_MOCK_BMS=1 (sht31Begin() chưa init nên Tick no-op).
   if (net::wifiIsConnected() && net::timeIsSynced()) {
+    // SHT31 là cảm biến MÔI TRƯỜNG (nhiệt/ẩm) — chỉ để báo cáo, gate theo mạng là hợp lý.
     sensor::sht31Tick();
-    // Sprint 6 (S6-FW-01/02): poll MQ-2 + water leak → report incident khi vượt.
-    // Gate online giống sht31: offline → tick dừng, IncidentTrigger đóng băng;
-    // reconnect + điều kiện còn → cạnh lên re-detect → report.
-    sensor::mq2Tick();
-    sensor::waterLeakTick();
   }
+
+  // GH-736 — CẢM BIẾN AN TOÀN CHẠY VÔ ĐIỀU KIỆN.
+  //
+  // Trước đây MQ-2 và rò nước bị gate chung với SHT31 ("gate online giống sht31"). Hệ quả:
+  // xung khí/nước xảy ra trong lúc mất Wi-Fi hoặc NTP chưa sync sẽ KHÔNG được lấy mẫu, và
+  // nếu điều kiện hết trước khi có mạng lại thì sự cố biến mất không dấu vết. Mất mạng không
+  // làm pin bớt cháy — gộp cảm biến an toàn chung với cảm biến báo cáo là biến sự cố mạng
+  // thành sự cố an toàn.
+  //
+  // An toàn khi gỡ gate: envIncidentReport() tự trả false NGAY (không gọi mạng, không chặn)
+  // khi thiếu siteId/NTP, và cả hai cảm biến đã có sẵn cơ chế latch `s_pendingReport` để thử
+  // lại ở tick sau. Nên offline vẫn lấy mẫu + chốt sự cố, có mạng thì đẩy đi.
+  sensor::mq2Tick();
+  sensor::waterLeakTick();
 
   updateStatusLed();
   logStatsPeriodic();

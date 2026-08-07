@@ -15,6 +15,9 @@
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <LittleFS.h>
+
+#include "net/tls_ca.h"
 #include <string.h>
 
 #include "config/device_identity.h"     // S2-FW-01 + S2-FW-04: runtime credentials
@@ -66,6 +69,10 @@ PostResult postJsonInternal(const char* path,
   if (outRespBytes) *outRespBytes = 0;
 
   if (!s_tlsConfigured) httpClientBegin();
+  if (!s_tlsConfigured) {          // GH-735 — không có CA thì không gửi đi đâu cả.
+    res.durationMs = 0;
+    return res;
+  }
 
   String url;
   url.reserve(96 + (path ? strlen(path) : 0));
@@ -135,6 +142,10 @@ PostResult httpGetJsonRecv(const char* path,
   if (outRespBytes) *outRespBytes = 0;
 
   if (!s_tlsConfigured) httpClientBegin();
+  if (!s_tlsConfigured) {          // GH-735 — không có CA thì không gửi đi đâu cả.
+    res.durationMs = 0;
+    return res;
+  }
 
   String url;
   url.reserve(96 + (path ? strlen(path) : 0));
@@ -190,6 +201,10 @@ PostResult httpPutJson(const char* path, const char* body, size_t bodyLen) {
   res.responseSnippet[0] = '\0';
 
   if (!s_tlsConfigured) httpClientBegin();
+  if (!s_tlsConfigured) {          // GH-735 — không có CA thì không gửi đi đâu cả.
+    res.durationMs = 0;
+    return res;
+  }
 
   String url;
   url.reserve(96 + (path ? strlen(path) : 0));
@@ -232,12 +247,72 @@ PostResult httpPutJson(const char* path, const char* body, size_t bodyLen) {
   return res;
 }
 
+namespace {
+
+// Cache CA PEM. setCACert() giữ CON TRỎ chứ không copy, nên chuỗi phải sống lâu hơn
+// mọi kết nối ⇒ static, không phải biến cục bộ.
+String s_caPem;
+bool   s_caLoaded    = false;
+bool   s_caAttempted = false;
+bool   s_insecureMode = false;
+
+tls::CaLoadStatus loadCaPemOnce() {
+  if (s_caLoaded) return tls::CaLoadStatus::Ok;
+  if (s_caAttempted && !s_caLoaded) return tls::CaLoadStatus::FileMissing;
+  s_caAttempted = true;
+
+  // formatOnFail=false CÓ CHỦ Ý: format sẽ xoá luôn hàng đợi offline và chính file CA
+  // (xem GH-936). Thà báo lỗi còn hơn tự ý xoá dữ liệu.
+  if (!LittleFS.begin(false)) return tls::CaLoadStatus::FilesystemUnavailable;
+  if (!LittleFS.exists(TLS_CA_CERT_PATH)) return tls::CaLoadStatus::FileMissing;
+
+  File f = LittleFS.open(TLS_CA_CERT_PATH, "r");
+  if (!f) return tls::CaLoadStatus::FileUnreadable;
+  s_caPem = f.readString();
+  f.close();
+
+  if (!tls::isLikelyPemCertificate(s_caPem.c_str(), s_caPem.length()))
+    return tls::CaLoadStatus::NotPemFormat;
+
+  s_caLoaded = true;
+  return tls::CaLoadStatus::Ok;
+}
+
+}  // namespace
+
+bool httpConfigureTls(WiFiClientSecure& client) {
+  const tls::CaLoadStatus st = loadCaPemOnce();
+  if (st == tls::CaLoadStatus::Ok) {
+    client.setCACert(s_caPem.c_str());
+    s_insecureMode = false;
+    return true;
+  }
+
+#if TLS_ALLOW_INSECURE
+  // Lối thoát dev — cố ý ồn ào để không ai vô tình để lọt lên production.
+  Serial.printf("[http] *** TLS KHÔNG VERIFY *** (%s). CHỈ dùng cho dev — "
+                "TLS_ALLOW_INSECURE=1.\n", tls::describe(st));
+  client.setInsecure();
+  s_insecureMode = true;
+  return true;
+#else
+  // GH-735 — FAIL CLOSED. Trước đây nhánh này gọi setInsecure(), nghĩa là thiếu CA thì
+  // firmware vẫn chạy nhưng nhận mọi chứng chỉ: kẻ đứng giữa trả về bản mô tả firmware
+  // giả kèm SHA khớp là thiết bị flash luôn. Không nạp được CA thì KHÔNG kết nối.
+  Serial.printf("[http] TLS FAIL: %s. Từ chối kết nối.\n", tls::describe(st));
+  Serial.printf("[http]   → copy CA vào data%s rồi `pio run -t uploadfs`\n", TLS_CA_CERT_PATH);
+  s_insecureMode = false;
+  return false;
+#endif
+}
+
+bool httpTlsIsInsecure() { return s_insecureMode; }
+
 void httpClientBegin() {
   if (s_tlsConfigured) return;
-  // PILOT: bỏ qua verify CA. Sprint 3+ phải set root CA.
-  s_tlsClient.setInsecure();
-  s_tlsConfigured = true;
-  Serial.println("[http] TLS configured (INSECURE — dev only)");
+  s_tlsConfigured = httpConfigureTls(s_tlsClient);
+  if (s_tlsConfigured)
+    Serial.println("[http] TLS configured (verify CA)");
 }
 
 PostResult httpPostJson(const char* path,

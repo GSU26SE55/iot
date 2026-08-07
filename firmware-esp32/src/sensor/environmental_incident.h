@@ -1,8 +1,8 @@
 // ==================================================================
 // Sprint 6 — S6-FW-01/02 (#63/#64): Environmental incident reporter.
 //
-// Reporter DÙNG CHUNG cho MQ-2 (smoke) + water leak: build payload và POST sang
-// backend `POST /api/environmental-incidents`.
+// Reporter DÙNG CHUNG cho MQ-2 (gas — báo GasLeak, xem NS-24 #664) + water leak
+// (Flood): build payload và POST sang backend `POST /api/environmental-incidents`.
 //
 // ⚠ Vì sao HTTPS chứ không MQTT (dù tasksprint ghi "publish qua MQTT"):
 //   Backend MQTT bridge (MqttBridgeBackgroundService) CHỈ subscribe 4 wildcard
@@ -54,7 +54,23 @@ void envIncidentSetSiteId(const char* siteIdGuid);
 // Báo cáo 1 incident lên backend. Trả true nếu HTTP 2xx (201 created hoặc
 // 200 dedup). `notes` optional (nullptr OK). Caller PHẢI đảm bảo WiFi + NTP
 // synced; nếu siteId rỗng hoặc NTP chưa sync → skip + log + trả false.
-bool envIncidentReport(IncidentType type, IncidentSeverity severity, const char* notes);
+/// GH-736 — `detectedSecondsAgo` = sự cố xảy ra cách đây bao lâu (0 = vừa xảy ra).
+/// Cần thiết vì cảm biến an toàn nay lấy mẫu cả khi offline: sự cố có thể phát hiện lúc
+/// mất mạng và chỉ gửi được hàng giờ sau — ghi giờ lúc gửi là ghi sai thời điểm sự cố.
+/// GH-741 — kết quả gửi, phân biệt lỗi tạm thời với lỗi vĩnh viễn.
+enum class IncidentReportResult {
+  Success = 1,
+  /// Mạng lỗi / 5xx / 408 / 429 — thử lại CÓ tác dụng, nhưng phải có backoff.
+  Transient = 2,
+  /// 4xx khác (400/401/403/404/409/422) — gửi lại vẫn hỏng. Phải DỪNG, không thử lại.
+  Permanent = 3,
+};
+
+IncidentReportResult envIncidentReport(IncidentType type, IncidentSeverity severity,
+                                       const char* notes, uint32_t detectedSecondsAgo = 0);
+
+/// Số incident bị BỎ vì lỗi vĩnh viễn (sai scope API key, chưa provision…).
+uint32_t envIncidentDroppedCount();
 
 uint32_t envIncidentReportOkCount();
 uint32_t envIncidentReportFailCount();

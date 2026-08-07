@@ -14,6 +14,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <WiFiClientSecure.h>
+
 namespace net {
 
 struct PostResult {
@@ -27,6 +29,14 @@ struct PostResult {
 
 // Khởi tạo HTTP client (lần đầu setup TLS). Gọi 1 lần trong setup().
 void httpClientBegin();
+
+/// GH-735 — gắn CA cert vào một WiFiClientSecure bất kỳ (dùng chung cho HTTPS ingest + OTA).
+/// Trả false khi KHÔNG nạp được CA ⇒ caller PHẢI từ chối kết nối, không được đi tiếp.
+/// (Ngoại lệ duy nhất: build đặt TLS_ALLOW_INSECURE=1 — chỉ dành cho dev.)
+bool httpConfigureTls(WiFiClientSecure& client);
+
+/// True nếu TLS đang chạy ở chế độ KHÔNG verify (chỉ xảy ra khi TLS_ALLOW_INSECURE=1).
+bool httpTlsIsInsecure();
 
 // POST `body` (Content-Type: application/json) lên `BACKEND_URL + path`.
 // Thêm header X-Api-Key + X-Device-Code (lấy từ identity store — S2-FW-04).
