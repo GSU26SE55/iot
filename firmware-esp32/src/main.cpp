@@ -435,6 +435,8 @@ void logStatsPeriodic() {
 
 }  // namespace
 
+void appTask(void* pv);
+
 void setup() {
   Serial.begin(SERIAL_BAUD);
   uint32_t t0 = millis();
@@ -511,10 +513,17 @@ void setup() {
     Serial.println("[setup] MQTT init FAIL — chạy HTTPS-only (S4-FW-06 fallback)");
   }
 
+  // loopTask của Arduino chỉ có 8KB stack — TLS handshake cộng HTTPClient khi
+  // POST batch làm chạm watchpoint cuối stack, chip panic "Unhandled debug
+  // exception" ngay sau heartbeat. CONFIG_ARDUINO_LOOP_STACK_SIZE nằm trong
+  // sdkconfig đã biên dịch sẵn nên build_flags không đổi được. Giải pháp: chạy
+  // toàn bộ thân vòng lặp trong task riêng có stack 16KB.
+  xTaskCreatePinnedToCore(appTask, "appLoop", 16384, nullptr, 1, nullptr, 1);
+
   Serial.println("[setup] done — entering loop()");
 }
 
-void loop() {
+void appLoopBody() {
   net::wifiTick();
   net::timeSyncTick();
   cli::cliTick();
@@ -564,5 +573,17 @@ void loop() {
 
   updateStatusLed();
   logStatsPeriodic();
-  delay(10);
+}
+
+void appTask(void* pv) {
+  (void)pv;
+  for (;;) {
+    appLoopBody();
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
+// Mọi việc đã chuyển sang appTask — loopTask chỉ còn ngủ.
+void loop() {
+  vTaskDelay(pdMS_TO_TICKS(1000));
 }
