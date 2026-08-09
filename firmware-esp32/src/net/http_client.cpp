@@ -14,10 +14,12 @@
 
 #include <Arduino.h>
 #include <HTTPClient.h>
+#include <WiFiClient.h>
 #include <WiFiClientSecure.h>
 #include <string.h>
 
 #include "config/device_identity.h"     // S2-FW-01 + S2-FW-04: runtime credentials
+#include "config/runtime_config.h"
 
 #if __has_include("config.h")
   #include "config.h"
@@ -31,7 +33,15 @@ namespace {
 // Static để không cấp phát lại heap mỗi request — TLS handshake tốn 30–60kB heap;
 // reuse giúp keep-alive (cùng host).
 WiFiClientSecure s_tlsClient;
+WiFiClient       s_plainClient;
 bool             s_tlsConfigured = false;
+
+bool beginRequest(HTTPClient& http, const String& url) {
+  if (url.startsWith("https://")) return http.begin(s_tlsClient, url);
+  if (url.startsWith("http://")) return http.begin(s_plainClient, url);
+  Serial.printf("[http] unsupported URL scheme: %s\n", url.c_str());
+  return false;
+}
 
 size_t copyResponseFull(HTTPClient& http,
                         char* snippet, size_t snippetLen,
@@ -69,7 +79,7 @@ PostResult postJsonInternal(const char* path,
 
   String url;
   url.reserve(96 + (path ? strlen(path) : 0));
-  url += BACKEND_URL;
+  url += runtimecfg::runtimeConfig().backendUrl;
   url += path;
 
   HTTPClient http;
@@ -78,7 +88,7 @@ PostResult postJsonInternal(const char* path,
   http.setConnectTimeout(HTTP_TIMEOUT_MS);
 
   uint32_t t0 = millis();
-  if (!http.begin(s_tlsClient, url)) {
+  if (!beginRequest(http, url)) {
     Serial.printf("[http] begin() failed url=%s\n", url.c_str());
     res.durationMs = millis() - t0;
     return res;
@@ -138,7 +148,7 @@ PostResult httpGetJsonRecv(const char* path,
 
   String url;
   url.reserve(96 + (path ? strlen(path) : 0));
-  url += BACKEND_URL;
+  url += runtimecfg::runtimeConfig().backendUrl;
   url += path;
 
   HTTPClient http;
@@ -147,7 +157,7 @@ PostResult httpGetJsonRecv(const char* path,
   http.setConnectTimeout(HTTP_TIMEOUT_MS);
 
   uint32_t t0 = millis();
-  if (!http.begin(s_tlsClient, url)) {
+  if (!beginRequest(http, url)) {
     Serial.printf("[http] GET begin() failed url=%s\n", url.c_str());
     res.durationMs = millis() - t0;
     return res;
@@ -193,7 +203,7 @@ PostResult httpPutJson(const char* path, const char* body, size_t bodyLen) {
 
   String url;
   url.reserve(96 + (path ? strlen(path) : 0));
-  url += BACKEND_URL;
+  url += runtimecfg::runtimeConfig().backendUrl;
   url += path;
 
   HTTPClient http;
@@ -202,7 +212,7 @@ PostResult httpPutJson(const char* path, const char* body, size_t bodyLen) {
   http.setConnectTimeout(HTTP_TIMEOUT_MS);
 
   uint32_t t0 = millis();
-  if (!http.begin(s_tlsClient, url)) {
+  if (!beginRequest(http, url)) {
     Serial.printf("[http] PUT begin() failed url=%s\n", url.c_str());
     res.durationMs = millis() - t0;
     return res;

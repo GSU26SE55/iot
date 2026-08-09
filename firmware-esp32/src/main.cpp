@@ -33,6 +33,7 @@
 #include "cmd/command_handler.h"
 #include "config/device_identity.h"
 #include "config/nvs_store.h"
+#include "config/runtime_config.h"
 #include "net/wifi_manager.h"
 #include "net/time_sync.h"
 #include "net/http_client.h"
@@ -54,6 +55,7 @@
 #include "provision/provision.h"
 #include "telemetry/heartbeat.h"
 #include "ui/status_led.h"
+#include "portal/setup_portal.h"
 
 #include <cstring>
 
@@ -83,7 +85,7 @@ void printBanner() {
   Serial.println(" Sprint 1+2+3 — Firmware ESP32-S3");
   Serial.printf("  Version : %s\n",   FW_VERSION);
   Serial.printf("  Env     : %s\n",   FW_BUILD_ENV);
-  Serial.printf("  Backend : %s\n",   BACKEND_URL);
+  Serial.printf("  Backend : %s\n", runtimecfg::runtimeConfig().backendUrl);
   Serial.printf("  Pins    : %u × %u sources\n",
                 static_cast<unsigned>(MOCK_BATTERY_COUNT),
                 static_cast<unsigned>(bms::kSourcesPerBattery));
@@ -442,15 +444,21 @@ void setup() {
   uint32_t t0 = millis();
   while (!Serial && millis() - t0 < 2000) { delay(10); }
 
+  // Runtime network/service values must be loaded before Wi-Fi, HTTP and MQTT.
+  // Values saved by the browser portal override config.h after the first setup.
+  storage::nvsBegin();
+  runtimecfg::runtimeConfigBegin();
+  identity::identityBegin();
+
   printBanner();
 
   ui::ledBegin();
   ui::ledSet(ui::LedState::Offline);
 
-  net::wifiBegin(WIFI_SSID, WIFI_PASS);
+  const runtimecfg::RuntimeConfig& runtimeConfig = runtimecfg::runtimeConfig();
+  net::wifiBegin(runtimeConfig.wifiSsid, runtimeConfig.wifiPassword);
+  portal::setupPortalBegin();
   net::timeSyncBegin();
-  storage::nvsBegin();
-  identity::identityBegin();
   provision::loadProvisioned(s_provCfg);
   if (s_provCfg.provisioned) {
     Serial.printf("[main] loaded provisioned config: polling=%lums hb=%lums site=%s ntp=%s\n",
@@ -583,7 +591,9 @@ void appTask(void* pv) {
   }
 }
 
-// Mọi việc đã chuyển sang appTask — loopTask chỉ còn ngủ.
+// Keep WebServer on Arduino's loopTask (the same task that created it in setup).
+// Network ingest remains on appTask because TLS needs the larger 16 KB stack.
 void loop() {
-  vTaskDelay(pdMS_TO_TICKS(1000));
+  portal::setupPortalTick();
+  vTaskDelay(pdMS_TO_TICKS(10));
 }

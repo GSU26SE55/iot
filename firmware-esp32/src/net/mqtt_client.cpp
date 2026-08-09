@@ -10,6 +10,7 @@
 #endif
 
 #include "config/device_identity.h"
+#include "config/runtime_config.h"
 #include "net/time_sync.h"
 #include "net/ca_cert_embedded.h"
 
@@ -28,13 +29,11 @@ namespace net {
 namespace {
 
 // ---- Static state ----
-#if MQTT_USE_TLS
-WiFiClientSecure s_wifiClient;
-#else
-WiFiClient       s_wifiClient;
-#endif
-
-PubSubClient    s_mqtt(s_wifiClient);
+WiFiClient       s_plainClient;
+WiFiClientSecure s_tlsClient;
+PubSubClient     s_plainMqtt(s_plainClient);
+PubSubClient     s_tlsMqtt(s_tlsClient);
+PubSubClient*    s_mqtt = &s_plainMqtt;
 CommandCallback s_userCmdCb     = nullptr;
 bool            s_inited        = false;
 uint32_t        s_lastReconnectMs = 0;
@@ -68,66 +67,46 @@ void onMessage(char* topic, byte* payload, unsigned int length) {
   }
 }
 
-bool loadCaCert() {
-#if MQTT_USE_TLS
-  // Ưu tiên CA nhúng trong firmware. LittleFS không dùng được cho việc này:
-  // local_queue và chính file này đều gọi LittleFS.begin(true) tức
-  // format-nếu-mount-lỗi, mà ảnh mklittlefs không mount được nên phân vùng
-  // bị xoá sạch mỗi lần boot, cuốn theo ca_cert.pem.
+bool configureRuntimeTransport() {
+  const runtimecfg::RuntimeConfig& config = runtimecfg::runtimeConfig();
+  if (!config.mqttUseTls) {
+    Serial.println("[mqtt] plain MQTT selected (LAN/development only)");
+    return true;
+  }
+
   if (kMqttCaCert[0] != '\0') {
-    // KHÔNG trim(): mbedTLS đòi PEM kết thúc bằng ký tự xuống dòng sau dòng
-    // -----END CERTIFICATE-----. Cắt mất nó là bắt tay hỏng với lỗi -9984
-    // "X509 Certificate verification failed", rất dễ tưởng nhầm sai CA.
     s_caCert = String(kMqttCaCert);
     if (s_caCert.indexOf("-----BEGIN CERTIFICATE-----") >= 0) {
-      s_wifiClient.setCACert(s_caCert.c_str());
-      Serial.printf("[mqtt] CA cert nhúng trong firmware (%u bytes)\n",
+      s_tlsClient.setCACert(s_caCert.c_str());
+      Serial.printf("[mqtt] embedded CA configured (%u bytes)\n",
                     static_cast<unsigned>(s_caCert.length()));
       return true;
     }
-    Serial.println("[mqtt] CA nhúng sai format — thử đọc từ LittleFS");
   }
 
-  if (!LittleFS.begin(true /*formatOnFail*/)) {
-    Serial.println("[mqtt] LittleFS mount FAIL — không load được CA cert");
+  if (!LittleFS.begin(true) || !LittleFS.exists(MQTT_CA_CERT_PATH)) {
+    Serial.printf("[mqtt] TLS selected but CA is unavailable at %s\n",
+                  MQTT_CA_CERT_PATH);
     return false;
   }
-  if (!LittleFS.exists(MQTT_CA_CERT_PATH)) {
-    Serial.printf("[mqtt] CA cert KHÔNG tồn tại tại %s\n", MQTT_CA_CERT_PATH);
-    Serial.println("[mqtt]   → chạy `infra/mqtt/scripts/gen-certs.sh`");
-    Serial.println("[mqtt]   → copy ca.crt vào firmware-esp32/data/ca_cert.pem");
-    Serial.println("[mqtt]   → pio run -t uploadfs");
+  File certificateFile = LittleFS.open(MQTT_CA_CERT_PATH, "r");
+  if (!certificateFile) return false;
+  s_caCert = certificateFile.readString();
+  certificateFile.close();
+  if (s_caCert.length() < 100 ||
+      s_caCert.indexOf("-----BEGIN CERTIFICATE-----") < 0) {
+    Serial.println("[mqtt] TLS CA file is invalid");
     return false;
   }
-  File f = LittleFS.open(MQTT_CA_CERT_PATH, "r");
-  if (!f) return false;
-  s_caCert = f.readString();
-  f.close();
-  if (s_caCert.length() < 100) {
-    Serial.printf("[mqtt] CA cert quá ngắn (%u bytes) — file hỏng?\n",
-                  static_cast<unsigned>(s_caCert.length()));
-    return false;
-  }
-  // Sanity check PEM marker — bắt nhầm format (DER binary, JSON, hoặc file rác).
-  // PEM cert PHẢI bắt đầu bằng "-----BEGIN CERTIFICATE-----".
-  if (s_caCert.indexOf("-----BEGIN CERTIFICATE-----") < 0) {
-    Serial.printf("[mqtt] CA cert KHÔNG phải PEM format (thiếu -----BEGIN CERTIFICATE-----).\n");
-    Serial.printf("[mqtt]   Đầu file: '%s'\n", s_caCert.substring(0, 40).c_str());
-    Serial.println("[mqtt]   → Sửa: cp infra/mqtt/mosquitto/certs/ca.crt data/ca_cert.pem (PEM ASCII)");
-    return false;
-  }
-  s_wifiClient.setCACert(s_caCert.c_str());
-  Serial.printf("[mqtt] CA cert loaded (%u bytes) từ %s\n",
-                static_cast<unsigned>(s_caCert.length()), MQTT_CA_CERT_PATH);
+  s_tlsClient.setCACert(s_caCert.c_str());
+  Serial.printf("[mqtt] CA configured from %s (%u bytes)\n", MQTT_CA_CERT_PATH,
+                static_cast<unsigned>(s_caCert.length()));
   return true;
-#else
-  Serial.println("[mqtt] MQTT_USE_TLS=0 — plain MQTT (KHÔNG dùng cho production)");
-  return true;
-#endif
 }
 
 bool tryConnect() {
   if (!WiFi.isConnected()) return false;
+  const runtimecfg::RuntimeConfig& config = runtimecfg::runtimeConfig();
 
   // (Re)config LWT mỗi lần connect — vì deviceCode có thể đổi qua Serial CLI
   // (S2-FW-01 hot reload). LWT topic = solar/{dev}/status, payload="offline",
@@ -137,21 +116,21 @@ bool tryConnect() {
            MQTT_TOPIC_PREFIX, identity::deviceCode());
 
   Serial.printf("[mqtt] connect host=%s port=%d user=%s lwt=%s ...\n",
-                MQTT_BROKER_HOST, MQTT_BROKER_PORT,
-                MQTT_USERNAME, willTopicBuf);
+                config.mqttHost, config.mqttPort,
+                config.mqttUsername, willTopicBuf);
 
   // PubSubClient::connect(clientId, user, pass, willTopic, willQos, willRetain, willMsg)
-  bool ok = s_mqtt.connect(
-      MQTT_CLIENT_ID,
-      MQTT_USERNAME,
-      MQTT_PASSWORD,
+  bool ok = s_mqtt->connect(
+      identity::deviceCode(),
+      config.mqttUsername,
+      config.mqttPassword,
       willTopicBuf,           // S4-FW-02 will topic
       1,                       // willQos
       true,                    // willRetain
       "offline");              // willMessage
 
   if (!ok) {
-    int state = s_mqtt.state();
+    int state = s_mqtt->state();
     // PubSubClient state codes — map sang lý do dễ debug.
     const char* reason;
     switch (state) {
@@ -176,14 +155,14 @@ bool tryConnect() {
                 static_cast<unsigned long>(s_connectCount));
 
   // S4-FW-03: publish "online" retain QoS 1 lên status — override LWT "offline".
-  bool pubOk = s_mqtt.publish(willTopicBuf, "online", true /*retain*/);
+  bool pubOk = s_mqtt->publish(willTopicBuf, "online", true /*retain*/);
   Serial.printf("[mqtt] status=online retain → %s\n", pubOk ? "OK" : "FAIL");
 
   // S4-FW-03: subscribe downlink cmd.
   static char cmdTopicBuf[kTopicBufLen];
   snprintf(cmdTopicBuf, kTopicBufLen, "%s/%s/cmd",
            MQTT_TOPIC_PREFIX, identity::deviceCode());
-  bool subOk = s_mqtt.subscribe(cmdTopicBuf, 1 /*QoS 1*/);
+  bool subOk = s_mqtt->subscribe(cmdTopicBuf, 1 /*QoS 1*/);
   Serial.printf("[mqtt] subscribe %s → %s\n",
                 cmdTopicBuf, subOk ? "OK" : "FAIL");
 
@@ -210,7 +189,7 @@ bool tryConnect() {
 //   Sprint 5+ backend nên lowercase topic build hoặc dùng MqttUsername field.
 void warnIfCaseMismatch() {
   const char* dev = identity::deviceCode();
-  const char* user = MQTT_USERNAME;
+  const char* user = runtimecfg::runtimeConfig().mqttUsername;
   if (!dev || !user) return;
 
   size_t devLen = strlen(dev);
@@ -238,23 +217,24 @@ void warnIfCaseMismatch() {
 bool mqttBegin() {
   if (s_inited) return true;
 
-  if (!loadCaCert()) {
-#if MQTT_USE_TLS
+  const runtimecfg::RuntimeConfig& config = runtimecfg::runtimeConfig();
+  s_mqtt = config.mqttUseTls ? &s_tlsMqtt : &s_plainMqtt;
+
+  if (!configureRuntimeTransport()) {
     Serial.println("[mqtt] mqttBegin FAIL — CA cert chưa sẵn sàng");
     return false;
-#endif
   }
 
-  s_mqtt.setServer(MQTT_BROKER_HOST, MQTT_BROKER_PORT);
-  s_mqtt.setBufferSize(MQTT_MAX_PACKET_SIZE);
-  s_mqtt.setKeepAlive(MQTT_KEEPALIVE_SEC);
-  s_mqtt.setCallback(onMessage);
+  s_mqtt->setServer(config.mqttHost, config.mqttPort);
+  s_mqtt->setBufferSize(MQTT_MAX_PACKET_SIZE);
+  s_mqtt->setKeepAlive(MQTT_KEEPALIVE_SEC);
+  s_mqtt->setCallback(onMessage);
 
   warnIfCaseMismatch();
 
   s_inited = true;
   Serial.printf("[mqtt] init OK — broker=%s:%d tls=%d buf=%u keepalive=%ds\n",
-                MQTT_BROKER_HOST, MQTT_BROKER_PORT, MQTT_USE_TLS,
+                config.mqttHost, config.mqttPort, config.mqttUseTls ? 1 : 0,
                 static_cast<unsigned>(MQTT_MAX_PACKET_SIZE),
                 static_cast<int>(MQTT_KEEPALIVE_SEC));
   return true;
@@ -264,12 +244,11 @@ void mqttTick() {
   if (!s_inited) return;
   if (!WiFi.isConnected()) return;
 
-#if MQTT_USE_TLS
   // TLS cert validation cần NTP synced — broker cert có notBefore=2026 GMT,
   // ESP32 boot time=1970 sẽ fail "certificate not yet valid" và loop spam log
   // tới khi NTP sync. Gate tryConnect bằng net::timeIsSynced() — Sprint 1 đã có
   // setup NTP qua time_sync.cpp.
-  if (!net::timeIsSynced()) {
+  if (runtimecfg::runtimeConfig().mqttUseTls && !net::timeIsSynced()) {
     static uint32_t s_lastNtpWaitLogMs = 0;
     uint32_t now = millis();
     if (now - s_lastNtpWaitLogMs > 10000) {
@@ -278,9 +257,8 @@ void mqttTick() {
     }
     return;
   }
-#endif
 
-  if (!s_mqtt.connected()) {
+  if (!s_mqtt->connected()) {
     uint32_t now = millis();
     if (now - s_lastReconnectMs < MQTT_RECONNECT_INTERVAL_MS) return;
     s_lastReconnectMs = now;
@@ -288,11 +266,11 @@ void mqttTick() {
     return;
   }
 
-  s_mqtt.loop();
+  s_mqtt->loop();
 }
 
 bool mqttIsConnected() {
-  return s_mqtt.connected();
+  return s_mqtt->connected();
 }
 
 void mqttSetCommandCallback(CommandCallback cb) {
@@ -304,7 +282,7 @@ void mqttSetCommandCallback(CommandCallback cb) {
 namespace {
 bool publishWithStats(const char* topic, const char* payload, size_t len,
                      uint8_t qos, bool retain) {
-  if (!s_mqtt.connected()) {
+  if (!s_mqtt->connected()) {
     s_pubFail++;
     s_consecutiveFail++;
     return false;
@@ -316,9 +294,9 @@ bool publishWithStats(const char* topic, const char* payload, size_t len,
   //   "publish/subscribe QoS 0..1"); LWT vẫn được set QoS 1 ở connect().
   //   Production có thể nâng cấp lên MQTTnet hoặc esp-mqtt nếu cần QoS 1 strict.
   (void)qos;
-  bool ok = s_mqtt.publish(topic,
-                           reinterpret_cast<const uint8_t*>(payload),
-                           len, retain);
+  bool ok = s_mqtt->publish(topic,
+                            reinterpret_cast<const uint8_t*>(payload),
+                            len, retain);
   if (ok) {
     s_pubOk++;
     s_consecutiveFail = 0;

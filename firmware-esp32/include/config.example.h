@@ -13,6 +13,16 @@
 #define WIFI_SSID       "your-wifi"
 #define WIFI_PASS   "your-password"
 
+// --------- Browser setup portal ----------
+// LAN: http://<ESP32-IP>:8080 or http://solar-gateway.local:8080
+// Wi-Fi failure fallback: join SolarBMS-xxxxxx, then open http://192.168.4.1:8080
+#define CONFIG_PORTAL_PORT            8080
+#define CONFIG_PORTAL_USER            "admin"
+#define CONFIG_PORTAL_PASSWORD        "change-me-now"
+#define CONFIG_PORTAL_AP_PREFIX       "SolarBMS"
+#define CONFIG_PORTAL_HOSTNAME        "solar-gateway"
+#define CONFIG_PORTAL_AP_FALLBACK_MS  30000UL
+
 // --------- NTP ---------- (S1-FW-03)
 // Pool gần Việt Nam — fallback sang pool.ntp.org nếu fail.
 #define NTP_SERVER_1    "vn.pool.ntp.org"

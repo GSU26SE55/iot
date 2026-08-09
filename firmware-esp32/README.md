@@ -9,6 +9,18 @@ Roadmap firmware:
 - **Sprint 5** ← **HIỆN TẠI** — Modbus RTU BMS + INA226 + DS18B20 + SHT31 + USE_MOCK_BMS dispatcher
 - Sprint 7 — OTA
 
+## Browser setup portal
+
+Firmware exposes a small configuration app directly from the ESP32:
+
+- Connected to the router: `http://<ESP32-IP>:8080` or `http://solar-gateway.local:8080`
+- Cannot connect to the router: join the `SolarBMS-xxxxxx` Wi-Fi network, then open `http://192.168.4.1:8080`
+- Default example login: `admin` / `change-me-now` (change `CONFIG_PORTAL_PASSWORD` in `include/config.h` before flashing)
+
+The portal can update Wi-Fi, Backend URL, device credentials and MQTT settings. Values are stored in NVS and override `config.h` on later boots. Passwords are write-only: the API only returns flags that indicate whether a password exists.
+
+The fallback AP starts immediately after an initial Wi-Fi failure and also starts when a previously connected station stays offline for `CONFIG_PORTAL_AP_FALLBACK_MS`. The configuration server remains available through the LAN IP while normal telemetry is running.
+
 ## Sprint 4 quick reference
 
 ```
