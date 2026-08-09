@@ -31,9 +31,12 @@
 
 #include "cli/serial_cli.h"
 #include "cmd/command_handler.h"
+#include "config/battery_map_runtime.h"
 #include "config/device_identity.h"
+#include "config/mqtt_config.h"
 #include "config/nvs_store.h"
 #include "config/runtime_config.h"
+#include "config/wifi_config.h"
 #include "net/wifi_manager.h"
 #include "net/time_sync.h"
 #include "net/http_client.h"
@@ -52,6 +55,10 @@
 #include "core/idempotency_key.h"
 #include "ota/ota_update.h"             // Sprint 7 (S7-FW-01/02)
 #include "queue/local_queue.h"
+#include "core/ingest_policy.h"
+#include "core/reprovision_policy.h"
+#include "core/reading_filter.h"
+#include "core/ingest_result.h"
 #include "provision/provision.h"
 #include "telemetry/heartbeat.h"
 #include "ui/status_led.h"
@@ -68,6 +75,7 @@ uint32_t s_lastIngestMs    = 0;
 uint32_t s_batchSeq        = 0;
 uint32_t s_okCount         = 0;
 uint32_t s_failCount       = 0;
+uint32_t s_partialIngestCount = 0;   // GH-748
 uint32_t s_queuedCount     = 0;
 uint32_t s_flushedCount    = 0;
 
@@ -85,7 +93,7 @@ void printBanner() {
   Serial.println(" Sprint 1+2+3 — Firmware ESP32-S3");
   Serial.printf("  Version : %s\n",   FW_VERSION);
   Serial.printf("  Env     : %s\n",   FW_BUILD_ENV);
-  Serial.printf("  Backend : %s\n", runtimecfg::runtimeConfig().backendUrl);
+  Serial.printf("  Backend : %s\n", runtimecfg::backendUrl());
   Serial.printf("  Pins    : %u × %u sources\n",
                 static_cast<unsigned>(MOCK_BATTERY_COUNT),
                 static_cast<unsigned>(bms::kSourcesPerBattery));
@@ -101,6 +109,12 @@ void ensureProvisioned() {
     sensor::sht31SetSiteId(s_provCfg.siteId);
     // Sprint 6 (S6-FW-01/02): siteId dùng chung cho MQ-2 + water leak reporter.
     sensor::envIncidentSetSiteId(s_provCfg.siteId);
+
+    // IOT3-46 — nhánh này chạy khi NVS đã có `provd=1`, tức TỪ LẦN BOOT THỨ HAI TRỞ ĐI.
+    // Thiếu dòng dưới thì lần boot đầu (vừa provision xong) chạy đẹp, còn mọi lần boot sau
+    // âm thầm chạy HTTPS-only — và KHÔNG có log lỗi nào, vì HTTPS vẫn hoạt động bình thường.
+    // `mqttApplyConfig()` tự bỏ qua khi cấu hình không đổi, gọi nhiều lần vô hại.
+    net::mqttApplyConfig();
     return;
   }
   if (!net::wifiIsConnected() || !net::timeIsSynced()) return;
@@ -121,6 +135,36 @@ void ensureProvisioned() {
     s_nextAttemptMs = millis() + 30000;
     Serial.println("[main] provision fail — retry sau 30s");
   }
+}
+
+// IOT3-44 — broker từ chối đăng nhập liên tục ⇒ xin lại credential.
+//
+// Khác hẳn lỗi mạng: chờ không giải quyết được gì, vì mật khẩu trong NVS đã không còn khớp
+// `mqtt_password_plaintext` bên backend (admin xoay key, hoặc thiết bị được tạo lại). Đường tự
+// lành duy nhất là chạy lại `/provision` để nhận credential mới.
+void checkMqttCredentialHealth() {
+  static uint32_t s_lastReprovMs   = 0;
+  static bool     s_everReprov     = false;
+
+  if (!s_provisionDone) return;   // provision đang/chưa chạy — để `ensureProvisioned()` lo
+
+  if (!core::shouldReprovisionOnAuthFailure(net::mqttAuthFailureCount(),
+                                            net::mqttAuthFailureThreshold(),
+                                            millis(), s_lastReprovMs, s_everReprov)) {
+    return;
+  }
+
+  Serial.printf("[main] MQTT bị từ chối xác thực %lu lần liên tiếp — xin lại credential "
+                "qua /provision (hạ nhiệt %lu phút)\n",
+                static_cast<unsigned long>(net::mqttAuthFailureCount()),
+                static_cast<unsigned long>(core::kReprovisionCooldownMs / 60000UL));
+
+  provision::clearProvisionFlag();
+  s_provCfg.provisioned = false;
+  s_provisionDone       = false;
+  net::mqttResetAuthFailures();
+  s_lastReprovMs = millis();
+  s_everReprov   = true;
 }
 
 // Sprint 3 (S3-FW-04): build production payload với multi-source.
@@ -158,6 +202,22 @@ PostOutcome postBatch(const char* body, size_t bodyLen, const char* idempKey) {
                   res.httpCode,
                   static_cast<unsigned long>(res.durationMs),
                   idempKey ? idempKey : "(none)");
+
+    // GH-748 — 2xx KHÔNG có nghĩa cả batch đã vào. Backend trả
+    // { totalReceived, inserted, skipped }; trước đây firmware không hề đọc, nên việc bỏ
+    // số đo (sai mapping asset, giá trị ngoài dải) diễn ra trong im lặng.
+    //
+    // KHÔNG gửi lại phần bị bỏ: `skipped` của backend là mapping_invalid + outlier — cả hai
+    // vĩnh viễn, gửi lại đúng dữ liệu đó chỉ ra đúng kết quả đó. Cái cần cứu là TÍN HIỆU.
+    const core::IngestResult ing =
+        core::parseIngestResult(res.responseSnippet, strlen(res.responseSnippet));
+    if (ing.isPartial()) {
+      s_partialIngestCount++;
+      Serial.printf("[ingest] ⚠ NHẬN THIẾU: %d/%d reading vào được, %d bị bỏ.\n",
+                    ing.inserted, ing.totalReceived, ing.skipped);
+      Serial.println("[ingest]   Nguyên nhân thường gặp: serial pin chưa được map cho thiết bị");
+      Serial.println("[ingest]   này, hoặc giá trị ngoài dải vật lý. Kiểm tra provisioning/hiệu chuẩn.");
+    }
     return PostOutcome::Success;
   }
   bool transient = net::isTransientFailure(res.httpCode);
@@ -177,8 +237,12 @@ PostOutcome postBatch(const char* body, size_t bodyLen, const char* idempKey) {
 // 1 hoặc 2 reading thay vì 3. Slot indexing cũ `b * 3` sẽ misgroup.
 //
 // Returns true nếu TẤT CẢ battery có ≥ 1 reading publish OK; false nếu ANY fail.
+// GH-740 — báo lại serial ĐÃ publish để caller loại chúng khỏi fallback HTTPS.
+// `outPublished` nhận con trỏ vào chính `readings[i].serial` (sống hết vòng gọi).
 bool ingestViaMqtt(const char* isoTs, size_t batteryCount,
-                   const core::SensorReading* readings, size_t readingCount) {
+                   const core::SensorReading* readings, size_t readingCount,
+                   const char** outPublished, size_t outCap, size_t* outPublishedCount) {
+  if (outPublishedCount) *outPublishedCount = 0;
   (void)batteryCount;  // không còn dùng — group by serial dynamic
   if (!net::mqttIsConnected()) return false;
   if (readings == nullptr || readingCount == 0) return false;
@@ -234,10 +298,58 @@ bool ingestViaMqtt(const char* isoTs, size_t batteryCount,
                   serial, static_cast<unsigned>(nGroup),
                   static_cast<unsigned>(bodyLen),
                   pubOk ? "OK" : "FAIL");
-    if (!pubOk) return false;
+    if (!pubOk) {
+      // GH-740 — dừng tại đây, NHƯNG danh sách serial đã gửi vẫn được trả về để fallback
+      // HTTPS bỏ qua chúng. Trước đây chỉ `return false` nên caller gửi lại cả batch.
+      return false;
+    }
+    if (outPublished && outPublishedCount && *outPublishedCount < outCap) {
+      outPublished[(*outPublishedCount)++] = serial;
+    }
     okCount++;
   }
   return okCount == nUnique;
+}
+
+// GH-737 — LẤY MẪU + XẾP HÀNG KHI KHÔNG CÓ MẠNG.
+//
+// Trước đây main loop mất Wi-Fi thì chỉ `s_failCount++`: không đọc BMS, không ghi gì vào
+// hàng đợi. Hàng đợi CHỈ được nạp từ nhánh lỗi tạm thời của ingestOnce() — mà nhánh đó đòi
+// phải online trước đã. Hệ quả: toàn bộ telemetry trong khoảng mất mạng biến mất, trái cam
+// kết "không mất dữ liệu 5 phút" (README §88, overall.iot.md §403-413).
+//
+// Hàm này cố ý lặp lại các bước dựng payload của ingestOnce() thay vì tái cấu trúc hàm đó:
+// ingestOnce() còn phải giữ `readings` cho đường MQTT, tách ra sẽ đụng cả nhánh đang chạy tốt.
+//
+// Mốc thời gian: đồng hồ hệ thống ESP32 vẫn chạy sau khi mất Wi-Fi (NTP chỉ ĐẶT giờ một lần),
+// nên isoNow()/timeEpoch() vẫn đúng trong lúc offline. Chỉ trường hợp CHƯA TỪNG sync NTP mới
+// không tạo được bản ghi hợp lệ — khi đó trả false và caller đếm fail.
+bool sampleAndQueueOffline() {
+  char ts[24];
+  if (!net::isoNow(ts, sizeof(ts))) return false;
+
+  core::SensorReading readings[kMaxReadings];
+  const size_t nBat = MOCK_BATTERY_COUNT > bms::kMockMaxBatteries
+                      ? bms::kMockMaxBatteries
+                      : MOCK_BATTERY_COUNT;
+  const size_t n = bms::bmsSourcePollAll(readings, nBat);
+  if (n == 0) return false;
+
+  const size_t bodyLen = core::buildProductionBatchPayload(
+      readings, n, ts, identity::deviceCode(),
+      s_payloadBuf, sizeof(s_payloadBuf));
+  if (bodyLen == 0) return false;
+
+  // Khoá idempotency sinh NGAY LÚC LẤY MẪU và đi cùng bản ghi vào hàng đợi: khi đẩy bù sau
+  // reconnect, backend nhận đúng khoá đó nên gửi lại nhiều lần cũng không sinh bản ghi trùng.
+  if (!core::generateIdempotencyKeyV4(s_idempBuf, sizeof(s_idempBuf))) return false;
+
+  const uint32_t epoch = net::timeEpoch();
+  if (epoch == 0) return false;
+
+  // queueEnqueue dùng epoch GIÂY làm tên file ⇒ hai lần đẩy trong cùng một giây sẽ đè nhau.
+  // Hàm này chỉ được gọi theo nhịp poll (mặc định 5s) nên khoá luôn duy nhất.
+  return queue::queueEnqueue(epoch, s_payloadBuf, bodyLen, s_idempBuf);
 }
 
 bool ingestOnce() {
@@ -262,8 +374,13 @@ bool ingestOnce() {
   bool tryMqtt = net::mqttIsConnected() &&
                  (net::mqttConsecutiveFailCount() < MQTT_PUBLISH_FAIL_THRESHOLD);
 
+  // GH-740 — serial đã publish qua MQTT, để loại khỏi fallback HTTPS.
+  const char* mqttPublished[bms::kMockMaxBatteries] = {nullptr};
+  size_t      mqttPublishedCount = 0;
+
   if (tryMqtt) {
-    if (ingestViaMqtt(ts, nBat, readings, n)) {
+    if (ingestViaMqtt(ts, nBat, readings, n,
+                      mqttPublished, bms::kMockMaxBatteries, &mqttPublishedCount)) {
       s_backoff.reset();
       Serial.printf("[ingest] MQTT posted %u readings across %u pin\n",
                     static_cast<unsigned>(n), static_cast<unsigned>(nBat));
@@ -278,8 +395,25 @@ bool ingestOnce() {
   }
 
   // ---- Fallback HTTPS path (giữ idempotency + queue logic Sprint 3) ----
+  // GH-740 — chỉ gửi phần MQTT CHƯA đẩy được. Publish một phần rồi fallback toàn bộ batch
+  // là ghi trùng những nhóm đã vào backend qua MQTT (khoá idempotency HTTPS không cứu được,
+  // vì bản ghi kia vào bằng đường khác với hình dạng payload khác).
+  core::SensorReading remaining[kMaxReadings];
+  const size_t nRemaining = core::filterOutPublished(
+      readings, n, mqttPublished, mqttPublishedCount, remaining, kMaxReadings);
+
+  if (nRemaining == 0) {
+    Serial.println("[ingest] MQTT đã đẩy hết — không cần fallback HTTPS");
+    return true;
+  }
+  if (nRemaining < n) {
+    Serial.printf("[ingest] fallback HTTPS %u/%u reading (bỏ %u đã publish qua MQTT)\n",
+                  static_cast<unsigned>(nRemaining), static_cast<unsigned>(n),
+                  static_cast<unsigned>(n - nRemaining));
+  }
+
   size_t bodyLen = core::buildProductionBatchPayload(
-      readings, n, ts, identity::deviceCode(),
+      remaining, nRemaining, ts, identity::deviceCode(),
       s_payloadBuf, sizeof(s_payloadBuf));
   if (bodyLen == 0) return false;
 
@@ -293,7 +427,7 @@ bool ingestOnce() {
   if (outcome == PostOutcome::Success) {
     s_backoff.reset();
     Serial.printf("[ingest] HTTPS posted %u readings (multi-source)\n",
-                  static_cast<unsigned>(n));
+                  static_cast<unsigned>(nRemaining));
     return true;
   }
 
@@ -360,12 +494,27 @@ void tryFlushQueue() {
 }
 
 void updateStatusLed() {
-  if (!net::wifiIsConnected()) {
-    ui::ledSet(ui::LedState::Offline);
-  } else if (queue::queueSize() > 0) {
-    ui::ledSet(ui::LedState::Queued);
+  // IOT3-54 — thứ tự xét đi từ "cần người can thiệp nhất" xuống "để yên được".
+  // Trạng thái MẠNG phải đứng trên trạng thái hàng đợi: chưa có mạng thì hàng đợi đầy là hệ quả,
+  // không phải nguyên nhân, mà đèn chỉ nói được MỘT điều nên phải nói cái gốc.
+  switch (net::wifiPhase()) {
+    case net::WifiPhase::Unconfigured:
+      ui::ledSet(ui::LedState::Setup);          // tím nháy — mở trang cài đặt lên đi
+      return;
+    case net::WifiPhase::Recovery:
+      ui::ledSet(ui::LedState::Recovery);       // tím/cam xen kẽ — mất mạng lâu, AP đang bật
+      return;
+    case net::WifiPhase::Connecting:
+      ui::ledSet(ui::LedState::WifiSearching);  // cam — đang tìm mạng
+      return;
+    case net::WifiPhase::Connected:
+      break;
+  }
+
+  if (queue::queueSize() > 0) {
+    ui::ledSet(ui::LedState::Queued);           // xanh nháy — còn hàng đợi
   } else {
-    ui::ledSet(ui::LedState::Online);
+    ui::ledSet(ui::LedState::Online);           // xanh đều
   }
 }
 
@@ -379,7 +528,8 @@ void logStatsPeriodic() {
                 "hb ok=%lu fail=%lu / queue=%u backoff_attempt=%lu / "
                 "mqtt conn=%s cn=%lu pubok=%lu pubfail=%lu streak=%lu / "
                 "cmd rx=%lu ok=%lu fail=%lu unk=%lu / "
-                "heap=%u rssi=%ddBm wifi=%s prov=%s\n",
+                "heap=%u rssi=%ddBm wifi=%s prov=%s / "
+                "cfg wifi=%s mqtt=%s batmap=%s(%u pin)\n",
                 static_cast<unsigned long>(now / 1000),
                 static_cast<unsigned long>(s_okCount),
                 static_cast<unsigned long>(s_failCount),
@@ -401,7 +551,13 @@ void logStatsPeriodic() {
                 static_cast<unsigned>(ESP.getFreeHeap()),
                 net::wifiRssi(),
                 net::wifiIsConnected() ? "UP" : "DOWN",
-                s_provisionDone ? "yes" : "no");
+                s_provisionDone ? "yes" : "no",
+                // IOT3-47 — nguồn cấu hình. Câu hỏi đầu tiên khi thiết bị "nối sai chỗ" luôn là
+                // "nó đang đọc NVS hay đang đọc bản build?", trước đây phải đoán.
+                wificfg::isFromNvs() ? "nvs" : "compile",
+                mqttcfg::isFromNvs() ? "nvs" : "compile",
+                batmap::isFromNvs()  ? "nvs" : "compile",
+                static_cast<unsigned>(batmap::count()));
 
   // Sprint 5 — sensor stats (chỉ relevant nếu USE_MOCK_BMS=0; mock mode counters luôn 0).
 #if !USE_MOCK_BMS
@@ -444,20 +600,25 @@ void setup() {
   uint32_t t0 = millis();
   while (!Serial && millis() - t0 < 2000) { delay(10); }
 
-  // Runtime network/service values must be loaded before Wi-Fi, HTTP and MQTT.
-  // Values saved by the browser portal override config.h after the first setup.
-  storage::nvsBegin();
-  runtimecfg::runtimeConfigBegin();
-  identity::identityBegin();
-
-  printBanner();
+  // NVS-backed settings are loaded below before Wi-Fi, HTTP and MQTT start.
 
   ui::ledBegin();
   ui::ledSet(ui::LedState::Offline);
 
-  const runtimecfg::RuntimeConfig& runtimeConfig = runtimecfg::runtimeConfig();
-  net::wifiBegin(runtimeConfig.wifiSsid, runtimeConfig.wifiPassword);
-  portal::setupPortalBegin();
+  // IOT3-45 — NVS phải mở TRƯỚC WiFi: từ sprint này SSID/mật khẩu, broker MQTT và bảng pin đều
+  // nằm trong NVS, còn macro trong config.h chỉ là đường lui. Giữ thứ tự cũ (WiFi trước NVS) thì
+  // lần boot nào cũng nối bằng mạng compile-time rồi mới biết NVS có mạng khác.
+  storage::nvsBegin();
+  identity::identityBegin();      // deviceCode — mqttcfg cần để suy tiền tố topic dự phòng
+  wificfg::begin();               // IOT3-36
+  mqttcfg::begin();               // IOT3-37
+  batmap::begin();                // IOT3-49
+  runtimecfg::runtimeConfigBegin();
+
+  printBanner();
+
+  net::wifiBegin();               // IOT3-50 — tự đọc wificfg
+  portal::setupPortalBegin();     // authenticated LAN app on port 8080
   net::timeSyncBegin();
   provision::loadProvisioned(s_provCfg);
   if (s_provCfg.provisioned) {
@@ -508,17 +669,21 @@ void setup() {
   // Sprint 4 (S4-FW-01/02/03/05): MQTT broker client + downlink handler.
   // mqttBegin() load CA cert từ LittleFS (queue đã mount LittleFS lúc queueBegin
   // — share an toàn vì LittleFS API idempotent).
-  if (net::mqttBegin()) {
-    cmd::handlerBegin();
-    // S4-FW-05: wire polling setter — cmd `set_interval` cập nhật s_provCfg.
-    cmd::setPollingHandler([](uint32_t newMs) -> bool {
-      s_provCfg.pollingIntervalMs = newMs;
-      Serial.printf("[main] polling interval đã đổi runtime → %lums\n",
-                    static_cast<unsigned long>(newMs));
-      return true;
-    });
-  } else {
-    Serial.println("[setup] MQTT init FAIL — chạy HTTPS-only (S4-FW-06 fallback)");
+  // IOT3-40 — đăng ký handler downlink VÔ ĐIỀU KIỆN. Từ sprint này `mqttBegin()` trả false ở
+  // trạng thái hoàn toàn bình thường "chưa provision", và MQTT sẽ lên sau đó qua
+  // `mqttApplyConfig()`. Cột handler vào nhánh thành công như trước thì thiết bị nối được broker
+  // nhưng câm lệnh downlink cho tới lần khởi động lại — mà chẳng có log nào nói vì sao.
+  cmd::handlerBegin();
+  // S4-FW-05: wire polling setter — cmd `set_interval` cập nhật s_provCfg.
+  cmd::setPollingHandler([](uint32_t newMs) -> bool {
+    s_provCfg.pollingIntervalMs = newMs;
+    Serial.printf("[main] polling interval đã đổi runtime → %lums\n",
+                  static_cast<unsigned long>(newMs));
+    return true;
+  });
+
+  if (!net::mqttBegin()) {
+    Serial.println("[setup] MQTT chưa khởi tạo — chạy HTTPS-only (S4-FW-06 fallback)");
   }
 
   // loopTask của Arduino chỉ có 8KB stack — TLS handshake cộng HTTPClient khi
@@ -537,6 +702,8 @@ void appLoopBody() {
   cli::cliTick();
   // Sprint 4: MQTT tick (reconnect + poll inbound cmd). Tự skip nếu wifi down.
   net::mqttTick();
+  ui::ledTick();                 // IOT3-54 — bơm hiệu ứng nháy
+  checkMqttCredentialHealth();   // IOT3-44 — phải chạy TRƯỚC ensureProvisioned()
 
   ensureProvisioned();
 
@@ -547,12 +714,29 @@ void appLoopBody() {
   if (now - s_lastIngestMs >= pollInterval) {
     s_lastIngestMs = now;
 
-    if (!net::wifiIsConnected()) {
-      s_failCount++;
-    } else if (!net::timeIsSynced()) {
-      s_failCount++;
-    } else {
+    // GH-737 — quyết định tách sang core::ingestAction() (hàm thuần, test ở env:native).
+    switch (core::ingestAction(net::wifiIsConnected(), net::timeIsSynced())) {
+    case core::IngestAction::PostOnline:
       if (ingestOnce()) s_okCount++; else s_failCount++;
+      break;
+
+    case core::IngestAction::QueueOffline: {
+      // GH-737 — mất mạng nhưng đồng hồ vẫn chạy: VẪN đọc BMS và xếp hàng, để đẩy bù
+      // sau khi có mạng lại. Trước đây nhánh này chỉ tăng bộ đếm lỗi ⇒ mất trắng dữ liệu.
+      if (sampleAndQueueOffline()) {
+        s_queuedCount++;
+        Serial.printf("[ingest] offline → queued (depth=%u)\n",
+                      static_cast<unsigned>(queue::queueSize()));
+      } else {
+        s_failCount++;
+      }
+      break;
+    }
+
+    case core::IngestAction::SkipNoClock:
+      // Chưa từng sync NTP ⇒ không có mốc thời gian hợp lệ để ghi bản ghi.
+      s_failCount++;
+      break;
     }
   }
 
@@ -571,13 +755,23 @@ void appLoopBody() {
   // Sprint 5 (S5-FW-06): SHT31 ambient post mỗi SHT31_POLL_INTERVAL_MS (60s default).
   // Tự skip nếu USE_MOCK_BMS=1 (sht31Begin() chưa init nên Tick no-op).
   if (net::wifiIsConnected() && net::timeIsSynced()) {
+    // SHT31 là cảm biến MÔI TRƯỜNG (nhiệt/ẩm) — chỉ để báo cáo, gate theo mạng là hợp lý.
     sensor::sht31Tick();
-    // Sprint 6 (S6-FW-01/02): poll MQ-2 + water leak → report incident khi vượt.
-    // Gate online giống sht31: offline → tick dừng, IncidentTrigger đóng băng;
-    // reconnect + điều kiện còn → cạnh lên re-detect → report.
-    sensor::mq2Tick();
-    sensor::waterLeakTick();
   }
+
+  // GH-736 — CẢM BIẾN AN TOÀN CHẠY VÔ ĐIỀU KIỆN.
+  //
+  // Trước đây MQ-2 và rò nước bị gate chung với SHT31 ("gate online giống sht31"). Hệ quả:
+  // xung khí/nước xảy ra trong lúc mất Wi-Fi hoặc NTP chưa sync sẽ KHÔNG được lấy mẫu, và
+  // nếu điều kiện hết trước khi có mạng lại thì sự cố biến mất không dấu vết. Mất mạng không
+  // làm pin bớt cháy — gộp cảm biến an toàn chung với cảm biến báo cáo là biến sự cố mạng
+  // thành sự cố an toàn.
+  //
+  // An toàn khi gỡ gate: envIncidentReport() tự trả false NGAY (không gọi mạng, không chặn)
+  // khi thiếu siteId/NTP, và cả hai cảm biến đã có sẵn cơ chế latch `s_pendingReport` để thử
+  // lại ở tick sau. Nên offline vẫn lấy mẫu + chốt sự cố, có mạng thì đẩy đi.
+  sensor::mq2Tick();
+  sensor::waterLeakTick();
 
   updateStatusLed();
   logStatsPeriodic();

@@ -4,9 +4,29 @@
 #include "core/payload.h"
 
 #include <ArduinoJson.h>
+#include <stdio.h>
 #include <string.h>
 
 namespace core {
+
+// Backend PK của hypertable sensor_readings là (Time, BatteryAssetId) — KHÔNG gồm
+// sensorSourceCode. isoNow() chỉ có độ phân giải giây, nên 3 reading cùng pin
+// (primary/redundant/external-temp) trong 1 batch mà dùng chung timestamp sẽ
+// vi phạm khóa chính → backend 500 cả batch. Vá millisecond = index item để mỗi
+// item có Time duy nhất: "…T08:15:42Z" + idx 7 → "…T08:15:42.007Z".
+static void patchItemTimestamp(const char* baseIso, size_t idx,
+                               char* outBuf, size_t outBufLen) {
+  const size_t n = strlen(baseIso);
+  if (n < 2 || baseIso[n - 1] != 'Z' || n + 5 >= outBufLen) {
+    // Format lạ hoặc buffer thiếu → giữ nguyên (an toàn hơn cắt xén).
+    strncpy(outBuf, baseIso, outBufLen - 1);
+    outBuf[outBufLen - 1] = '\0';
+    return;
+  }
+  memcpy(outBuf, baseIso, n - 1);
+  snprintf(outBuf + (n - 1), outBufLen - (n - 1), ".%03uZ",
+           static_cast<unsigned>(idx % 1000u));
+}
 
 size_t buildLegacyBatchPayload(const SensorReading* readings,
                                size_t                    readingCount,
@@ -33,8 +53,10 @@ size_t buildLegacyBatchPayload(const SensorReading* readings,
     const SensorReading& r = readings[i];
 
     JsonObject it = items.add<JsonObject>();
+    char itemIso[32];
+    patchItemTimestamp(isoTimestamp, i, itemIso, sizeof(itemIso));
     it["batteryAssetId"] = r.batteryAssetId;
-    it["time"]           = isoTimestamp;     // Sprint 1: 1 batch = 1 timestamp
+    it["time"]           = itemIso;          // ms = index → Time duy nhất per item
     it["voltage"]        = r.voltage;
     it["current"]        = r.current;
     it["temperature"]    = r.temperature;
@@ -91,8 +113,10 @@ size_t buildProductionBatchPayload(const SensorReading* readings,
     } else {
       it["batteryAssetId"] = r.batteryAssetId;
     }
-    it["time"]            = isoTimestamp;
-    it["deviceTimestamp"] = isoTimestamp;     // #IoT2-15 clock skew check
+    char itemIso[32];
+    patchItemTimestamp(isoTimestamp, i, itemIso, sizeof(itemIso));
+    it["time"]            = itemIso;          // ms = index → tránh đụng PK (Time, BatteryAssetId)
+    it["deviceTimestamp"] = itemIso;          // #IoT2-15 clock skew check
     it["voltage"]         = r.voltage;
     it["current"]         = r.current;
     it["temperature"]     = r.temperature;

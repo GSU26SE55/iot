@@ -25,6 +25,7 @@
 
 #include "config/nvs_store.h"
 #include "net/http_client.h"
+#include "core/ota_check_policy.h"
 #include "net/wifi_manager.h"
 #include "net/time_sync.h"
 #include "net/mqtt_client.h"
@@ -186,7 +187,15 @@ void enterRollback(bool markBad) {
 // Stream .bin qua HTTPS → Update partition + tính SHA-256 song song.
 bool downloadAndFlash(const char* url, const char* expectedSha, const char* logId) {
   WiFiClientSecure client;
-  client.setInsecure();   // pilot — nhất quán http_client (Sprint 1)
+  // GH-735 — dùng chung đường nạp CA với http_client. Trước đây gọi setInsecure():
+  // kẻ đứng giữa dựng được server giả trả .bin của mình kèm SHA khớp, và thiết bị
+  // flash luôn — SHA chỉ chứng minh "tải đúng thứ server nói", không chứng minh
+  // server đó là thật.
+  if (!net::httpConfigureTls(client)) {
+    Serial.println("[ota] TLS không cấu hình được — HUỶ tải firmware.");
+    putLog(logId, FwStatus::Failed, 0, "TLS CA unavailable");
+    return false;
+  }
 
   HTTPClient http;
   http.setTimeout(OTA_HTTP_TIMEOUT_MS);
@@ -463,6 +472,11 @@ bool otaBegin() {
 #endif
 }
 
+namespace {
+bool        s_forceCheck = false;
+const char* s_lastReject  = "";
+}  // namespace
+
 void otaTick() {
   if (!s_enabled) return;
 
@@ -480,15 +494,44 @@ void otaTick() {
 
   if (!net::wifiIsConnected() || !net::timeIsSynced()) return;
 
-  const uint32_t now = millis();
-  if (s_lastCheckMs == 0) {
-    if (now < 30000UL) return;        // chờ uptime 30s (WiFi/NTP/provision ổn định)
-  } else if (now - s_lastCheckMs < OTA_CHECK_INTERVAL_MS) {
-    return;
+  // GH-745 — quyết định tách sang core::decideOtaCheck() (thuần, test ở env:native).
+  core::OtaCheckInputs in;
+  in.enabled     = s_enabled;
+  in.verifying   = s_verifyMode;
+  in.forced      = s_forceCheck;
+  in.lastCheckMs = s_lastCheckMs;
+  in.nowMs       = millis();
+  in.intervalMs  = OTA_CHECK_INTERVAL_MS;
+  in.warmupMs    = 30000UL;   // chờ WiFi/NTP/provision ổn định sau boot
+
+  if (core::decideOtaCheck(in) != core::OtaCheckDecision::Run) return;
+
+  if (s_forceCheck) {
+    Serial.println("[ota] check do lệnh trigger_ota (bỏ qua khoảng chờ định kỳ)");
+    s_forceCheck = false;
   }
-  s_lastCheckMs = now;
+  s_lastCheckMs = in.nowMs;
   doCheckAndApply();
 }
+
+bool otaRequestCheck() {
+  if (!s_enabled) {
+    s_lastReject = "OTA disabled (OTA_ENABLED=0)";
+    Serial.println("[ota] trigger_ota TỪ CHỐI — OTA tắt bằng cấu hình");
+    return false;
+  }
+  if (s_verifyMode) {
+    s_lastReject = "verifying previous update";
+    Serial.println("[ota] trigger_ota TỪ CHỐI — đang xác minh bản vừa flash");
+    return false;
+  }
+  s_forceCheck = true;
+  s_lastReject = "";
+  Serial.println("[ota] trigger_ota ĐÃ NHẬN — sẽ check ở tick kế tiếp");
+  return true;
+}
+
+const char* otaLastRejectReason() { return s_lastReject; }
 
 bool     otaInVerifyMode() { return s_verifyMode; }
 uint32_t otaCheckCount()   { return s_checkCount; }

@@ -1,6 +1,4 @@
 {
-  "enabledMcpjsonServers": ["context7"],
-
   "permissions": {
     "allow": [
       "WebSearch",
@@ -28,12 +26,26 @@
       "Bash(ruff:*)",
       "Bash(uvicorn:*)",
       "Bash(pytest:*)",
-      "Bash(jq:*)"
+      "Bash(jq:*)",
+      "WebFetch(domain:docs.phinix.org)",
+      "WebFetch(domain:www.bdtronics.com)",
+      "WebFetch(domain:www.manualslib.com)",
+      "WebFetch(domain:www.gobelpower.com)",
+      "WebFetch(domain:www.macsbatteries.com)",
+      "WebFetch(domain:www.scribd.com)",
+      "WebFetch(domain:onvolt.pl)",
+      "WebFetch(domain:www.amazon.com)",
+      "WebFetch(domain:jikongbms.com)",
+      "WebFetch(domain:jag35.com)",
+      "WebFetch(domain:batteri-energi.dk)",
+      "WebFetch(domain:www.evlithium.com)",
+      "WebFetch(domain:www.thegioiic.com)"
     ]
   },
-
+  "enabledMcpjsonServers": [
+    "context7"
+  ],
   "hooks": {
-
     "PreToolUse": [
       {
         "matcher": "Bash",
@@ -64,7 +76,6 @@
         ]
       }
     ],
-
     "PostToolUse": [
       {
         "matcher": "Edit|Write",
@@ -132,7 +143,6 @@
         ]
       }
     ],
-
     "SessionStart": [
       {
         "matcher": "*",
@@ -145,7 +155,6 @@
         ]
       }
     ],
-
     "Stop": [
       {
         "matcher": "*",
@@ -158,6 +167,5 @@
         ]
       }
     ]
-
   }
 }

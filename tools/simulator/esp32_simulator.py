@@ -23,6 +23,7 @@ Yêu cầu: Python 3.10+, `requests` (pip install requests).
 from __future__ import annotations
 
 import argparse
+import enum
 import json
 import math
 import os
@@ -36,11 +37,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
+# GH-738 — KHÔNG sys.exit() ở tầng import.
+# Thoát ngay lúc import làm cả module không import được, nên phần logic thuần (phân loại
+# HTTP status) không thể viết test — mà đó đúng là chỗ đã sai. Lỗi thiếu `requests` được
+# báo trong main(), hành vi khi chạy CLI không đổi.
 try:
     import requests
-except ImportError:
-    print("[ERR] Cần cài requests: pip install requests", file=sys.stderr)
-    sys.exit(2)
+except ImportError:  # pragma: no cover - phụ thuộc môi trường
+    requests = None
 
 
 DEFAULT_HEARTBEAT_INTERVAL_S = 60
@@ -49,16 +53,42 @@ DEFAULT_BATCH_SIZE = 6
 DEFAULT_QUEUE_PATH = Path("./queue.jsonl")
 
 
+def iso_utc_now() -> str:
+    r"""GH-739 — mốc thời gian ĐÚNG dạng firmware thật phát ra.
+
+    Firmware dùng ``strftime("%Y-%m-%dT%H:%M:%SZ")`` (xem ``net::isoNow``) → ``...42Z``.
+    ``datetime.isoformat()`` của Python lại cho ``...42.789012+00:00`` — vừa có phần lẻ giây
+    vừa dùng offset thay vì ``Z``. Mock backend kiểm bằng
+    ``^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$`` nên dạng offset bị từ chối.
+
+    Đây là lỗi thứ hai lộ ra khi viết test hợp đồng cho GH-739 — cùng gốc: simulator sinh ra
+    JSON khác với thiết bị thật.
+    """
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 @dataclass
 class SensorReading:
-    Time: str
-    BatteryAssetSerial: str
-    Voltage: float
-    Current: float
-    Temperature: float
-    SocPercent: float
-    DeviceTimestamp: str
-    SourceType: int = 2  # IotGateway
+    """GH-739 — tên trường TRÙNG KHÍT chuỗi JSON mà firmware thật gửi (camelCase).
+
+    Trước đây dataclass này dùng PascalCase (``Time``, ``BatteryAssetSerial``, ``Items``),
+    trong khi firmware ESP32 (``core::buildProductionBatchPayload``) gửi camelCase
+    (``time``, ``batteryAssetSerial``, ``items``). Simulator vì thế KHÔNG mô phỏng đúng
+    thiết bị — nó chỉ "chạy được" với backend ASP.NET thật vì ASP.NET bind không phân biệt
+    hoa thường, che mất chỗ lệch; còn mock backend (nghiêm ngặt, đúng như đặc tả) trả 400.
+
+    Giữ tên trường Python trùng tên trên dây để ``asdict()`` sinh ra đúng payload, không
+    cần một lớp ánh xạ nữa có thể trôi khỏi hợp đồng.
+    """
+
+    time: str
+    batteryAssetSerial: str  # noqa: N815 - khớp tên trên dây
+    voltage: float
+    current: float
+    temperature: float
+    socPercent: float  # noqa: N815 - khớp tên trên dây
+    deviceTimestamp: str  # noqa: N815 - khớp tên trên dây
+    sourceType: int = 2  # noqa: N815 - khớp tên trên dây; 2 = IotGateway
 
     @staticmethod
     def mock_for(serial: str, t: float, base_v: float = 3.7) -> "SensorReading":
@@ -66,16 +96,48 @@ class SensorReading:
         current = round(random.uniform(-2.0, 2.0), 3)
         temperature = round(25.0 + 2.0 * math.sin(t / 120.0) + random.uniform(-0.5, 0.5), 2)
         soc = round(70.0 + 10.0 * math.sin(t / 600.0), 2)
-        now_utc = datetime.now(timezone.utc).isoformat()
+        now_utc = iso_utc_now()
         return SensorReading(
-            Time=now_utc,
-            BatteryAssetSerial=serial,
-            Voltage=voltage,
-            Current=current,
-            Temperature=temperature,
-            SocPercent=max(0.0, min(100.0, soc)),
-            DeviceTimestamp=now_utc,
+            time=now_utc,
+            batteryAssetSerial=serial,
+            voltage=voltage,
+            current=current,
+            temperature=temperature,
+            socPercent=max(0.0, min(100.0, soc)),
+            deviceTimestamp=now_utc,
         )
+
+
+class Outcome(enum.Enum):
+    """GH-738 — kết quả một lần gửi, quyết định giữ hay bỏ bản ghi."""
+
+    SUCCESS = "success"
+    TRANSIENT = "transient"   # lỗi tạm thời → giữ trong hàng đợi, thử lại sau
+    PERMANENT = "permanent"   # gửi lại cũng vô ích → bỏ, đừng chặn hàng đợi
+
+
+# Mã lỗi 4xx nhưng THỬ LẠI CÓ TÁC DỤNG.
+_RETRYABLE_4XX = frozenset({408, 425, 429})
+
+
+def classify_response(status_code: int) -> Outcome:
+    """Phân loại HTTP status theo hợp đồng ingest của backend.
+
+    Vì sao không so ``== 200``: endpoint ``/api/sensor-readings/batch`` trả **201 Created**
+    cho lần ghi mới và **200 OK** cho ca trùng idempotent. Simulator cũ chỉ nhận 200 nên MỌI
+    lần ghi mới đều bị ghi log FAIL rồi đẩy vào hàng đợi — và vì phần flush chỉ chạy sau một
+    lần gửi live thành công, hàng đợi không bao giờ vơi.
+
+    Phân loại thay vì chỉ đúng/sai: 4xx là dữ liệu sai, gửi lại vẫn sai — giữ nó trong hàng
+    đợi sẽ chặn vĩnh viễn mọi bản ghi phía sau (cùng lớp lỗi starvation với GH-725).
+    """
+    if 200 <= status_code < 300:
+        return Outcome.SUCCESS
+    if status_code in _RETRYABLE_4XX:
+        return Outcome.TRANSIENT
+    if 400 <= status_code < 500:
+        return Outcome.PERMANENT
+    return Outcome.TRANSIENT
 
 
 class LocalQueue:
@@ -131,7 +193,7 @@ class IotClient:
         body = {
             "FirmwareVersion": firmware_version,
             "HardwareRevision": hw_revision,
-            "DeviceTimestamp": datetime.now(timezone.utc).isoformat(),
+            "DeviceTimestamp": iso_utc_now(),
         }
         return self.session.post(f"{self.base_url}/api/iot-devices/provision", json=body, timeout=10)
 
@@ -142,7 +204,7 @@ class IotClient:
             "FreeMemoryPercent": round(random.uniform(30.0, 80.0), 2),
             "UptimeSeconds": uptime_s,
             "QueuedReadingCount": queued,
-            "DeviceTimestamp": datetime.now(timezone.utc).isoformat(),
+            "DeviceTimestamp": iso_utc_now(),
         }
         return self.session.post(f"{self.base_url}/api/iot-devices/heartbeat", json=body, timeout=10)
 
@@ -155,7 +217,7 @@ class IotClient:
 
     def ingest(self, readings: List[SensorReading], idempotency_key: str) -> requests.Response:
         headers = {"Idempotency-Key": idempotency_key}
-        body = {"Items": [asdict(r) for r in readings]}
+        body = {"items": [asdict(r) for r in readings]}
         return self.session.post(
             f"{self.base_url}/api/sensor-readings/batch",
             json=body,
@@ -182,6 +244,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+
+    # Kiểm SAU parse_args() để `--help` vẫn dùng được khi chưa cài requests.
+    if requests is None:
+        print("[ERR] Cần cài requests: pip install requests", file=sys.stderr)
+        return 2
     if not args.api_key:
         print("[ERR] Thiếu --api-key hoặc env IOT_API_KEY", file=sys.stderr)
         return 2
@@ -220,7 +287,7 @@ def main() -> int:
             try:
                 r = client.heartbeat(args.firmware_version, queue.size(), uptime)
                 print(f"[heartbeat] {r.status_code} queued={queue.size()}")
-                if r.status_code == 200:
+                if classify_response(r.status_code) is Outcome.SUCCESS:
                     try:
                         data = r.json().get("data", {})
                         if data.get("clockSkewWarning"):
@@ -233,17 +300,22 @@ def main() -> int:
 
         if now - last_ing >= args.ingest_interval:
             readings = [SensorReading.mock_for(random.choice(serials), now + i) for i in range(args.batch_size)]
-            payload = {"Items": [asdict(r) for r in readings]}
+            payload = {"items": [asdict(r) for r in readings]}
             idem_key = str(uuid.uuid4())
 
             sent = False
             try:
                 r = client.ingest(readings, idem_key)
-                if r.status_code == 200:
-                    print(f"[ingest] OK batch={len(readings)} resp={r.text[:120]}")
+                outcome = classify_response(r.status_code)
+                if outcome is Outcome.SUCCESS:
+                    print(f"[ingest] OK {r.status_code} batch={len(readings)} resp={r.text[:120]}")
                     sent = True
+                elif outcome is Outcome.PERMANENT:
+                    # 4xx: dữ liệu sai, gửi lại vẫn sai → BỎ, không đẩy vào hàng đợi.
+                    print(f"[ingest] DROPPED {r.status_code} (permanent) {r.text[:200]}")
+                    sent = True          # coi như đã xử lý xong, không xếp hàng
                 else:
-                    print(f"[ingest] FAIL {r.status_code} {r.text[:200]}")
+                    print(f"[ingest] FAIL {r.status_code} (transient) {r.text[:200]}")
             except requests.RequestException as ex:
                 print(f"[ingest] NETWORK FAIL: {ex}")
 
@@ -263,7 +335,13 @@ def main() -> int:
                                 headers={"Idempotency-Key": item["key"]},
                                 timeout=15,
                             )
-                            if r.status_code == 200:
+                            outcome = classify_response(r.status_code)
+                            if outcome is Outcome.SUCCESS:
+                                flushed += 1
+                            elif outcome is Outcome.PERMANENT:
+                                # Bỏ bản ghi hỏng thay vì dừng: một batch 4xx nằm đầu hàng
+                                # đợi sẽ chặn vĩnh viễn toàn bộ phần phía sau.
+                                print(f"[queue] DROPPED {r.status_code} (permanent)")
                                 flushed += 1
                             else:
                                 break

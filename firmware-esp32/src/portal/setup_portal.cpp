@@ -2,14 +2,17 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <WebServer.h>
 #include <WiFi.h>
 #include <cstring>
 
 #include "config/device_identity.h"
+#include "config/mqtt_config.h"
 #include "config/runtime_config.h"
+#include "config/wifi_config.h"
+#include "core/net_config_rules.h"
+#include "net/setup_portal.h"
 
 #if __has_include("config.h")
   #include "config.h"
@@ -26,27 +29,18 @@
 #ifndef CONFIG_PORTAL_PASSWORD
   #define CONFIG_PORTAL_PASSWORD "solar-setup"
 #endif
-#ifndef CONFIG_PORTAL_AP_PREFIX
-  #define CONFIG_PORTAL_AP_PREFIX "SolarBMS"
-#endif
 #ifndef CONFIG_PORTAL_HOSTNAME
   #define CONFIG_PORTAL_HOSTNAME "solar-gateway"
-#endif
-#ifndef CONFIG_PORTAL_AP_FALLBACK_MS
-  #define CONFIG_PORTAL_AP_FALLBACK_MS 30000UL
 #endif
 
 namespace portal {
 namespace {
 
 WebServer s_server(CONFIG_PORTAL_PORT);
-DNSServer s_dns;
 bool s_started = false;
-bool s_apActive = false;
 bool s_mdnsStarted = false;
 bool s_restartPending = false;
 uint32_t s_restartAtMs = 0;
-uint32_t s_offlineSinceMs = 0;
 
 const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
 <html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -74,7 +68,7 @@ button{border:0;border-radius:10px;padding:13px 18px;background:var(--accent);co
 <label>Port<input id="mqttPort" type="number" min="1" max="65535" required></label>
 <label>Username<input id="mqttUsername" maxlength="64"></label>
 <label>Password<input id="mqttPassword" type="password" maxlength="96" placeholder="Để trống để giữ nguyên"></label>
-<label class="check full"><input id="mqttUseTls" type="checkbox"> Dùng TLS</label>
+<label class="check full"><input id="mqttUseTls" type="checkbox" disabled> Dùng TLS (cố định theo firmware)</label>
 </div></section>
 <button id="saveButton" type="submit">Lưu và khởi động lại ESP32</button><div id="message" class="message"></div>
 </form><p class="note">Trang này chỉ nên dùng trong mạng nội bộ. Sau khi đổi Wi‑Fi, hãy kết nối điện thoại/máy tính vào mạng mới rồi mở lại địa chỉ của ESP32.</p>
@@ -113,29 +107,23 @@ bool tooLong(const char* value, size_t capacity) {
   return value == nullptr || strlen(value) >= capacity;
 }
 
-void copySafe(char* destination, size_t destinationLen, const char* source) {
-  strncpy(destination, source, destinationLen - 1);
-  destination[destinationLen - 1] = '\0';
-}
-
 void handleGetConfig() {
   if (!authenticated()) return;
-  const runtimecfg::RuntimeConfig& config = runtimecfg::runtimeConfig();
   JsonDocument document;
-  document["wifiSsid"] = config.wifiSsid;
-  document["hasWifiPassword"] = config.wifiPassword[0] != '\0';
-  document["backendUrl"] = config.backendUrl;
+  document["wifiSsid"] = wificfg::ssid();
+  document["hasWifiPassword"] = wificfg::password()[0] != '\0';
+  document["backendUrl"] = runtimecfg::backendUrl();
   document["deviceCode"] = identity::deviceCode();
   document["hasApiKey"] = identity::apiKey()[0] != '\0';
-  document["mqttHost"] = config.mqttHost;
-  document["mqttPort"] = config.mqttPort;
-  document["mqttUseTls"] = config.mqttUseTls;
-  document["mqttUsername"] = config.mqttUsername;
-  document["hasMqttPassword"] = config.mqttPassword[0] != '\0';
+  document["mqttHost"] = mqttcfg::host();
+  document["mqttPort"] = mqttcfg::port();
+  document["mqttUseTls"] = MQTT_USE_TLS != 0;
+  document["mqttUsername"] = mqttcfg::username();
+  document["hasMqttPassword"] = mqttcfg::password()[0] != '\0';
   document["stationConnected"] = WiFi.status() == WL_CONNECTED;
   document["stationIp"] = WiFi.localIP().toString();
-  document["apActive"] = s_apActive;
-  document["apIp"] = s_apActive ? WiFi.softAPIP().toString() : "";
+  document["apActive"] = net::portalIsActive();
+  document["apIp"] = net::portalIsActive() ? WiFi.softAPIP().toString() : "";
   document["setupPort"] = CONFIG_PORTAL_PORT;
   sendJson(200, document);
 }
@@ -164,14 +152,14 @@ void handleSaveConfig() {
     sendError(400, "Thiếu SSID, Backend URL, Device code hoặc MQTT host");
     return;
   }
-  if (tooLong(wifiSsid, runtimecfg::kMaxWifiSsidLen) ||
-      tooLong(wifiPassword, runtimecfg::kMaxWifiPasswordLen) ||
+  if (tooLong(wifiSsid, wificfg::kSsidBufLen) ||
+      tooLong(wifiPassword, wificfg::kPassBufLen) ||
       tooLong(backendUrl, runtimecfg::kMaxBackendUrlLen) ||
       tooLong(deviceCode, identity::kMaxDeviceCodeLen) ||
       tooLong(apiKey, identity::kMaxApiKeyLen) ||
-      tooLong(mqttHost, runtimecfg::kMaxMqttHostLen) ||
-      tooLong(mqttUsername, runtimecfg::kMaxMqttUsernameLen) ||
-      tooLong(mqttPassword, runtimecfg::kMaxMqttPasswordLen)) {
+      tooLong(mqttHost, mqttcfg::kHostBufLen) ||
+      tooLong(mqttUsername, mqttcfg::kUserBufLen) ||
+      tooLong(mqttPassword, mqttcfg::kPassBufLen)) {
     sendError(400, "Một trường cấu hình vượt quá độ dài cho phép");
     return;
   }
@@ -185,23 +173,36 @@ void handleSaveConfig() {
     return;
   }
 
-  runtimecfg::RuntimeConfig next = runtimecfg::runtimeConfig();
-  copySafe(next.wifiSsid, sizeof(next.wifiSsid), wifiSsid);
-  if (wifiPassword[0] != '\0') {
-    copySafe(next.wifiPassword, sizeof(next.wifiPassword), wifiPassword);
-  }
-  copySafe(next.backendUrl, sizeof(next.backendUrl), backendUrl);
-  copySafe(next.mqttHost, sizeof(next.mqttHost), mqttHost);
-  next.mqttPort = static_cast<uint16_t>(mqttPort);
-  next.mqttUseTls = document["mqttUseTls"] | false;
-  copySafe(next.mqttUsername, sizeof(next.mqttUsername), mqttUsername);
-  if (mqttPassword[0] != '\0') {
-    copySafe(next.mqttPassword, sizeof(next.mqttPassword), mqttPassword);
+  const bool requestedTls = document["mqttUseTls"] | (MQTT_USE_TLS != 0);
+  if (requestedTls != (MQTT_USE_TLS != 0)) {
+    sendError(400, "MQTT TLS is fixed by the firmware build");
+    return;
   }
 
-  if (!runtimecfg::saveRuntimeConfig(next) ||
+  // Password fields are write-only. An empty value keeps the stored secret.
+  char nextWifiPassword[wificfg::kPassBufLen];
+  char nextMqttUsername[mqttcfg::kUserBufLen];
+  char nextMqttPassword[mqttcfg::kPassBufLen];
+  snprintf(nextWifiPassword, sizeof(nextWifiPassword), "%s",
+           wifiPassword[0] != '\0' ? wifiPassword : wificfg::password());
+  snprintf(nextMqttUsername, sizeof(nextMqttUsername), "%s",
+           mqttUsername[0] != '\0' ? mqttUsername : mqttcfg::username());
+  snprintf(nextMqttPassword, sizeof(nextMqttPassword), "%s",
+           mqttPassword[0] != '\0' ? mqttPassword : mqttcfg::password());
+
+  char topicPrefix[mqttcfg::kPrefixBufLen];
+  if (core::deriveTopicPrefix(deviceCode, topicPrefix, sizeof(topicPrefix)) == 0) {
+    sendError(400, "Device code cannot form a valid MQTT topic");
+    return;
+  }
+
+  if (!wificfg::save(wifiSsid, nextWifiPassword) ||
+      !runtimecfg::saveBackendUrl(backendUrl) ||
       !identity::setDeviceCode(deviceCode) ||
-      (apiKey[0] != '\0' && !identity::setApiKey(apiKey))) {
+      (apiKey[0] != '\0' && !identity::setApiKey(apiKey)) ||
+      !mqttcfg::setBroker(mqttHost, mqttPort) ||
+      !mqttcfg::setCredential(nextMqttUsername, nextMqttPassword) ||
+      !mqttcfg::setTopicPrefix(topicPrefix)) {
     sendError(500, "Không ghi được cấu hình vào NVS");
     return;
   }
@@ -213,32 +214,6 @@ void handleSaveConfig() {
   s_restartPending = true;
   s_restartAtMs = millis() + 1500;
   Serial.println("[portal] configuration saved; restart scheduled");
-}
-
-void startAccessPoint() {
-  if (s_apActive) return;
-  uint64_t chipId = ESP.getEfuseMac();
-  char ssid[40];
-  snprintf(ssid, sizeof(ssid), "%s-%06llX", CONFIG_PORTAL_AP_PREFIX,
-           static_cast<unsigned long long>(chipId & 0xFFFFFFULL));
-
-  WiFi.mode(WIFI_AP_STA);
-  const IPAddress ip(192, 168, 4, 1);
-  const IPAddress subnet(255, 255, 255, 0);
-  WiFi.softAPConfig(ip, ip, subnet);
-  const char* apPassword = strlen(CONFIG_PORTAL_PASSWORD) >= 8
-                               ? CONFIG_PORTAL_PASSWORD
-                               : "SolarSetup1";
-  if (!WiFi.softAP(ssid, apPassword)) {
-    Serial.println("[portal] fallback AP start FAILED");
-    return;
-  }
-  s_dns.start(53, "*", ip);
-  s_apActive = true;
-  Serial.printf("[portal] fallback AP=%s url=http://%s:%u\n", ssid,
-                ip.toString().c_str(), static_cast<unsigned>(CONFIG_PORTAL_PORT));
-  Serial.printf("[portal] login user=%s (password is CONFIG_PORTAL_PASSWORD)\n",
-                CONFIG_PORTAL_USER);
 }
 
 void startMdnsIfPossible() {
@@ -275,27 +250,18 @@ void setupPortalBegin() {
   });
   s_server.begin();
   s_started = true;
-  s_offlineSinceMs = millis();
   Serial.printf("[portal] web setup listening on port %u\n",
                 static_cast<unsigned>(CONFIG_PORTAL_PORT));
 
   if (WiFi.status() == WL_CONNECTED) startMdnsIfPossible();
-  else startAccessPoint();
 }
 
 void setupPortalTick() {
   if (!s_started) return;
   s_server.handleClient();
-  if (s_apActive) s_dns.processNextRequest();
 
   if (WiFi.status() == WL_CONNECTED) {
-    s_offlineSinceMs = 0;
     startMdnsIfPossible();
-  } else {
-    if (s_offlineSinceMs == 0) s_offlineSinceMs = millis();
-    if (!s_apActive && millis() - s_offlineSinceMs >= CONFIG_PORTAL_AP_FALLBACK_MS) {
-      startAccessPoint();
-    }
   }
 
   if (s_restartPending && static_cast<int32_t>(millis() - s_restartAtMs) >= 0) {
@@ -306,7 +272,7 @@ void setupPortalTick() {
 }
 
 bool setupPortalApActive() {
-  return s_apActive;
+  return net::portalIsActive();
 }
 
 }  // namespace portal

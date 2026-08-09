@@ -10,7 +10,8 @@
 #endif
 
 #include "config/device_identity.h"
-#include "config/runtime_config.h"
+#include "config/mqtt_config.h"
+#include "core/net_config_rules.h"
 #include "net/time_sync.h"
 #include "net/ca_cert_embedded.h"
 
@@ -29,11 +30,13 @@ namespace net {
 namespace {
 
 // ---- Static state ----
-WiFiClient       s_plainClient;
-WiFiClientSecure s_tlsClient;
-PubSubClient     s_plainMqtt(s_plainClient);
-PubSubClient     s_tlsMqtt(s_tlsClient);
-PubSubClient*    s_mqtt = &s_plainMqtt;
+#if MQTT_USE_TLS
+WiFiClientSecure s_wifiClient;
+#else
+WiFiClient       s_wifiClient;
+#endif
+
+PubSubClient    s_mqtt(s_wifiClient);
 CommandCallback s_userCmdCb     = nullptr;
 bool            s_inited        = false;
 uint32_t        s_lastReconnectMs = 0;
@@ -44,14 +47,52 @@ uint32_t s_pubFail        = 0;
 uint32_t s_connectCount   = 0;
 uint32_t s_consecutiveFail = 0;
 
+// IOT3-44 — streak lỗi XÁC THỰC (state 4/5), đếm tách khỏi s_consecutiveFail (vốn là lỗi publish).
+uint32_t s_authFail = 0;
+constexpr int kAuthFailThreshold = 5;
+
 // CA cert buffer — load 1 lần lúc begin, giữ static để TLS handshake dùng lại.
 // Heap để tránh stack overflow (CA PEM ~1.5KB).
 String s_caCert;
 
-// Topic buffer — deviceCode max 64 + batterySerial max ~32 + envelope segments
-// ≈ 120 chars max. Buffer 160 dư an toàn. Mỗi publish helper có buffer static
-// riêng để tránh race (callback có thể publish trong khi caller đang publish).
-constexpr size_t kTopicBufLen = 160;
+// Topic buffer — IOT3-39: nay dựng từ `mqttcfg::topicPrefix()` (tối đa
+// core::kMaxMqttPrefixChars = 96) + "/" + batterySerial + "/telemetry".
+// Trường hợp dài nhất: 96 + 1 + 64 + 10 + 1 = 172 ⇒ lấy 192.
+// Mỗi publish helper có buffer static riêng để tránh race (callback có thể publish
+// trong khi caller đang publish).
+constexpr size_t kTopicBufLen = 192;
+
+/// Dựng `"<prefix>/<suffix>"` vào buffer. Tách riêng để 6 chỗ dựng topic chỉ còn MỘT công thức.
+void buildTopic(char* buf, size_t bufLen, const char* suffix) {
+  snprintf(buf, bufLen, "%s/%s", mqttcfg::topicPrefix(), suffix);
+}
+
+// ---- Ảnh chụp cấu hình mà phiên hiện tại được dựng theo (IOT3-41) ----
+//
+// Cần vì `mqttApplyConfig()` được gọi từ NHIỀU nơi: sau provision, ở nhánh đã-provisioned mỗi
+// vòng loop đầu, và từ CLI. Không so trước thì mỗi lần gọi lại ngắt một phiên đang chạy tốt để
+// dựng lại y nguyên — tự tạo khoảng mất kết nối, và mỗi khoảng ấy là số đo rơi mất.
+char s_appliedHost  [mqttcfg::kHostBufLen];
+char s_appliedUser  [mqttcfg::kUserBufLen];
+char s_appliedPass  [mqttcfg::kPassBufLen];
+char s_appliedPrefix[mqttcfg::kPrefixBufLen];
+int  s_appliedPort = 0;
+
+void snapshotAppliedConfig() {
+  snprintf(s_appliedHost,   sizeof(s_appliedHost),   "%s", mqttcfg::host());
+  snprintf(s_appliedUser,   sizeof(s_appliedUser),   "%s", mqttcfg::username());
+  snprintf(s_appliedPass,   sizeof(s_appliedPass),   "%s", mqttcfg::password());
+  snprintf(s_appliedPrefix, sizeof(s_appliedPrefix), "%s", mqttcfg::topicPrefix());
+  s_appliedPort = mqttcfg::port();
+}
+
+bool configDiffersFromApplied() {
+  return strcmp(s_appliedHost,   mqttcfg::host())        != 0 ||
+         strcmp(s_appliedUser,   mqttcfg::username())    != 0 ||
+         strcmp(s_appliedPass,   mqttcfg::password())    != 0 ||
+         strcmp(s_appliedPrefix, mqttcfg::topicPrefix()) != 0 ||
+         s_appliedPort != mqttcfg::port();
+}
 
 void onMessage(char* topic, byte* payload, unsigned int length) {
   // Sprint 4 chỉ handle 1 topic = solar/{dev}/cmd (subscribe duy nhất).
@@ -67,70 +108,93 @@ void onMessage(char* topic, byte* payload, unsigned int length) {
   }
 }
 
-bool configureRuntimeTransport() {
-  const runtimecfg::RuntimeConfig& config = runtimecfg::runtimeConfig();
-  if (!config.mqttUseTls) {
-    Serial.println("[mqtt] plain MQTT selected (LAN/development only)");
-    return true;
-  }
-
+bool loadCaCert() {
+#if MQTT_USE_TLS
+  // Ưu tiên CA nhúng trong firmware. LittleFS không dùng được cho việc này:
+  // local_queue và chính file này đều gọi LittleFS.begin(true) tức
+  // format-nếu-mount-lỗi, mà ảnh mklittlefs không mount được nên phân vùng
+  // bị xoá sạch mỗi lần boot, cuốn theo ca_cert.pem.
   if (kMqttCaCert[0] != '\0') {
+    // KHÔNG trim(): mbedTLS đòi PEM kết thúc bằng ký tự xuống dòng sau dòng
+    // -----END CERTIFICATE-----. Cắt mất nó là bắt tay hỏng với lỗi -9984
+    // "X509 Certificate verification failed", rất dễ tưởng nhầm sai CA.
     s_caCert = String(kMqttCaCert);
     if (s_caCert.indexOf("-----BEGIN CERTIFICATE-----") >= 0) {
-      s_tlsClient.setCACert(s_caCert.c_str());
-      Serial.printf("[mqtt] embedded CA configured (%u bytes)\n",
+      s_wifiClient.setCACert(s_caCert.c_str());
+      Serial.printf("[mqtt] CA cert nhúng trong firmware (%u bytes)\n",
                     static_cast<unsigned>(s_caCert.length()));
       return true;
     }
+    Serial.println("[mqtt] CA nhúng sai format — thử đọc từ LittleFS");
   }
 
-  if (!LittleFS.begin(true) || !LittleFS.exists(MQTT_CA_CERT_PATH)) {
-    Serial.printf("[mqtt] TLS selected but CA is unavailable at %s\n",
-                  MQTT_CA_CERT_PATH);
+  if (!LittleFS.begin(true /*formatOnFail*/)) {
+    Serial.println("[mqtt] LittleFS mount FAIL — không load được CA cert");
     return false;
   }
-  File certificateFile = LittleFS.open(MQTT_CA_CERT_PATH, "r");
-  if (!certificateFile) return false;
-  s_caCert = certificateFile.readString();
-  certificateFile.close();
-  if (s_caCert.length() < 100 ||
-      s_caCert.indexOf("-----BEGIN CERTIFICATE-----") < 0) {
-    Serial.println("[mqtt] TLS CA file is invalid");
+  if (!LittleFS.exists(MQTT_CA_CERT_PATH)) {
+    Serial.printf("[mqtt] CA cert KHÔNG tồn tại tại %s\n", MQTT_CA_CERT_PATH);
+    Serial.println("[mqtt]   → chạy `infra/mqtt/scripts/gen-certs.sh`");
+    Serial.println("[mqtt]   → copy ca.crt vào firmware-esp32/data/ca_cert.pem");
+    Serial.println("[mqtt]   → pio run -t uploadfs");
     return false;
   }
-  s_tlsClient.setCACert(s_caCert.c_str());
-  Serial.printf("[mqtt] CA configured from %s (%u bytes)\n", MQTT_CA_CERT_PATH,
-                static_cast<unsigned>(s_caCert.length()));
+  File f = LittleFS.open(MQTT_CA_CERT_PATH, "r");
+  if (!f) return false;
+  s_caCert = f.readString();
+  f.close();
+  if (s_caCert.length() < 100) {
+    Serial.printf("[mqtt] CA cert quá ngắn (%u bytes) — file hỏng?\n",
+                  static_cast<unsigned>(s_caCert.length()));
+    return false;
+  }
+  // Sanity check PEM marker — bắt nhầm format (DER binary, JSON, hoặc file rác).
+  // PEM cert PHẢI bắt đầu bằng "-----BEGIN CERTIFICATE-----".
+  if (s_caCert.indexOf("-----BEGIN CERTIFICATE-----") < 0) {
+    Serial.printf("[mqtt] CA cert KHÔNG phải PEM format (thiếu -----BEGIN CERTIFICATE-----).\n");
+    Serial.printf("[mqtt]   Đầu file: '%s'\n", s_caCert.substring(0, 40).c_str());
+    Serial.println("[mqtt]   → Sửa: cp infra/mqtt/mosquitto/certs/ca.crt data/ca_cert.pem (PEM ASCII)");
+    return false;
+  }
+  s_wifiClient.setCACert(s_caCert.c_str());
+  Serial.printf("[mqtt] CA cert loaded (%u bytes) từ %s\n",
+                static_cast<unsigned>(s_caCert.length()), MQTT_CA_CERT_PATH);
   return true;
+#else
+  Serial.println("[mqtt] MQTT_USE_TLS=0 — plain MQTT (KHÔNG dùng cho production)");
+  return true;
+#endif
 }
 
 bool tryConnect() {
   if (!WiFi.isConnected()) return false;
-  const runtimecfg::RuntimeConfig& config = runtimecfg::runtimeConfig();
 
   // (Re)config LWT mỗi lần connect — vì deviceCode có thể đổi qua Serial CLI
   // (S2-FW-01 hot reload). LWT topic = solar/{dev}/status, payload="offline",
   // QoS 1, retain=true (S4-FW-02 spec).
   static char willTopicBuf[kTopicBufLen];
-  snprintf(willTopicBuf, kTopicBufLen, "%s/%s/status",
-           MQTT_TOPIC_PREFIX, identity::deviceCode());
+  buildTopic(willTopicBuf, kTopicBufLen, "status");   // IOT3-39
 
   Serial.printf("[mqtt] connect host=%s port=%d user=%s lwt=%s ...\n",
-                config.mqttHost, config.mqttPort,
-                config.mqttUsername, willTopicBuf);
+                mqttcfg::host(), mqttcfg::port(),
+                mqttcfg::username(), willTopicBuf);
 
+  // IOT3-38 — clientId lấy deviceCode RUNTIME, không lấy macro `MQTT_CLIENT_ID` (vốn nở ra
+  // `DEVICE_CODE` compile-time). Đổi mã thiết bị qua CLI/NVS rồi mà clientId vẫn là mã cũ thì
+  // broker thấy hai phiên cùng clientId sẽ đá phiên trước ra — hai thiết bị đạp nhau vô tận.
+  //
   // PubSubClient::connect(clientId, user, pass, willTopic, willQos, willRetain, willMsg)
-  bool ok = s_mqtt->connect(
+  bool ok = s_mqtt.connect(
       identity::deviceCode(),
-      config.mqttUsername,
-      config.mqttPassword,
+      mqttcfg::username(),
+      mqttcfg::password(),
       willTopicBuf,           // S4-FW-02 will topic
       1,                       // willQos
       true,                    // willRetain
       "offline");              // willMessage
 
   if (!ok) {
-    int state = s_mqtt->state();
+    int state = s_mqtt.state();
     // PubSubClient state codes — map sang lý do dễ debug.
     const char* reason;
     switch (state) {
@@ -146,23 +210,36 @@ bool tryConnect() {
       default: reason = "(unknown state)"; break;
     }
     Serial.printf("[mqtt] connect FAIL state=%d — %s\n", state, reason);
+
+    // IOT3-44 — đếm RIÊNG lỗi xác thực. Phải tách khỏi lỗi mạng (-2/-3/-4): mất mạng thì chờ
+    // là xong, còn sai thông tin đăng nhập thì chờ bao lâu cũng vô ích — chỉ `/provision` lấy
+    // credential mới mới cứu được. Gộp chung sẽ hoặc là re-provision loạn mỗi lần rớt WiFi,
+    // hoặc là không bao giờ re-provision.
+    if (state == 4 || state == 5) {
+      s_authFail++;
+      Serial.printf("[mqtt]   ↑ lỗi XÁC THỰC lần thứ %lu liên tiếp (ngưỡng %d → xin credential mới)\n",
+                    static_cast<unsigned long>(s_authFail), kAuthFailThreshold);
+    } else {
+      // Lỗi mạng KHÔNG được xoá streak xác thực — mạng chập chờn xen giữa các lần bị từ chối
+      // sẽ reset đếm về 0 mãi mãi, và thiết bị không bao giờ tự lành.
+    }
     return false;
   }
 
   s_connectCount++;
   s_consecutiveFail = 0;
+  s_authFail = 0;   // IOT3-44 — nối được nghĩa là credential đang dùng ĐÚNG
   Serial.printf("[mqtt] CONNECTED (count=%lu)\n",
                 static_cast<unsigned long>(s_connectCount));
 
   // S4-FW-03: publish "online" retain QoS 1 lên status — override LWT "offline".
-  bool pubOk = s_mqtt->publish(willTopicBuf, "online", true /*retain*/);
+  bool pubOk = s_mqtt.publish(willTopicBuf, "online", true /*retain*/);
   Serial.printf("[mqtt] status=online retain → %s\n", pubOk ? "OK" : "FAIL");
 
   // S4-FW-03: subscribe downlink cmd.
   static char cmdTopicBuf[kTopicBufLen];
-  snprintf(cmdTopicBuf, kTopicBufLen, "%s/%s/cmd",
-           MQTT_TOPIC_PREFIX, identity::deviceCode());
-  bool subOk = s_mqtt->subscribe(cmdTopicBuf, 1 /*QoS 1*/);
+  buildTopic(cmdTopicBuf, kTopicBufLen, "cmd");   // IOT3-39
+  bool subOk = s_mqtt.subscribe(cmdTopicBuf, 1 /*QoS 1*/);
   Serial.printf("[mqtt] subscribe %s → %s\n",
                 cmdTopicBuf, subOk ? "OK" : "FAIL");
 
@@ -175,80 +252,135 @@ bool tryConnect() {
 // Public API
 // ====================================================================
 
-// Sanity check — diagnose case-mismatch giữa DEVICE_CODE và MQTT_USERNAME.
+// IOT3-40 — kiểm chéo tiền tố topic đang dùng với tiền tố suy ra từ deviceCode.
 //
-// Backend convention (IotApiKeyService.GenerateMqttCredential):
-//   mqtt_username = deviceCode.ToLowerInvariant()
+// Backend cấp `mqttTopicPrefix` (= `MqttBrokerEndpointProvider.TopicPrefixFor()`), còn ACL của
+// Mosquitto lại khớp theo `pattern write solar/%u/...` với `%u` = username. Ba nguồn — tiền tố
+// backend cấp, username, và deviceCode — phải quy về CÙNG một chuỗi chữ thường. Lệch một chữ hoa
+// là mất cả uplink lẫn downlink mà **không bên nào báo lỗi**: broker chỉ lặng lẽ không chuyển tin.
 //
-// ACL pattern `solar/%u/...` dùng username = lowercase, nhưng backend
-// `AdminIotDevicesController.SendCommand` publish topic dùng RAW deviceCode
-// (`solar/{device.DeviceCode}/cmd`). Nếu deviceCode KHÔNG lowercase, topic
-// backend gửi sẽ KHÔNG match ACL subscription của device → mất downlink.
-//
-// → Workaround Sprint 4: admin PHẢI tạo device với deviceCode đã lowercase.
-//   Sprint 5+ backend nên lowercase topic build hoặc dùng MqttUsername field.
-void warnIfCaseMismatch() {
-  const char* dev = identity::deviceCode();
-  const char* user = runtimecfg::runtimeConfig().mqttUsername;
-  if (!dev || !user) return;
+// So sánh này chỉ CẢNH BÁO, không chặn — có thể backend cố ý dùng tiền tố khác (đổi quy ước), và
+// chặn kết nối vì một cảnh báo suy đoán còn tệ hơn.
+void warnIfTopicPrefixMismatch() {
+  const char* actual = mqttcfg::topicPrefix();
 
-  size_t devLen = strlen(dev);
-  size_t userLen = strlen(user);
-  if (devLen != userLen) {
-    Serial.printf("[mqtt] ⚠ DEVICE_CODE='%s' (len %u) khác MQTT_USERNAME='%s' (len %u) — "
-                  "backend MqttUsername convention = lowercase(DeviceCode).\n",
-                  dev, static_cast<unsigned>(devLen),
-                  user, static_cast<unsigned>(userLen));
+  char expected[mqttcfg::kPrefixBufLen];
+  if (core::deriveTopicPrefix(identity::deviceCode(), expected, sizeof(expected)) == 0) {
+    Serial.println("[mqtt] ⚠ không suy được tiền tố từ deviceCode để đối chiếu (mã rỗng?)");
     return;
   }
-  for (size_t i = 0; i < devLen; ++i) {
-    if (static_cast<char>(tolower(static_cast<unsigned char>(dev[i]))) != user[i]) {
-      Serial.printf("[mqtt] ⚠ MQTT_USERNAME='%s' KHÔNG phải lowercase(DEVICE_CODE='%s') — "
-                    "downlink solar/{deviceCode}/cmd có thể NOT match ACL solar/%%u/cmd.\n",
-                    user, dev);
-      Serial.println("[mqtt]    → tạo device với deviceCode đã lowercase (vd 'gw-esp32-001'),");
-      Serial.println("[mqtt]    → hoặc backend Sprint 5+ phải lowercase khi build topic.");
-      return;
-    }
+
+  if (strcmp(actual, expected) != 0) {
+    Serial.printf("[mqtt] ⚠ tiền tố topic đang dùng '%s' KHÁC tiền tố suy từ deviceCode '%s'.\n",
+                  actual, expected);
+    Serial.println("[mqtt]    Nếu không cố ý: đây chính là kiểu lỗi làm broker im lặng nuốt tin.");
+    Serial.println("[mqtt]    → so lại MqttTopicPrefix backend trả về với mã thiết bị đang nạp.");
   }
-  Serial.printf("[mqtt] sanity OK — DEVICE_CODE='%s' lowercase khớp MQTT_USERNAME.\n", dev);
+
+  // Username phải trùng đúng phần sau "solar/" của tiền tố — đó là thứ ACL dùng làm `%u`.
+  const char* seg = strchr(actual, '/');
+  const char* user = mqttcfg::username();
+  if (seg != nullptr && user != nullptr && strcmp(seg + 1, user) != 0) {
+    Serial.printf("[mqtt] ⚠ username MQTT '%s' KHÁC đoạn thiết bị trong topic '%s' — "
+                  "ACL `pattern ... solar/%%u/...` sẽ TỪ CHỐI publish (state=5).\n",
+                  user, seg + 1);
+  }
 }
 
 bool mqttBegin() {
   if (s_inited) return true;
 
-  const runtimecfg::RuntimeConfig& config = runtimecfg::runtimeConfig();
-  s_mqtt = config.mqttUseTls ? &s_tlsMqtt : &s_plainMqtt;
-
-  if (!configureRuntimeTransport()) {
-    Serial.println("[mqtt] mqttBegin FAIL — CA cert chưa sẵn sàng");
+  // IOT3-40 — chưa provision thì KHÔNG khởi tạo, và chỉ nói MỘT lần.
+  // Trước IoT-3, broker/credential là macro compile-time nên luôn "có sẵn" (dù là placeholder),
+  // firmware cứ thế quay vòng connect-fail mỗi 5 giây. Nay giá trị đến lúc chạy, nên trạng thái
+  // "chưa có" là hợp lệ và bình thường — không phải lỗi để mà gào lên.
+  if (!mqttcfg::isConfigured()) {
+    static bool s_warned = false;
+    if (!s_warned) {
+      s_warned = true;
+      Serial.println("[mqtt] chưa có cấu hình MQTT (chưa provision) — bỏ qua, chạy HTTPS-only.");
+      Serial.println("[mqtt]   Provision xong sẽ tự khởi tạo qua net::mqttApplyConfig().");
+    }
     return false;
   }
 
-  s_mqtt->setServer(config.mqttHost, config.mqttPort);
-  s_mqtt->setBufferSize(MQTT_MAX_PACKET_SIZE);
-  s_mqtt->setKeepAlive(MQTT_KEEPALIVE_SEC);
-  s_mqtt->setCallback(onMessage);
+  if (!loadCaCert()) {
+#if MQTT_USE_TLS
+    Serial.println("[mqtt] mqttBegin FAIL — CA cert chưa sẵn sàng");
+    return false;
+#endif
+  }
 
-  warnIfCaseMismatch();
+  s_mqtt.setServer(mqttcfg::host(), mqttcfg::port());
+  s_mqtt.setBufferSize(MQTT_MAX_PACKET_SIZE);
+  s_mqtt.setKeepAlive(MQTT_KEEPALIVE_SEC);
+  s_mqtt.setCallback(onMessage);
+
+  warnIfTopicPrefixMismatch();
 
   s_inited = true;
-  Serial.printf("[mqtt] init OK — broker=%s:%d tls=%d buf=%u keepalive=%ds\n",
-                config.mqttHost, config.mqttPort, config.mqttUseTls ? 1 : 0,
+  snapshotAppliedConfig();
+  Serial.printf("[mqtt] init OK — broker=%s:%d tls=%d prefix=%s buf=%u keepalive=%ds\n",
+                mqttcfg::host(), mqttcfg::port(), MQTT_USE_TLS, mqttcfg::topicPrefix(),
                 static_cast<unsigned>(MQTT_MAX_PACKET_SIZE),
                 static_cast<int>(MQTT_KEEPALIVE_SEC));
   return true;
+}
+
+// IOT3-41
+bool mqttApplyConfig() {
+  // Chưa init (chưa provision lúc boot) ⇒ đây là lần đầu có cấu hình: khởi tạo luôn.
+  if (!s_inited) return mqttBegin();
+
+  if (!mqttcfg::isConfigured()) {
+    Serial.println("[mqtt] cấu hình mới KHÔNG dùng được — giữ nguyên phiên đang chạy");
+    return false;
+  }
+
+  // IOT3-46 — hàm này được gọi cả ở nhánh "đã provision từ trước", tức mỗi lần boot. Cấu hình
+  // y hệt thì KHÔNG đụng vào phiên đang chạy.
+  if (!configDiffersFromApplied()) {
+    return true;
+  }
+
+  s_mqtt.setServer(mqttcfg::host(), mqttcfg::port());
+  if (s_mqtt.connected()) {
+    Serial.println("[mqtt] cấu hình đổi → ngắt kết nối để dựng lại LWT/topic/subscribe");
+    s_mqtt.disconnect();
+  }
+  // Nối lại NGAY, không đợi hết MQTT_RECONNECT_INTERVAL_MS — cùng lý do với mqttOnIdentityChanged().
+  s_lastReconnectMs = 0;
+  // Credential mới ⇒ streak xác thực cũ không còn ý nghĩa, xoá kẻo re-provision oan.
+  s_authFail = 0;
+
+  snapshotAppliedConfig();
+  warnIfTopicPrefixMismatch();
+  Serial.printf("[mqtt] áp cấu hình mới — broker=%s:%d prefix=%s\n",
+                mqttcfg::host(), mqttcfg::port(), mqttcfg::topicPrefix());
+  return true;
+}
+
+void mqttOnIdentityChanged() {
+  if (!s_inited) return;
+  if (s_mqtt.connected()) {
+    Serial.println("[mqtt] deviceCode đổi → ngắt kết nối để dựng lại LWT/topic/subscribe");
+    s_mqtt.disconnect();
+  }
+  // Cho phép kết nối lại NGAY, không phải đợi hết MQTT_RECONNECT_INTERVAL_MS: thiết bị đang
+  // câm downlink cho tới khi subscribe lại được.
+  s_lastReconnectMs = 0;
 }
 
 void mqttTick() {
   if (!s_inited) return;
   if (!WiFi.isConnected()) return;
 
+#if MQTT_USE_TLS
   // TLS cert validation cần NTP synced — broker cert có notBefore=2026 GMT,
   // ESP32 boot time=1970 sẽ fail "certificate not yet valid" và loop spam log
   // tới khi NTP sync. Gate tryConnect bằng net::timeIsSynced() — Sprint 1 đã có
   // setup NTP qua time_sync.cpp.
-  if (runtimecfg::runtimeConfig().mqttUseTls && !net::timeIsSynced()) {
+  if (!net::timeIsSynced()) {
     static uint32_t s_lastNtpWaitLogMs = 0;
     uint32_t now = millis();
     if (now - s_lastNtpWaitLogMs > 10000) {
@@ -257,8 +389,9 @@ void mqttTick() {
     }
     return;
   }
+#endif
 
-  if (!s_mqtt->connected()) {
+  if (!s_mqtt.connected()) {
     uint32_t now = millis();
     if (now - s_lastReconnectMs < MQTT_RECONNECT_INTERVAL_MS) return;
     s_lastReconnectMs = now;
@@ -266,11 +399,11 @@ void mqttTick() {
     return;
   }
 
-  s_mqtt->loop();
+  s_mqtt.loop();
 }
 
 bool mqttIsConnected() {
-  return s_mqtt->connected();
+  return s_mqtt.connected();
 }
 
 void mqttSetCommandCallback(CommandCallback cb) {
@@ -280,23 +413,21 @@ void mqttSetCommandCallback(CommandCallback cb) {
 // ---- Publish helpers ----
 
 namespace {
-bool publishWithStats(const char* topic, const char* payload, size_t len,
-                     uint8_t qos, bool retain) {
-  if (!s_mqtt->connected()) {
+// GH-746 — ĐÃ BỎ tham số `qos`: PubSubClient v2.8 không có overload QoS, nên trước đây tham
+// số này bị vứt ngay bằng một dòng cast-to-void — một tham số giả khiến call site tưởng mình
+// đang chọn QoS 1. (Test test_mqtt_qos_contract chặn dòng cast đó quay lại; vì guard so chuỗi
+// thô nên comment ở đây cố ý KHÔNG viết lại nguyên văn token đó.)
+bool publishWithStats(const char* topic, const char* payload, size_t len, bool retain) {
+  if (!s_mqtt.connected()) {
     s_pubFail++;
     s_consecutiveFail++;
     return false;
   }
-  // PubSubClient::publish overload: (topic, payload, length, retain).
-  // Lưu ý: không có overload nhận QoS publish cho v2.8 — QoS 0 mặc định.
-  // Để giữ "QoS 1" spec, dùng beginPublish/write/endPublish (tự set QoS).
-  // → Sprint 4: dùng publish (QoS 0) cho telemetry/heartbeat (acceptable per spec
-  //   "publish/subscribe QoS 0..1"); LWT vẫn được set QoS 1 ở connect().
-  //   Production có thể nâng cấp lên MQTTnet hoặc esp-mqtt nếu cần QoS 1 strict.
-  (void)qos;
-  bool ok = s_mqtt->publish(topic,
-                            reinterpret_cast<const uint8_t*>(payload),
-                            len, retain);
+  // PubSubClient::publish overload duy nhất: (topic, payload, length, retain) → QoS 0.
+  // `ok` = "đã đẩy được vào socket TCP", KHÔNG phải "broker đã nhận" (xem kPublishGuarantee).
+  bool ok = s_mqtt.publish(topic,
+                           reinterpret_cast<const uint8_t*>(payload),
+                           len, retain);
   if (ok) {
     s_pubOk++;
     s_consecutiveFail = 0;
@@ -319,30 +450,27 @@ bool mqttPublishTelemetry(const char* batterySerial,
     return false;
   }
   static char topicBuf[kTopicBufLen];
-  snprintf(topicBuf, kTopicBufLen, "%s/%s/%s/telemetry",
-           MQTT_TOPIC_PREFIX, identity::deviceCode(), batterySerial);
-  return publishWithStats(topicBuf, payload, payloadLen, 1, false);
+  snprintf(topicBuf, kTopicBufLen, "%s/%s/telemetry",     // IOT3-39
+           mqttcfg::topicPrefix(), batterySerial);
+  return publishWithStats(topicBuf, payload, payloadLen, false);
 }
 
 bool mqttPublishHeartbeat(const char* payload, size_t payloadLen) {
   static char topicBuf[kTopicBufLen];
-  snprintf(topicBuf, kTopicBufLen, "%s/%s/heartbeat",
-           MQTT_TOPIC_PREFIX, identity::deviceCode());
-  return publishWithStats(topicBuf, payload, payloadLen, 1, false);
+  buildTopic(topicBuf, kTopicBufLen, "heartbeat");   // IOT3-39
+  return publishWithStats(topicBuf, payload, payloadLen, false);
 }
 
 bool mqttPublishStatus(const char* payload, size_t payloadLen) {
   static char topicBuf[kTopicBufLen];
-  snprintf(topicBuf, kTopicBufLen, "%s/%s/status",
-           MQTT_TOPIC_PREFIX, identity::deviceCode());
-  return publishWithStats(topicBuf, payload, payloadLen, 1, true);
+  buildTopic(topicBuf, kTopicBufLen, "status");   // IOT3-39
+  return publishWithStats(topicBuf, payload, payloadLen, true);
 }
 
 bool mqttPublishCmdAck(const char* payload, size_t payloadLen) {
   static char topicBuf[kTopicBufLen];
-  snprintf(topicBuf, kTopicBufLen, "%s/%s/cmd/ack",
-           MQTT_TOPIC_PREFIX, identity::deviceCode());
-  return publishWithStats(topicBuf, payload, payloadLen, 1, false);
+  buildTopic(topicBuf, kTopicBufLen, "cmd/ack");   // IOT3-39
+  return publishWithStats(topicBuf, payload, payloadLen, false);
 }
 
 // ---- Stats ----
@@ -351,5 +479,10 @@ uint32_t mqttPublishFailCount()       { return s_pubFail; }
 uint32_t mqttConnectCount()           { return s_connectCount; }
 uint32_t mqttConsecutiveFailCount()   { return s_consecutiveFail; }
 void     mqttResetConsecutiveFails()  { s_consecutiveFail = 0; }
+
+// IOT3-44
+uint32_t mqttAuthFailureCount()       { return s_authFail; }
+int      mqttAuthFailureThreshold()   { return kAuthFailThreshold; }
+void     mqttResetAuthFailures()      { s_authFail = 0; }
 
 }  // namespace net

@@ -2,11 +2,11 @@
 
 namespace portal {
 
-// Start the setup web application. The app is always available through the
-// station IP and starts a fallback access point when the station is offline.
+// Start the authenticated administration app on CONFIG_PORTAL_PORT. Access is
+// through the station IP or the AP managed by net/setup_portal when active.
 void setupPortalBegin();
 
-// Handle HTTP/DNS requests and Wi-Fi fallback state. Call frequently.
+// Handle HTTP requests and scheduled restart. Call frequently.
 void setupPortalTick();
 
 bool setupPortalApActive();

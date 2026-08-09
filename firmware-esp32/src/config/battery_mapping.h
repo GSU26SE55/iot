@@ -27,6 +27,14 @@ struct BatteryMapping {
 // Sprint 1+3 mock — 8 pin slot.
 // Sprint 3: backend resolve `batteryAssetSerial` → BatteryAssetId qua endpoint #IoT2-18.
 //           Nếu backend chưa seed serial, fallback `batteryAssetId` Guid (Sprint 1 mode).
+//
+// Slot 1-4 khớp BatteryDataSeeder backend (BAT-2026-001..004, type 12V — hợp dải mock
+// 12.0-13.0V). GUID cột 1 là legacy fallback, production contract resolve bằng serial.
+// ⚠ Khi chuyển sang BMS thật (USE_MOCK_BMS=0, pack 8S 24V): thay slot 1 bằng dòng
+//   "BAT-2026-REAL-001" bên dưới (asset 24V đã tạo sẵn trên backend 27/07/2026 —
+//   type "LiFePO4 24V 30Ah", ngưỡng 20-29.5V). KHÔNG dùng BAT-2026-001 cho pack thật
+//   (type 12V, ngưỡng 11-14V → 25.6V sẽ breach liên tục).
+//   {"8590baf1-b628-46d5-9f97-ca29fa523ce5", "BAT-2026-REAL-001", "BAT-2026-REAL-001", 1, 0},
 inline constexpr BatteryMapping kBatteryMappings[] = {
   // 4 slot đầu khớp serial seed thật trong battery_assets của backend local.
   // Sai serial thì backend vẫn trả 201 nhưng bỏ qua reading, DB trống trơn.

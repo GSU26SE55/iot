@@ -14,17 +14,9 @@
 namespace runtimecfg {
 namespace {
 
-constexpr const char* kWifiSsidKey = "wifiSsid";
-constexpr const char* kWifiPasswordKey = "wifiPass";
 constexpr const char* kBackendUrlKey = "backendUrl";
-constexpr const char* kMqttHostKey = "mqttHost";
-constexpr const char* kMqttPortKey = "mqttPort";
-constexpr const char* kMqttTlsKey = "mqttTls";
-constexpr const char* kMqttUsernameKey = "mqttUser";
-constexpr const char* kMqttPasswordKey = "mqttPass";
 
-RuntimeConfig s_config{};
-bool s_hasStoredWifi = false;
+char s_backendUrl[kMaxBackendUrlLen]{};
 
 void copySafe(char* destination, size_t destinationLen, const char* source) {
   if (destination == nullptr || destinationLen == 0) return;
@@ -36,72 +28,30 @@ void copySafe(char* destination, size_t destinationLen, const char* source) {
   destination[destinationLen - 1] = '\0';
 }
 
-bool loadString(const char* key, char* destination, size_t destinationLen,
-                const char* fallback) {
-  if (storage::nvsGetString(key, destination, destinationLen)) return true;
-  copySafe(destination, destinationLen, fallback);
-  return false;
-}
-
 }  // namespace
 
 void runtimeConfigBegin() {
-  const bool ssidFromNvs = loadString(kWifiSsidKey, s_config.wifiSsid,
-                                      sizeof(s_config.wifiSsid), WIFI_SSID);
-  loadString(kWifiPasswordKey, s_config.wifiPassword,
-             sizeof(s_config.wifiPassword), WIFI_PASS);
-  const bool backendFromNvs = loadString(kBackendUrlKey, s_config.backendUrl,
-                                         sizeof(s_config.backendUrl), BACKEND_URL);
-  const bool mqttHostFromNvs = loadString(kMqttHostKey, s_config.mqttHost,
-                                          sizeof(s_config.mqttHost), MQTT_BROKER_HOST);
-  loadString(kMqttUsernameKey, s_config.mqttUsername,
-             sizeof(s_config.mqttUsername), MQTT_USERNAME);
-  loadString(kMqttPasswordKey, s_config.mqttPassword,
-             sizeof(s_config.mqttPassword), MQTT_PASSWORD);
-
-  int32_t port = storage::nvsGetInt32(kMqttPortKey, MQTT_BROKER_PORT);
-  if (port < 1 || port > 65535) port = MQTT_BROKER_PORT;
-  s_config.mqttPort = static_cast<uint16_t>(port);
-  s_config.mqttUseTls = storage::nvsGetUInt8(kMqttTlsKey, MQTT_USE_TLS ? 1 : 0) != 0;
-  s_hasStoredWifi = ssidFromNvs;
-
-  Serial.printf("[config] wifi=%s (source=%s)\n", s_config.wifiSsid,
-                ssidFromNvs ? "NVS" : "config.h");
-  Serial.printf("[config] backend=%s (source=%s)\n", s_config.backendUrl,
+  const bool backendFromNvs =
+      storage::nvsGetString(kBackendUrlKey, s_backendUrl, sizeof(s_backendUrl));
+  if (!backendFromNvs) copySafe(s_backendUrl, sizeof(s_backendUrl), BACKEND_URL);
+  Serial.printf("[config] backend=%s (source=%s)\n", s_backendUrl,
                 backendFromNvs ? "NVS" : "config.h");
-  Serial.printf("[config] mqtt=%s:%u tls=%d (source=%s)\n",
-                s_config.mqttHost, static_cast<unsigned>(s_config.mqttPort),
-                s_config.mqttUseTls ? 1 : 0,
-                mqttHostFromNvs ? "NVS" : "config.h");
 }
 
-const RuntimeConfig& runtimeConfig() {
-  return s_config;
+const char* backendUrl() {
+  return s_backendUrl;
 }
 
-bool saveRuntimeConfig(const RuntimeConfig& config) {
-  bool ok = true;
-  ok = storage::nvsPutString(kWifiSsidKey, config.wifiSsid) && ok;
-  ok = storage::nvsPutString(kWifiPasswordKey, config.wifiPassword) && ok;
-  ok = storage::nvsPutString(kBackendUrlKey, config.backendUrl) && ok;
-  ok = storage::nvsPutString(kMqttHostKey, config.mqttHost) && ok;
-  ok = storage::nvsPutInt32(kMqttPortKey, config.mqttPort) && ok;
-  ok = storage::nvsPutUInt8(kMqttTlsKey, config.mqttUseTls ? 1 : 0) && ok;
-  ok = storage::nvsPutString(kMqttUsernameKey, config.mqttUsername) && ok;
-  ok = storage::nvsPutString(kMqttPasswordKey, config.mqttPassword) && ok;
-  if (!ok) {
-    Serial.println("[config] save FAILED");
+bool saveBackendUrl(const char* url) {
+  if (url == nullptr || url[0] == '\0' || strlen(url) >= sizeof(s_backendUrl) ||
+      (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0)) {
+    Serial.println("[config] backend URL invalid");
     return false;
   }
-
-  s_config = config;
-  s_hasStoredWifi = true;
-  Serial.println("[config] runtime configuration saved to NVS");
+  if (!storage::nvsPutString(kBackendUrlKey, url)) return false;
+  copySafe(s_backendUrl, sizeof(s_backendUrl), url);
+  Serial.printf("[config] backend URL saved: %s\n", s_backendUrl);
   return true;
-}
-
-bool hasStoredWifiConfig() {
-  return s_hasStoredWifi;
 }
 
 }  // namespace runtimecfg

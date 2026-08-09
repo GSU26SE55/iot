@@ -3,6 +3,8 @@
 // ==================================================================
 #include "cmd/command_handler.h"
 
+#include "ota/ota_update.h"
+
 #include "cmd/cmd_logic.h"
 #include "net/mqtt_client.h"
 #include "telemetry/heartbeat.h"
@@ -93,10 +95,14 @@ void handleRequestHeartbeat(const logic::ParsedCommand& parsed) {
 }
 
 void handleTriggerOta(const logic::ParsedCommand& parsed) {
-  // S7 sẽ implement esp_https_ota; Sprint 4 chỉ stub + ack.
-  Serial.printf("[cmd] trigger_ota PLACEHOLDER — Sprint 7 sẽ implement (cmdId=%s)\n",
-                parsed.cmdId);
-  publishAck(parsed.cmdId, "ok", "ota scheduled (Sprint 7 placeholder)");
+  // GH-745 — trước đây hàm này chỉ in "PLACEHOLDER" rồi ACK "ok" dù KHÔNG làm gì. OTA thật
+  // đã có từ Sprint 7 nhưng chưa bao giờ được nối vào, nên người vận hành bấm "cập nhật
+  // ngay" thấy báo thành công trong khi thiết bị vẫn đợi lịch 1 giờ.
+  if (ota::otaRequestCheck()) {
+    publishAck(parsed.cmdId, "ok", "ota check scheduled");
+    return;
+  }
+  publishAck(parsed.cmdId, "rejected", ota::otaLastRejectReason());
 }
 
 // ---- Main dispatcher ----
