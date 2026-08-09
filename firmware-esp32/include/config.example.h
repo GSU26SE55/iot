@@ -9,7 +9,16 @@
 // ==================================================================
 #pragma once
 
-// --------- WiFi ---------- (S1-FW-01 placeholder)
+// --------- WiFi ---------- ⚠️ CHỈ LÀ ĐƯỜNG LUI (IOT3-48)
+//
+// Từ Sprint IoT-3, SSID/mật khẩu thật nằm trong NVS ("wifissid"/"wifipass"), đặt bằng
+// trang cấu hình `SolarGW-xxxx` hoặc Serial CLI `set wifi <ssid> <mật khẩu>`.
+// Hai macro dưới chỉ được dùng khi NVS TRỐNG — tức bàn thợ, không phải hiện trường.
+//
+// Đã chốt dùng WiFi CỦA KHÁCH HÀNG, mà mỗi nhà một mạng: nhúng cứng ở đây nghĩa là mỗi
+// thiết bị một bản build, và khách đổi mật khẩu là phải mang cáp ra tận nơi nạp lại.
+//
+// Để nguyên "your-wifi" là hợp lệ và nên làm — firmware sẽ tự mở trang cấu hình.
 #define WIFI_SSID       "your-wifi"
 #define WIFI_PASS   "your-password"
 
@@ -83,14 +92,32 @@
 // #define MOCK_SCENARIO_OVERHEAT
 // #define MOCK_SCENARIO_LOW_SOC
 
+// ============== Sprint IoT-3 — trang cấu hình tại chỗ (IOT3-52) ==============
+//
+// Chưa có WiFi trong NVS (hoặc mất mạng ≥ 5 phút) thì thiết bị tự phát điểm phát sóng
+// `SolarGW-XXXX` (XXXX = 4 ký tự cuối MAC) để nạp SSID/mật khẩu + mã thiết bị + API key.
+//
+// ⚠️ Mật khẩu dưới đây PHẢI ≥ 8 ký tự (yêu cầu của WPA2) và PHẢI đổi trước khi giao khách.
+//    AP không mật khẩu nghĩa là bất kỳ ai đi ngang cũng đổi được mạng và API key của thiết bị —
+//    mà API key là thứ mở toàn bộ đường HTTPS lên backend.
+//    Đây là MỘT TRONG HAI giá trị duy nhất còn phải điền tay (cùng BACKEND_URL).
+#define SETUP_AP_PASSWORD   "solar-setup-2026"
+
 // ============== Sprint 4 — MQTT broker (S4-FW-01..06) =================
 //
-// MQTT-over-TLS: broker info + per-device credential (cấp lúc admin create
-// device, backend trả 1 lần qua IotDeviceCreatedDto.MqttUsername/MqttPassword).
+// ⚠️ NĂM MACRO DƯỚI CHỈ LÀ ĐƯỜNG LUI (IOT3-48).
 //
-// Username/Password placeholder — Sprint 4 sẽ chuyển sang đọc từ NVS qua
-// `set mqttuser <username>` + `set mqttpass <password>` (Serial CLI), tương
-// tự apiKey/deviceCode (S2-FW-01). Hot-reload, không cần reflash.
+// Nguồn chân lý là NVS ("mqhost"/"mqport"/"mqtls"/"mquser"/"mqpass"/"mqprefix"), do
+// `POST /api/iot-devices/provision` cấp lúc chạy và `config/mqtt_config.cpp` nạp lúc boot.
+// Chúng chỉ được dùng khi NVS TRỐNG. Không cần — và KHÔNG NÊN — sửa cho từng thiết bị:
+// mỗi thiết bị một credential mà nhúng vào firmware thì mỗi thiết bị một bản build.
+//
+// NGOẠI LỆ: `MQTT_USE_TLS` VẪN LÀ COMPILE-TIME THẬT (quyết định Q2 của sprint).
+// `WiFiClientSecure` và `WiFiClient` là hai KIỂU khác nhau, chọn bằng `#if` lúc biên dịch.
+// Trường `mqttUseTls` backend gửi xuống chỉ được lưu để ĐỐI CHIẾU và cảnh báo khi lệch.
+//
+// Việc duy nhất phải điền tay trong cả file này: `BACKEND_URL`, `DEVICE_CODE`, `API_KEY`
+// (hoặc nạp qua CLI/trang cấu hình) và mật khẩu AP setup `SETUP_AP_PASSWORD`.
 
 #define MQTT_BROKER_HOST    "10.0.0.10"      // hostname / IP broker (dev: laptop chạy mosquitto)
 #define MQTT_BROKER_PORT    8883             // 1883 plain | 8883 TLS
@@ -100,9 +127,14 @@
 
 // Topic prefix theo overall.md §52.14 (backend MqttTopicMap). Đổi prefix
 // chỉ khi backend đồng bộ — bridge subscribe wildcard `solar/#`.
+// ⚠️ KHÔNG CÒN ĐƯỢC DÙNG (IOT3-39): tiền tố đầy đủ (`solar/<mã thiết bị chữ thường>`) do
+//    `mqttcfg::topicPrefix()` cấp — backend trả về, hoặc suy từ deviceCode. Một nơi duy nhất
+//    quyết định chuỗi này, nên lớp lỗi hoa/thường ở phía thiết bị đã bị xoá hẳn.
 #define MQTT_TOPIC_PREFIX   "solar"
 
 // Client ID — gửi cho broker. Đảm bảo unique trong cluster.
+// ⚠️ KHÔNG CÒN ĐƯỢC DÙNG (IOT3-38): `mqtt_client.cpp` lấy `identity::deviceCode()` lúc chạy.
+//    Giữ macro để không vỡ bản build cũ; đổi giá trị ở đây KHÔNG có tác dụng gì.
 #define MQTT_CLIENT_ID      DEVICE_CODE
 
 // Keep-alive (sec) — broker ngắt session sau ~1.5x giá trị này nếu không
@@ -165,16 +197,31 @@
 // BMS model — chọn register map preset (xem src/bms/bms_register_map.h).
 //   1 = Daly Smart BMS (custom protocol — Sprint 5 chỉ stub, dùng JBD nếu thật sự cần)
 //   2 = JBD BMS (LiFePO4 phổ biến — register map chuẩn Modbus RTU)
-//   3 = JK-BMS (multi-cell — register map khác JBD)
+//   3 = JK-BMS (Modbus V1.1 — sparse block, decoder riêng ở bms_register_map.cpp)
 //   4 = Generic (user tự định nghĩa register trong bms_register_map_custom.h)
-#define BMS_MODEL            2          // JBD default
+//
+// IOT3-02 — phần cứng thật của dự án là JK-BD6A24S10P ⇒ PHẢI là 3.
+// Đường JK gate bằng `#if BMS_MODEL == 3` (modbus_bms.cpp), để 2 thì toàn bộ
+// decoder JK không được biên dịch vào và Modbus đọc 0x0000 trên JK sẽ timeout.
+// `platformio.ini` env `esp32-s3-real*` còn ép -DBMS_MODEL=3 để không phụ thuộc file này.
+#define BMS_MODEL            3          // JK-BMS Modbus V1.1
 
 // Multi-drop config (S5-FW-03): loop unitId từ kBmsUnitIdStart đến +Count-1.
-// Phải khớp số pin trong config/battery_mapping.h.
+//
+// IOT3-01 — PHẢI khớp số BMS THỰC SỰ có mặt trên bus RS485, KHÔNG phải số slot
+// trong config/battery_mapping.h. Mỗi unitId vắng mặt tốn 2 lượt timeout 2000ms
+// (xem BMS_POLL_TIMEOUT_MS bên dưới) ⇒ đặt 4 khi chỉ có 1 BMS làm chu kỳ đo
+// phình từ ~1,0s lên ~13,2s. Lắp thêm BMS thì tăng con số này lên tương ứng.
 #define BMS_UNIT_ID_START    1
-#define BMS_UNIT_ID_COUNT    4
-#define BMS_POLL_TIMEOUT_MS  500UL      // Modbus request timeout per battery
-#define BMS_POLL_RETRY       1          // retry 1 lần nếu timeout
+#define BMS_UNIT_ID_COUNT    1
+// IOT3-09 — ĐÃ BỎ `BMS_POLL_TIMEOUT_MS`.
+//
+// Hằng đó chưa bao giờ được dùng ở đâu trong src/ (grep ra 0 kết quả) nhưng nhìn
+// như đang có tác dụng, khiến mọi tính toán thời gian dựa trên nó sai 4 lần.
+// Timeout THẬT là `ModbusMaster::ku16MBResponseTimeout = 2000` — `static const`
+// trong ModbusMaster.h, KHÔNG đổi được nếu không fork thư viện.
+// Muốn giảm thời gian chờ thì hạ BMS_POLL_RETRY hoặc sửa BMS_UNIT_ID_COUNT cho đúng.
+#define BMS_POLL_RETRY       1          // retry 1 lần nếu timeout (mỗi lượt 2000ms)
 
 // --------- I2C bus shared INA226 + SHT31 (WD §4.2) ---------
 #define I2C_SDA_PIN          8
@@ -183,8 +230,21 @@
 
 // INA226 (S5-FW-04) — current + voltage redundant
 #define INA226_I2C_ADDRESS   0x40       // default; AD0=GND, AD1=GND
-#define INA226_SHUNT_OHM     0.1f       // shunt resistor value (10mΩ phổ biến với pin nhỏ)
-#define INA226_MAX_CURRENT_A 20.0f      // expected max current — calc current LSB
+// IOT3-04/05 — chọn theo DÒNG ĐỈNH của JK-BD6A24S10P (100A liên tục / 200A đỉnh).
+//
+// Ràng buộc phần cứng: INA226 đo điện áp shunt tối đa ±81,92 mV (datasheet TI);
+// thư viện chốt ở 0,08190 V. Shunt 200A/75mV = 0,375 mΩ ⇒ ở 200A ra 75 mV (đạt),
+// dải đo tới 218 A, toả 3,75 W ở 100A liên tục.
+// KHÔNG dùng shunt 100A/75mV (0,75 mΩ): dải đo chỉ tới 109 A — mù ở đỉnh và toả gấp đôi.
+//
+// Hai ràng buộc THƯ VIỆN đi kèm, thiếu cái nào cũng không init được:
+//   1. robtillaart/INA226 chặn shunt < 1 mΩ ⇒ platformio.ini phải có
+//      -DINA226_MINIMAL_SHUNT_OHM=0.0001, nếu không trả INA226_ERR_SHUNT_LOW.
+//   2. Khối normalize của setMaxCurrentShunt chỉ tạo được LSB tối đa 5000 µA
+//      ⇒ chặn maxCurrent ở 163,8 A ⇒ ina226.cpp phải truyền normalize=false,
+//      nếu không trả INA226_ERR_NORMALIZE_FAILED.
+#define INA226_SHUNT_OHM     0.000375f  // shunt bắt bu-lông 200A/75mV = 0,375 mΩ
+#define INA226_MAX_CURRENT_A 200.0f     // dòng đỉnh JK-BD6A24S10P
 
 // --------- DS18B20 1-Wire (WD §4.1) ---------
 #define DS18B20_GPIO         4

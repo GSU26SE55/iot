@@ -18,6 +18,7 @@
 #include <LittleFS.h>
 
 #include "net/tls_ca.h"
+#include "net/ca_cert_embedded.h"       // IOT3-23: CA nhúng dùng chung với mqtt_client
 #include <string.h>
 
 #include "config/device_identity.h"     // S2-FW-01 + S2-FW-04: runtime credentials
@@ -260,6 +261,26 @@ tls::CaLoadStatus loadCaPemOnce() {
   if (s_caLoaded) return tls::CaLoadStatus::Ok;
   if (s_caAttempted && !s_caLoaded) return tls::CaLoadStatus::FileMissing;
   s_caAttempted = true;
+
+  // IOT3-23 — ƯU TIÊN CA NHÚNG, giống hệt mqtt_client.cpp::loadCaCert().
+  //
+  // Trước đây đường HTTPS chỉ đọc LittleFS trong khi đường MQTT đã chuyển sang CA
+  // nhúng (ca_cert_embedded.h). Lý do phải nhúng — ghi ngay trong header đó — là
+  // "ảnh mklittlefs không mount được nên phân vùng bị xoá sạch mỗi lần boot, cuốn
+  // theo ca_cert.pem". Nếu điều đó đúng thì LittleFS.begin(false) ở dưới trả false,
+  // TLS_ALLOW_INSECURE=0 khiến httpConfigureTls() fail-closed, và postJsonInternal()
+  // return ngay ⇒ provision + heartbeat + OTA + đẩy bù hàng đợi CHẾT HẾT, trong khi
+  // telemetry vẫn chảy qua MQTT nên dashboard trông vẫn bình thường.
+  //
+  // Đặt CA nhúng TRƯỚC LittleFS (ngược với thứ tự "ưu tiên file để thay tại hiện
+  // trường") là có chủ ý: giữ hai đường TLS CÙNG MỘT logic quan trọng hơn, vì chính
+  // việc hai đường xử lý khác nhau đã tạo ra lỗ hổng này.
+  if (kMqttCaCert[0] != '\0' &&
+      tls::isLikelyPemCertificate(kMqttCaCert, strlen(kMqttCaCert))) {
+    s_caPem = String(kMqttCaCert);
+    s_caLoaded = true;
+    return tls::CaLoadStatus::Ok;
+  }
 
   // formatOnFail=false CÓ CHỦ Ý: format sẽ xoá luôn hàng đợi offline và chính file CA
   // (xem GH-936). Thà báo lỗi còn hơn tự ý xoá dữ liệu.

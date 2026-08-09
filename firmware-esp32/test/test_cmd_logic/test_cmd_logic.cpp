@@ -201,6 +201,59 @@ void test_parse_long_cmdId_truncated_safely() {
 void setUp(void)    {}
 void tearDown(void) {}
 
+
+// ---- Hợp đồng với dropdown "Gửi command" của web admin (phát hiện 08/08/2026) ----
+
+/// <summary>
+/// Năm loại lệnh mà dropdown admin TỪNG liệt kê đều KHÔNG được firmware hiểu.
+/// </summary>
+/// <remarks>
+/// `frontend/src/shared/enums/iot/iot.enum.ts` chép danh sách từ XML doc của
+/// `IotDeviceCommandPayloadDto` — mà doc đó chưa bao giờ khớp `classifyType`. Hậu quả: Admin chọn
+/// `reboot`, backend trả 202, thiết bị nhận đúng topic rồi ack `status: "unknown"` và không làm gì.
+/// Không ai phát hiện suốt nhiều tuần vì mọi tầng đều báo thành công.
+///
+/// Bài test này ghim lại sự thật: nếu ai đó thêm `reboot` vào `classifyType`, test đỏ và người sửa
+/// buộc phải cập nhật cả ba nơi (firmware · IOT_COMMAND_TYPES · docs/api-battery.md) cùng lúc.
+/// </remarks>
+void test_admin_dropdown_legacy_types_are_all_unknown() {
+  const char* legacy[] = { "reboot", "ota", "sample-now", "calibrate", "set-config" };
+  for (size_t i = 0; i < sizeof(legacy) / sizeof(legacy[0]); ++i) {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "\"%s\" phải là Unknown — xem ghi chú trên", legacy[i]);
+    TEST_ASSERT_EQUAL_MESSAGE(static_cast<int>(CommandKind::Unknown),
+                              static_cast<int>(classifyType(legacy[i])), msg);
+  }
+}
+
+/// Ba loại DUY NHẤT firmware hiểu — `IOT_COMMAND_TYPES` phía frontend phải khớp đúng ba cái này.
+void test_only_three_supported_types_exist() {
+  TEST_ASSERT_EQUAL(static_cast<int>(CommandKind::SetInterval),
+                    static_cast<int>(classifyType("set_interval")));
+  TEST_ASSERT_EQUAL(static_cast<int>(CommandKind::TriggerOta),
+                    static_cast<int>(classifyType("trigger_ota")));
+  TEST_ASSERT_EQUAL(static_cast<int>(CommandKind::RequestHeartbeat),
+                    static_cast<int>(classifyType("request_heartbeat")));
+
+  // Biến thể gạch ngang cũng phải nhận — frontend có thể gửi dạng nào cũng được.
+  TEST_ASSERT_EQUAL(static_cast<int>(CommandKind::SetInterval),
+                    static_cast<int>(classifyType("set-interval")));
+  TEST_ASSERT_EQUAL(static_cast<int>(CommandKind::TriggerOta),
+                    static_cast<int>(classifyType("trigger-ota")));
+  TEST_ASSERT_EQUAL(static_cast<int>(CommandKind::RequestHeartbeat),
+                    static_cast<int>(classifyType("request-heartbeat")));
+}
+
+/// `set_interval` chỉ đọc `pollingSeconds` hoặc `pollingIntervalSeconds` — tên khác bị bỏ qua.
+/// Gợi ý params ở dropdown admin phải nêu đúng một trong hai tên này.
+void test_set_interval_ignores_wrongly_named_param() {
+  const char* json = "{\"cmdId\":\"c1\",\"type\":\"set_interval\",\"params\":{\"interval\":5}}";
+  ParsedCommand r = parseCommandPayload(json, strlen(json));
+  TEST_ASSERT_TRUE(r.ok);
+  TEST_ASSERT_EQUAL(static_cast<int>(CommandKind::SetInterval), static_cast<int>(r.kind));
+  TEST_ASSERT_EQUAL_UINT32(0, r.pollingSeconds);   // 0 = không đọc được → handler ack "failed"
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
 
@@ -234,6 +287,9 @@ int main(int, char**) {
   RUN_TEST(test_parse_missing_cmdId_returns_ok_empty_cmdId);
   RUN_TEST(test_parse_params_null_handled);
   RUN_TEST(test_parse_long_cmdId_truncated_safely);
+  RUN_TEST(test_admin_dropdown_legacy_types_are_all_unknown);
+  RUN_TEST(test_only_three_supported_types_exist);
+  RUN_TEST(test_set_interval_ignores_wrongly_named_param);
 
   return UNITY_END();
 }

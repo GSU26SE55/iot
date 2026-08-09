@@ -5,7 +5,13 @@
 // Cho phép đổi apiKey/deviceCode/config qua Serial mà KHÔNG cần reflash.
 //
 // Namespace: "iot" (max 15 chars per Preferences spec).
-// Keys (max 15 chars per key):
+//
+// ⚠️ Preferences giới hạn **15 ký tự cho MỖI KHOÁ**. Vượt quá thì `putString` trả 0 và giá trị
+//    KHÔNG được ghi — không exception, không log, chỉ là lần boot sau thiếu cấu hình. Thêm khoá mới
+//    phải đếm ký tự trước. Khoá dài nhất hiện tại là "wifissid"/"mqprefix" (8 ký tự).
+//
+// Khoá đang dùng:
+//   -- danh tính + provision (Sprint 2) --
 //   "apikey"     string  — API key plaintext (S2-FW-01)
 //   "devcode"    string  — DeviceCode (S2-FW-01)
 //   "provd"      uint8   — flag "đã provision" (0/1) (S2-FW-02)
@@ -15,9 +21,22 @@
 //   "ntpsv"      string  — NTP server từ configJson (S2-FW-02)
 //   "fwver"      string  — last firmware version đã provision (S2-FW-02)
 //
+//   -- mạng + broker, cấp lúc chạy (IOT3-35) --
+//   "wifissid"   string  — SSID WiFi khách hàng          (IOT3-36, config/wifi_config.cpp)
+//   "wifipass"   string  — mật khẩu WiFi                 (IOT3-36)
+//   "mqhost"     string  — host broker MQTT              (IOT3-37, config/mqtt_config.cpp)
+//   "mqport"     int32   — cổng broker                   (IOT3-37)
+//   "mqtls"      uint8   — backend BÁO có TLS hay không  (IOT3-37 — chỉ để đối chiếu;
+//                          đường TLS thật do `MQTT_USE_TLS` compile-time quyết, quyết định Q2)
+//   "mquser"     string  — username MQTT                 (IOT3-37)
+//   "mqpass"     string  — mật khẩu MQTT                 (IOT3-37)
+//   "mqprefix"   string  — tiền tố topic, vd solar/gw-esp32-001 (IOT3-37)
+//   "batmap"     string  — bảng ánh xạ pin, mã hoá theo `core/battery_map_codec.h` (IOT3-49)
+//
 // Tham chiếu:
 //   - tasksprint.md S2-FW-01
 //   - NI §9.1 (config loader)
+//   - overall.md §17 Sprint IoT-3 (IOT3-35..37, IOT3-49)
 // ==================================================================
 #pragma once
 #include <cstddef>

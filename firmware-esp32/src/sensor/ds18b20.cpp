@@ -10,7 +10,7 @@
   #include "config.example.h"
 #endif
 
-#include "config/battery_mapping.h"
+#include "config/battery_map_runtime.h"
 #include "core/source_tags.h"   // S6-FW-03 (#65): canonical cross-source tags
 
 #include <Arduino.h>
@@ -101,12 +101,9 @@ size_t ds18b20BuildExternalTempReadings(const char* const* serials, size_t n,
     memset(&r, 0, sizeof(r));
 
     strncpy(r.serial, serials[i], sizeof(r.serial) - 1);
-    for (const auto& m : config::kBatteryMappings) {
-      if (strcmp(m.serial, r.serial) == 0) {
-        strncpy(r.batteryAssetId, m.batteryAssetId, sizeof(r.batteryAssetId) - 1);
-        break;
-      }
-    }
+    // IOT3-49 — qua bảng runtime (tự lui về bảng cứng khi chưa provision).
+    strncpy(r.batteryAssetId, batmap::assetIdForSerial(r.serial),
+            sizeof(r.batteryAssetId) - 1);
 
     r.voltage     = 0.0f;   // DS18B20 không đo điện
     r.current     = 0.0f;
