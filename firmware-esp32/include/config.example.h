@@ -24,11 +24,14 @@
 
 // --------- Authenticated LAN administration app ----------
 // Open http://<ESP32-IP>:8080 or http://solar-gateway.local:8080 after Wi-Fi connects.
-// First-time/recovery captive setup uses SolarGW-XXXX on port 80 (see SETUP_AP_PASSWORD).
+// First-time/recovery setup uses SolarGW-XXXX and the web portal on port 8080.
 #define CONFIG_PORTAL_PORT            8080
 #define CONFIG_PORTAL_USER            "admin"
-#define CONFIG_PORTAL_PASSWORD        "change-me-now"
+#define CONFIG_PORTAL_PASSWORD        "12345678"
 #define CONFIG_PORTAL_HOSTNAME        "solar-gateway"
+#define SETUP_AP_PASSWORD             "12345678"
+// Có Wi-Fi cũ nhưng mất kết nối lâu hơn ngưỡng này thì mở AP recovery.
+#define CONFIG_PORTAL_AP_FALLBACK_MS  30000UL
 
 // --------- NTP ---------- (S1-FW-03)
 // Pool gần Việt Nam — fallback sang pool.ntp.org nếu fail.
@@ -50,7 +53,7 @@
 // Dev local:   "https://10.0.0.10:7200" (laptop chạy docker compose, ESP32 cùng LAN)
 // Staging:     "https://api-dev.gsu26se55.com"
 // LƯU Ý: HTTPS scheme — Sprint 1 dùng setInsecure() trong dev, Sprint 3 thay bằng CA cert.
-#define BACKEND_URL         "https://10.0.0.10:7200"
+#define BACKEND_URL         "https://api.example.com"
 
 // Endpoint ingest theo legacy contract (Sprint 1 MVP — backward compat NI §7.4).
 // Sprint 3 (S3-FW-04) giữ URL nhưng đổi schema sang production contract.
@@ -127,7 +130,7 @@
 // Việc duy nhất phải điền tay trong cả file này: `BACKEND_URL`, `DEVICE_CODE`, `API_KEY`
 // (hoặc nạp qua CLI/trang cấu hình) và mật khẩu AP setup `SETUP_AP_PASSWORD`.
 
-#define MQTT_BROKER_HOST    "10.0.0.10"      // hostname / IP broker (dev: laptop chạy mosquitto)
+#define MQTT_BROKER_HOST    "mqtt.example.com" // DNS ổn định; không dùng IP DHCP của router
 #define MQTT_BROKER_PORT    8883             // 1883 plain | 8883 TLS
 #define MQTT_USE_TLS        1                // 0 = plain (chỉ dev), 1 = TLS (production)
 #define MQTT_USERNAME       "gw-esp32-mvp-001"   // backend lower-case deviceCode

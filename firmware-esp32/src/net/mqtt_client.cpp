@@ -14,6 +14,7 @@
 #include "core/net_config_rules.h"
 #include "net/time_sync.h"
 #include "net/ca_cert_embedded.h"
+#include "net/host_resolver.h"
 
 #include <Arduino.h>
 #include <LittleFS.h>
@@ -166,8 +167,22 @@ bool loadCaCert() {
 #endif
 }
 
+void configureBrokerEndpoint() {
+  IPAddress resolved;
+  if (core::isMdnsHostname(mqttcfg::host()) &&
+      resolveMdnsHost(mqttcfg::host(), resolved)) {
+    s_mqtt.setServer(resolved, mqttcfg::port());
+    return;
+  }
+  s_mqtt.setServer(mqttcfg::host(), mqttcfg::port());
+}
+
 bool tryConnect() {
   if (!WiFi.isConnected()) return false;
+
+  // Re-resolve ở mỗi chu kỳ reconnect (resolver có cache). Nếu laptop/backend
+  // nhận IP DHCP mới mà ESP vẫn online, MQTT tự tìm lại sau tối đa một TTL.
+  configureBrokerEndpoint();
 
   // (Re)config LWT mỗi lần connect — vì deviceCode có thể đổi qua Serial CLI
   // (S2-FW-01 hot reload). LWT topic = solar/{dev}/status, payload="offline",
@@ -311,7 +326,7 @@ bool mqttBegin() {
 #endif
   }
 
-  s_mqtt.setServer(mqttcfg::host(), mqttcfg::port());
+  configureBrokerEndpoint();
   s_mqtt.setBufferSize(MQTT_MAX_PACKET_SIZE);
   s_mqtt.setKeepAlive(MQTT_KEEPALIVE_SEC);
   s_mqtt.setCallback(onMessage);
@@ -343,7 +358,7 @@ bool mqttApplyConfig() {
     return true;
   }
 
-  s_mqtt.setServer(mqttcfg::host(), mqttcfg::port());
+  configureBrokerEndpoint();
   if (s_mqtt.connected()) {
     Serial.println("[mqtt] cấu hình đổi → ngắt kết nối để dựng lại LWT/topic/subscribe");
     s_mqtt.disconnect();

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Solar BMS Setup</string>
+    <string name="portal_connecting">Đang tìm ESP32…</string>
+    <string name="portal_connected">Đã mở trang cấu hình ESP32</string>
+    <string name="portal_not_found">Chưa kết nối Solar Gateway</string>
+    <string name="connect_gateway_hint">Hãy kết nối Wi-Fi SolarGW-xxxx rồi bấm Tải lại.</string>
+    <string name="camera_required">Cần quyền camera để quét QR trực tiếp trong app.</string>
+    <string name="open_wifi">Wi-Fi</string>
+    <string name="reload">Tải lại</string>
+    <string name="scan_device_qr">Quét QR thiết bị</string>
+    <string name="scanner_live_hint">Đưa QR trên trang Admin vào giữa khung</string>
+    <string name="scanner_privacy_hint">Quét trực tiếp • Không chụp hoặc lưu ảnh</string>
+    <string name="scanner_start_failed">Không mở được camera: %1$s</string>
+</resources>

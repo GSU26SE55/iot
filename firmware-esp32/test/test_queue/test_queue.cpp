@@ -10,8 +10,9 @@
 // Chạy: pio test -e native -f test_queue
 // ==================================================================
 #include <unity.h>
-#include <vector>
 #include <algorithm>
+#include <string>
+#include <vector>
 
 #include "queue/queue_index.h"      // pure helpers + kMaxQueuedBatches
 

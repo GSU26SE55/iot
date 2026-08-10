@@ -113,6 +113,45 @@ inline bool mqttConfigUsable(const char* host, int port, const char* user, const
   return true;
 }
 
+// ===================================================================== mDNS endpoint
+
+/// True khi hostname dùng miền link-local `.local` (không phân biệt hoa/thường).
+/// Router gia đình thường trả NXDOMAIN cho tên này; firmware phải hỏi mDNS multicast.
+inline bool isMdnsHostname(const char* host) {
+  if (host == nullptr) return false;
+  size_t len = 0;
+  while (host[len] != '\0') ++len;
+  constexpr char suffix[] = ".local";
+  constexpr size_t suffixLen = sizeof(suffix) - 1;
+  if (len <= suffixLen) return false;  // cần ít nhất một ký tự trước `.local`
+
+  const size_t start = len - suffixLen;
+  for (size_t i = 0; i < suffixLen; ++i) {
+    char c = host[start + i];
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    if (c != suffix[i]) return false;
+  }
+  return true;
+}
+
+/// Bỏ hậu tố `.local` để tạo label truyền cho `MDNS.queryHost()`.
+/// Trả số ký tự đã ghi, hoặc 0 nếu hostname/buffer không hợp lệ.
+inline size_t mdnsQueryLabel(const char* host, char* out, size_t outLen) {
+  if (out == nullptr || outLen == 0) return 0;
+  out[0] = '\0';
+  if (!isMdnsHostname(host)) return 0;
+
+  size_t len = 0;
+  while (host[len] != '\0') ++len;
+  constexpr size_t suffixLen = sizeof(".local") - 1;
+  const size_t labelLen = len - suffixLen;
+  if (labelLen == 0 || labelLen >= outLen) return 0;
+
+  for (size_t i = 0; i < labelLen; ++i) out[i] = host[i];
+  out[labelLen] = '\0';
+  return labelLen;
+}
+
 /// <summary>
 /// Suy tiền tố topic từ deviceCode khi backend chưa cấp (chưa provision, hoặc bản backend cũ).
 /// </summary>

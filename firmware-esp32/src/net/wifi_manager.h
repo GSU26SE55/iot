@@ -25,9 +25,8 @@ namespace net {
 /// hai con trỏ tham số, mà đổi giá trị xong con trỏ vẫn chỉ vào chuỗi cũ.
 /// </para>
 /// <para>
-/// Block tối đa ~30s chờ link đầu tiên, nhưng vẫn trả về khi thất bại (loop tự thử lại).
-/// Chưa cấu hình WiFi thì trả về NGAY, không chờ — chờ 30 giây cho một SSID rỗng chỉ làm
-/// người lắp đặt tưởng thiết bị treo.
+/// Kết nối bất đồng bộ và trả về ngay. AP/web setup không bị chặn 30 giây
+/// khi router cũ không còn tồn tại.
 /// </para>
 /// </remarks>
 void wifiBegin();
@@ -40,9 +39,10 @@ bool wifiReconfigure(const char* ssid, const char* password);
 enum class WifiPhase : uint8_t {
   /// Chưa có SSID nào ⇒ mở trang cấu hình, CHỜ VÔ HẠN.
   Unconfigured = 0,
-  /// Có SSID, đang thử nối (thử lại mỗi 5 s). Dưới 5 phút mất mạng vẫn ở đây.
+  /// Có SSID, đang thử nối (thử lại mỗi 5 s). Chưa tới ngưỡng recovery vẫn ở đây.
   Connecting   = 1,
-  /// Mất mạng ≥ 5 phút ⇒ VỪA phát AP cấu hình VỪA tiếp tục thử mạng cũ (`WIFI_AP_STA`).
+  /// Mất mạng đủ `CONFIG_PORTAL_AP_FALLBACK_MS` ⇒ VỪA phát AP cấu hình VỪA
+  /// tiếp tục thử mạng cũ (`WIFI_AP_STA`). Mặc định sản phẩm là 30 giây.
   /// Router khách sống lại là thiết bị tự lành, không cần ai ra hiện trường.
   Recovery     = 2,
   /// Đang có mạng.
@@ -61,10 +61,6 @@ WifiPhase wifiPhase();
 
 /// Đã mất mạng bao lâu (ms). 0 khi đang có mạng.
 uint32_t wifiOfflineDurationMs();
-
-/// Ngưỡng chuyển sang chế độ phục hồi — lấy từ `core/wifi_phase_policy.h` để chỉ có MỘT con số
-/// trong cả cây mã (luật ở đó được test ở env:native).
-constexpr uint32_t kRecoveryAfterOfflineMs = core::kRecoveryAfterOfflineMsDefault;
 
 // True nếu WL_CONNECTED.
 bool wifiIsConnected();

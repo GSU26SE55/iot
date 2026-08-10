@@ -37,6 +37,7 @@
 #include "config/nvs_store.h"
 #include "config/runtime_config.h"
 #include "config/wifi_config.h"
+#include "net/setup_portal.h"
 #include "net/wifi_manager.h"
 #include "net/time_sync.h"
 #include "net/http_client.h"
@@ -81,6 +82,14 @@ uint32_t s_flushedCount    = 0;
 
 net::Backoff s_backoff;
 
+bool deviceIdentityReady() {
+  return identity::deviceCode()[0] != '\0' && identity::apiKey()[0] != '\0';
+}
+
+// Chỉ xanh sau khi backend đã ACK provision/heartbeat trong chính lần boot này.
+// Wi-Fi connected không đồng nghĩa API Gateway reachable.
+bool s_backendAcknowledged = false;
+
 // Payload buffer — Sprint 3 multi-source = 2 readings/battery, max 8 batteries
 //                  → 16 readings. payloadBufferSize(16) ≈ 6 KB.
 constexpr size_t kMaxReadings = bms::kMockMaxBatteries * bms::kSourcesPerBattery;
@@ -102,6 +111,7 @@ void printBanner() {
 }
 
 void ensureProvisioned() {
+  if (!deviceIdentityReady()) return;
   if (s_provisionDone) return;
   if (s_provCfg.provisioned) {
     s_provisionDone = true;
@@ -126,6 +136,7 @@ void ensureProvisioned() {
   ui::ledSet(ui::LedState::Provisioning);
   if (provision::runProvisionFlow(FW_VERSION, HARDWARE_REVISION, s_provCfg)) {
     s_provisionDone = true;
+    s_backendAcknowledged = true;
     telemetry::heartbeatSetInterval(s_provCfg.heartbeatIntervalMs);
     // S5-FW-06: provision response chứa siteId → wire vào SHT31.
     sensor::sht31SetSiteId(s_provCfg.siteId);
@@ -494,6 +505,10 @@ void tryFlushQueue() {
 }
 
 void updateStatusLed() {
+  if (!deviceIdentityReady()) {
+    ui::ledSet(ui::LedState::Setup);
+    return;
+  }
   // IOT3-54 — thứ tự xét đi từ "cần người can thiệp nhất" xuống "để yên được".
   // Trạng thái MẠNG phải đứng trên trạng thái hàng đợi: chưa có mạng thì hàng đợi đầy là hệ quả,
   // không phải nguyên nhân, mà đèn chỉ nói được MỘT điều nên phải nói cái gốc.
@@ -509,6 +524,13 @@ void updateStatusLed() {
       return;
     case net::WifiPhase::Connected:
       break;
+  }
+
+  if (!s_backendAcknowledged) {
+    // Chưa provision: tím để người cài đặt biết thiết bị vẫn đang ghép backend.
+    // Đã provision từ boot trước nhưng heartbeat hiện tại thất bại: đỏ, không xanh giả.
+    ui::ledSet(s_provisionDone ? ui::LedState::Offline : ui::LedState::Provisioning);
+    return;
   }
 
   if (queue::queueSize() > 0) {
@@ -617,8 +639,9 @@ void setup() {
 
   printBanner();
 
-  net::wifiBegin();               // IOT3-50 — tự đọc wificfg
-  portal::setupPortalBegin();     // authenticated LAN app on port 8080
+  net::portalStart(net::PortalMode::AlwaysAvailable);
+  portal::setupPortalBegin();     // authenticated AP/LAN app on port 8080
+  net::wifiBegin();               // connect STA in background; setup AP stays available
   net::timeSyncBegin();
   provision::loadProvisioned(s_provCfg);
   if (s_provCfg.provisioned) {
@@ -701,7 +724,7 @@ void appLoopBody() {
   net::timeSyncTick();
   cli::cliTick();
   // Sprint 4: MQTT tick (reconnect + poll inbound cmd). Tự skip nếu wifi down.
-  net::mqttTick();
+  if (deviceIdentityReady()) net::mqttTick();
   ui::ledTick();                 // IOT3-54 — bơm hiệu ứng nháy
   checkMqttCredentialHealth();   // IOT3-44 — phải chạy TRƯỚC ensureProvisioned()
 
@@ -711,7 +734,7 @@ void appLoopBody() {
   const uint32_t pollInterval = s_provCfg.provisioned ? s_provCfg.pollingIntervalMs
                                                       : INGEST_INTERVAL_MS;
 
-  if (now - s_lastIngestMs >= pollInterval) {
+  if (s_provisionDone && now - s_lastIngestMs >= pollInterval) {
     s_lastIngestMs = now;
 
     // GH-737 — quyết định tách sang core::ingestAction() (hàm thuần, test ở env:native).
@@ -741,15 +764,22 @@ void appLoopBody() {
   }
 
   // Sprint 3: flush queue khi backoff allow
-  tryFlushQueue();
+  if (s_provisionDone) tryFlushQueue();
 
   // Sprint 7 (S7-FW-01/02): OTA tick — UNCONDITIONAL (verify-mode cần chạy cả khi
   // offline để bắt deadline rollback). Network ops tự gate bên trong.
   ota::otaTick();
 
   // Sprint 2: heartbeat
-  if (net::wifiIsConnected() && net::timeIsSynced()) {
+  if (s_provisionDone && net::wifiIsConnected() && net::timeIsSynced()) {
+    const uint32_t okBefore = telemetry::heartbeatOkCount();
+    const uint32_t failBefore = telemetry::heartbeatFailCount();
     telemetry::heartbeatTick();
+    if (telemetry::heartbeatOkCount() != okBefore) {
+      s_backendAcknowledged = true;
+    } else if (telemetry::heartbeatFailCount() != failBefore) {
+      s_backendAcknowledged = false;
+    }
   }
 
   // Sprint 5 (S5-FW-06): SHT31 ambient post mỗi SHT31_POLL_INTERVAL_MS (60s default).

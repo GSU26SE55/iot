@@ -20,6 +20,8 @@
 
 #include "net/tls_ca.h"
 #include "net/ca_cert_embedded.h"       // IOT3-23: CA nhúng dùng chung với mqtt_client
+#include "net/host_resolver.h"
+#include "core/net_config_rules.h"
 #include <string.h>
 
 #include "config/device_identity.h"     // S2-FW-01 + S2-FW-04: runtime credentials
@@ -45,6 +47,47 @@ namespace {
 WiFiClientSecure s_tlsClient;
 WiFiClient       s_plainClient;
 bool             s_tlsConfigured = false;
+
+struct HttpTarget {
+  String url;
+  String originalAuthority;
+};
+
+HttpTarget buildHttpTarget(const char* path) {
+  const String base(runtimecfg::backendUrl());
+  HttpTarget target{base + (path ? path : ""), String()};
+
+  // Chỉ thay hostname bằng IP cho HTTP nội bộ. Với HTTPS phải giữ hostname
+  // để SNI/certificate verification khớp domain production.
+  constexpr const char* scheme = "http://";
+  if (!base.startsWith(scheme)) return target;
+
+  const int authorityStart = strlen(scheme);
+  int authorityEnd = base.indexOf('/', authorityStart);
+  if (authorityEnd < 0) authorityEnd = base.length();
+  const String authority = base.substring(authorityStart, authorityEnd);
+
+  // Portal không chấp nhận URL có userinfo. IPv6 literal cũng không phải `.local`,
+  // nên dấu ':' cuối cùng ở đây chính là separator của port nếu có.
+  int portSeparator = authority.lastIndexOf(':');
+  String host = portSeparator >= 0 ? authority.substring(0, portSeparator) : authority;
+  const String port = portSeparator >= 0 ? authority.substring(portSeparator) : String();
+  if (!core::isMdnsHostname(host.c_str())) return target;
+
+  IPAddress resolved;
+  if (!resolveMdnsHost(host.c_str(), resolved)) return target;
+
+  target.originalAuthority = authority;
+  target.url = base.substring(0, authorityStart) + resolved.toString() + port
+             + base.substring(authorityEnd) + (path ? path : "");
+  return target;
+}
+
+void addOriginalHostHeader(HTTPClient& http, const HttpTarget& target) {
+  if (target.originalAuthority.length() > 0) {
+    http.addHeader("Host", target.originalAuthority);
+  }
+}
 
 bool beginRequest(HTTPClient& http, const String& url) {
   if (url.startsWith("https://")) return http.begin(s_tlsClient, url);
@@ -91,10 +134,8 @@ PostResult postJsonInternal(const char* path,
     return res;
   }
 
-  String url;
-  url.reserve(96 + (path ? strlen(path) : 0));
-  url += runtimecfg::backendUrl();
-  url += path;
+  const HttpTarget target = buildHttpTarget(path);
+  const String& url = target.url;
 
   HTTPClient http;
   http.setReuse(true);
@@ -109,6 +150,7 @@ PostResult postJsonInternal(const char* path,
   }
 
   // S2-FW-04: 2 header bắt buộc đọc từ identity store runtime.
+  addOriginalHostHeader(http, target);
   http.addHeader("Content-Type",   "application/json");
   http.addHeader("X-Api-Key",      identity::apiKey());
   http.addHeader("X-Device-Code",  identity::deviceCode());
@@ -164,10 +206,8 @@ PostResult httpGetJsonRecv(const char* path,
     return res;
   }
 
-  String url;
-  url.reserve(96 + (path ? strlen(path) : 0));
-  url += runtimecfg::backendUrl();
-  url += path;
+  const HttpTarget target = buildHttpTarget(path);
+  const String& url = target.url;
 
   HTTPClient http;
   http.setReuse(true);
@@ -181,6 +221,7 @@ PostResult httpGetJsonRecv(const char* path,
     return res;
   }
 
+  addOriginalHostHeader(http, target);
   http.addHeader("X-Api-Key",     identity::apiKey());
   http.addHeader("X-Device-Code", identity::deviceCode());
   http.addHeader("Accept",        "application/json");
@@ -223,10 +264,8 @@ PostResult httpPutJson(const char* path, const char* body, size_t bodyLen) {
     return res;
   }
 
-  String url;
-  url.reserve(96 + (path ? strlen(path) : 0));
-  url += runtimecfg::backendUrl();
-  url += path;
+  const HttpTarget target = buildHttpTarget(path);
+  const String& url = target.url;
 
   HTTPClient http;
   http.setReuse(true);
@@ -240,6 +279,7 @@ PostResult httpPutJson(const char* path, const char* body, size_t bodyLen) {
     return res;
   }
 
+  addOriginalHostHeader(http, target);
   http.addHeader("Content-Type",  "application/json");
   http.addHeader("X-Api-Key",     identity::apiKey());
   http.addHeader("X-Device-Code", identity::deviceCode());

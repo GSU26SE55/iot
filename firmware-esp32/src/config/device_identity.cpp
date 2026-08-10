@@ -26,6 +26,7 @@ static_assert(kMaxDeviceCodeLen >= core::kMaxDeviceCodeLen + 1,
 namespace {
 constexpr const char* kKeyApiKey     = "apikey";
 constexpr const char* kKeyDeviceCode = "devcode";
+constexpr const char* kKeyUnpaired   = "unpaired";
 
 char s_apiKey    [kMaxApiKeyLen];
 char s_deviceCode[kMaxDeviceCodeLen];
@@ -37,6 +38,12 @@ void copySafe(char* dst, size_t dstLen, const char* src) {
   if (src == nullptr) { dst[0] = '\0'; return; }
   strncpy(dst, src, dstLen - 1);
   dst[dstLen - 1] = '\0';
+}
+
+void clearUnpairedMarkerIfComplete() {
+  if (s_apiKey[0] != '\0' && s_deviceCode[0] != '\0') {
+    storage::nvsPutUInt8(kKeyUnpaired, 0);
+  }
 }
 }  // namespace
 
@@ -81,6 +88,15 @@ bool loadValidated(const char* nvsKey, char* dst, size_t dstLen,
 }  // namespace
 
 void identityBegin() {
+  if (storage::nvsGetUInt8(kKeyUnpaired, 0) == 1) {
+    s_apiKey[0] = '\0';
+    s_deviceCode[0] = '\0';
+    s_apiKeyFromNvs = true;
+    s_deviceCodeFromNvs = true;
+    Serial.println("[identity] device is unpaired; waiting for a new setup QR");
+    return;
+  }
+
   // 1. Try NVS — mỗi khoá đọc bằng buffer ĐÚNG cỡ đích của nó (xem loadValidated).
   s_apiKeyFromNvs =
       loadValidated(kKeyApiKey, s_apiKey, sizeof(s_apiKey), API_KEY, "apiKey");
@@ -115,6 +131,7 @@ bool setApiKey(const char* newKey) {
   if (!storage::nvsPutString(kKeyApiKey, newKey)) return false;
   copySafe(s_apiKey, sizeof(s_apiKey), newKey);
   s_apiKeyFromNvs = true;
+  clearUnpairedMarkerIfComplete();
   Serial.println("[identity] apiKey updated (NVS)");
   return true;
 }
@@ -130,7 +147,18 @@ bool setDeviceCode(const char* newCode) {
   if (!storage::nvsPutString(kKeyDeviceCode, newCode)) return false;
   copySafe(s_deviceCode, sizeof(s_deviceCode), newCode);
   s_deviceCodeFromNvs = true;
+  clearUnpairedMarkerIfComplete();
   Serial.printf("[identity] deviceCode updated → %s\n", s_deviceCode);
+  return true;
+}
+
+bool prepareForPairing() {
+  if (!storage::nvsPutUInt8(kKeyUnpaired, 1)) return false;
+  s_apiKey[0] = '\0';
+  s_deviceCode[0] = '\0';
+  s_apiKeyFromNvs = true;
+  s_deviceCodeFromNvs = true;
+  Serial.println("[identity] cleared; next boot will require a new setup QR");
   return true;
 }
 

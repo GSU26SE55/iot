@@ -40,6 +40,11 @@ const char* deviceCode();
 bool setApiKey(const char* newKey);
 bool setDeviceCode(const char* newCode);
 
+// Mark the device as intentionally unpaired. Unlike resetToDefaults(), this
+// suppresses compile-time identity fallbacks on the next boot so the web
+// setup flow asks for a new QR code.
+bool prepareForPairing();
+
 // Reset cả 2 về compile-time defaults (erase NVS).
 bool resetToDefaults();
 

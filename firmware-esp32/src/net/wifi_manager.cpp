@@ -19,6 +19,16 @@
 #include "config/wifi_config.h"
 #include "net/setup_portal.h"
 
+#if __has_include("config.h")
+  #include "config.h"
+#else
+  #include "config.example.h"
+#endif
+
+#ifndef CONFIG_PORTAL_AP_FALLBACK_MS
+  #define CONFIG_PORTAL_AP_FALLBACK_MS core::kRecoveryAfterOfflineMsDefault
+#endif
+
 namespace net {
 
 namespace {
@@ -56,7 +66,7 @@ void onWiFiEvent(WiFiEvent_t event) {
 
 void wifiBegin() {
   WiFi.onEvent(onWiFiEvent);
-  WiFi.mode(WIFI_STA);
+  WiFi.mode(portalIsActive() ? WIFI_AP_STA : WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.persistent(false);          // tránh ghi creds vào NVS (Sprint 2 sẽ quản lý riêng)
   WiFi.setSleep(false);            // tăng độ ổn định MQTT/HTTPS (tiêu thụ thêm ~30mA)
@@ -71,26 +81,10 @@ void wifiBegin() {
   s_phase = WifiPhase::Connecting;
 
   WiFi.begin(wificfg::ssid(), wificfg::password());
-
-  Serial.printf("[wifi] connecting to \"%s\" ", wificfg::ssid());
-  uint32_t t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 30000) {
-    delay(500);
-    Serial.print('.');
-  }
-  Serial.println();
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.printf("[wifi] connected ip=%s rssi=%ddBm mac=%s\n",
-                  WiFi.localIP().toString().c_str(),
-                  WiFi.RSSI(),
-                  WiFi.macAddress().c_str());
-    s_phase        = WifiPhase::Connected;
-    s_offlineSince = 0;
-  } else {
-    Serial.println("[wifi] initial connect FAILED — will retry in loop");
-    s_offlineSince = millis();
-  }
+  s_offlineSince = millis();
+  s_lastReconnectMs = millis();
+  Serial.printf("[wifi] connecting to \"%s\" in background; setup AP remains available\n",
+                wificfg::ssid());
 }
 
 void wifiTick() {
@@ -107,7 +101,7 @@ void wifiTick() {
       (connected || s_offlineSince == 0) ? 0 : (now - s_offlineSince);
   const core::WifiPhaseDecision decision =
       core::decideWifiPhase(wificfg::isConfigured(), connected, offlineMsNow,
-                            kRecoveryAfterOfflineMs);
+                            CONFIG_PORTAL_AP_FALLBACK_MS);
 
   // ---------------- có mạng ----------------
   if (decision == core::WifiPhaseDecision::Connected) {
@@ -117,12 +111,6 @@ void wifiTick() {
       s_phase = WifiPhase::Connected;
     }
     s_offlineSince = 0;
-    // Nối được rồi thì đóng AP: để AP chạy tiếp vừa tốn sóng vừa khiến điện thoại
-    // của khách bám vào AP của thiết bị thay vì mạng nhà.
-    if (portalIsActive()) {
-      Serial.println("[wifi] đã nối được mạng — đóng trang cấu hình");
-      portalStop();
-    }
     return;
   }
 
@@ -142,21 +130,20 @@ void wifiTick() {
 
   if (decision == core::WifiPhaseDecision::Recovery) {
     if (s_phase != WifiPhase::Recovery) {
-      Serial.printf("[wifi] mất mạng %lu phút — bật chế độ PHỤC HỒI: phát AP cấu hình NHƯNG "
-                    "vẫn tiếp tục thử mạng cũ\n",
+      Serial.printf("[wifi] mất mạng %lu phút — chế độ PHỤC HỒI; "
+                    "AP cài đặt vẫn sẵn sàng\n",
                     static_cast<unsigned long>(offlineMs / 60000UL));
       s_phase = WifiPhase::Recovery;
     }
-    // `WIFI_AP_STA` chứ không phải `WIFI_AP`: mất chế độ station là mất luôn khả năng tự lành
-    // khi router khách sống lại, và sẽ phải cử người ra tận nơi vì một sự cố tự hết.
-    if (!portalIsActive() && portalStart(PortalMode::Recovery)) {
-      WiFi.mode(WIFI_AP_STA);
-    }
+    // Nhánh dự phòng cho thiết bị nâng cấp từ firmware cũ. Bản hiện tại
+    // đã mở portal ngay lúc boot nên thường không đi vào lệnh này.
+    if (!portalIsActive()) portalStart(PortalMode::Recovery);
   } else if (s_phase != WifiPhase::Connecting) {
     s_phase = WifiPhase::Connecting;
   }
 
-  // Thử lại mạng cũ — chạy ở CẢ hai chế độ Connecting lẫn Recovery.
+  // AP setup luôn chạy song song. WiFi.disconnect()/begin() chỉ đổi phần STA;
+  // portalTick() sẽ khôi phục AP nếu driver làm mất radio bit.
   if (now - s_lastReconnectMs < kReconnectThrottleMs) return;
   s_lastReconnectMs = now;
 

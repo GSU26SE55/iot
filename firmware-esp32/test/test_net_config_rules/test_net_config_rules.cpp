@@ -94,6 +94,25 @@ void test_mqtt_config_needs_all_four_fields() {
   TEST_ASSERT_FALSE(core::mqttConfigUsable("broker.local", 8883, "u", nullptr));
 }
 
+void test_mdns_hostname_and_query_label() {
+  TEST_ASSERT_TRUE(core::isMdnsHostname("DESKTOP-CARUVEK.local"));
+  TEST_ASSERT_TRUE(core::isMdnsHostname("solar-api.LOCAL"));
+  TEST_ASSERT_FALSE(core::isMdnsHostname("192.168.1.6"));
+  TEST_ASSERT_FALSE(core::isMdnsHostname("api.example.com"));
+  TEST_ASSERT_FALSE(core::isMdnsHostname(".local"));
+
+  char label[64];
+  TEST_ASSERT_EQUAL(15u,
+                    core::mdnsQueryLabel("DESKTOP-CARUVEK.local", label, sizeof(label)));
+  TEST_ASSERT_EQUAL_STRING("DESKTOP-CARUVEK", label);
+  TEST_ASSERT_EQUAL(0u, core::mdnsQueryLabel("api.example.com", label, sizeof(label)));
+  TEST_ASSERT_EQUAL_STRING("", label);
+
+  char tooSmall[5];
+  TEST_ASSERT_EQUAL(0u,
+                    core::mdnsQueryLabel("DESKTOP-CARUVEK.local", tooSmall, sizeof(tooSmall)));
+}
+
 // ------------------------------------------------- tiền tố topic
 
 void test_topic_prefix_matches_backend_convention() {
@@ -156,6 +175,7 @@ int main(int, char**) {
   RUN_TEST(test_wifi_length_limits_match_802_11);
   RUN_TEST(test_mqtt_port_range);
   RUN_TEST(test_mqtt_config_needs_all_four_fields);
+  RUN_TEST(test_mdns_hostname_and_query_label);
   RUN_TEST(test_topic_prefix_matches_backend_convention);
   RUN_TEST(test_topic_prefix_returns_empty_when_unusable);
   RUN_TEST(test_topic_prefix_never_truncates);
