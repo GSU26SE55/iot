@@ -199,6 +199,51 @@ EOF
 chmod 0644 "$CONF_D/tls.conf"
 
 echo ""
+# ------------------------------------------------------------------
+# IOT3-82 — sinh lại CA nhúng trong firmware.
+#
+# Vì sao BẮT BUỘC làm ở đây: firmware KHÔNG đọc CA từ LittleFS nữa (ảnh mklittlefs không mount
+# được nên phân vùng bị xoá mỗi lần boot), mà nhúng thẳng vào `src/net/ca_cert_embedded.h`.
+# Chạy lại script này mà quên cập nhật file đó thì broker có CA mới còn firmware vẫn giữ CA cũ,
+# và triệu chứng DUY NHẤT là bắt tay TLS hỏng với `-9984 X509 Certificate verification failed`
+# — không có dòng log nào nói rằng CA đã lệch.
+#
+# Chỉ ghi khi CA THẬT SỰ đổi: header này nằm trong git, ghi đè vô cớ tạo diff rác mỗi lần chạy.
+# ------------------------------------------------------------------
+EMBEDDED_CA_H="$(cd "$SCRIPT_DIR/../../.." && pwd)/firmware-esp32/src/net/ca_cert_embedded.h"
+
+if [ ! -f "$EMBEDDED_CA_H" ]; then
+  echo "[gen-certs] ⚠ KHÔNG thấy $EMBEDDED_CA_H — bỏ qua bước nhúng CA."
+  echo "[gen-certs]   Nếu bạn chạy script từ một bản checkout khác, hãy tự cập nhật file đó."
+elif grep -qF "$(sed -n '2p' "$CA_CRT")" "$EMBEDDED_CA_H" 2>/dev/null; then
+  echo "[gen-certs] CA nhúng trong firmware đã khớp ca.crt — không cần sinh lại."
+else
+  CA_HEADER_TMP="$(mktemp)"
+  {
+    sed -n '1,/^#pragma once$/p' "$EMBEDDED_CA_H"
+    echo ""
+    echo "// Không dùng PROGMEM: header này được include trước <Arduino.h> nên macro"
+    echo "// đó chưa tồn tại. Trên ESP32 hằng const nằm sẵn ở flash, không tốn RAM."
+    echo "static const char kMqttCaCert[] = R\"CERT("
+    cat "$CA_CRT"
+    echo ")CERT\";"
+  } > "$CA_HEADER_TMP"
+  mv "$CA_HEADER_TMP" "$EMBEDDED_CA_H"
+
+  echo "=============================================================="
+  echo "[gen-certs] ⚠⚠ CA ĐÃ ĐỔI — firmware PHẢI được build và nạp lại ⚠⚠"
+  echo ""
+  echo "  Đã cập nhật: $EMBEDDED_CA_H"
+  echo ""
+  echo "  Mọi thiết bị đang chạy firmware CŨ sẽ KHÔNG nối được broker nữa."
+  echo "  Triệu chứng: [mqtt] connect FAIL state=-2 và mbedTLS -9984."
+  echo ""
+  echo "    cd firmware-esp32 && pio run -e esp32-s3-real -t upload"
+  echo "    (hoặc đẩy OTA — xem Sprint 7)"
+  echo "=============================================================="
+fi
+
+echo ""
 # --- 7) Expiry awareness output ---
 SRV_EXPIRY=$(openssl x509 -in "$SRV_CRT" -noout -enddate | sed 's/notAfter=//')
 CA_EXPIRY=$(openssl x509 -in "$CA_CRT" -noout -enddate | sed 's/notAfter=//')

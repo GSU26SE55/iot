@@ -1,8 +1,13 @@
 // GH-735 — xem tls_ca.h.
 //
 // CHỈ chứa phần logic THUẦN (không Arduino, không LittleFS) để biên dịch được ở
-// env:native và test bằng Unity. Phần chạm phần cứng (mount LittleFS, đọc file,
-// gọi setCACert) nằm ở tls_ca_device.cpp — chỉ build cho ESP32.
+// env:native và test bằng Unity.
+//
+// IOT3-24 — phần chạm phần cứng KHÔNG nằm ở `tls_ca_device.cpp` (file đó chưa bao
+// giờ tồn tại). Mỗi đường TLS tự nạp cert trong file của nó:
+//   · HTTPS/OTA → http_client.cpp::loadCaPemOnce()
+//   · MQTT      → mqtt_client.cpp::loadCaCert()
+// Cả hai ưu tiên `kMqttCaCert` (net/ca_cert_embedded.h) rồi mới tới LittleFS.
 
 #include "net/tls_ca.h"
 

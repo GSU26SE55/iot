@@ -105,6 +105,27 @@ bool mqttPublishCmdAck(const char* payload, size_t payloadLen);
 /// Hàm này ngắt kết nối để tick kế tiếp dựng lại LWT + topic + subscribe theo code mới.
 void mqttOnIdentityChanged();
 
+/// <summary>
+/// IOT3-41 — gọi SAU khi <c>mqttcfg</c> đổi (provision trả cấu hình mới, hoặc đặt tay qua CLI).
+/// </summary>
+/// <remarks>
+/// <para>
+/// Ba việc: <c>setServer()</c> theo broker mới · ngắt phiên cũ để dựng lại LWT/subscribe ·
+/// cho phép nối lại ngay thay vì đợi hết <c>MQTT_RECONNECT_INTERVAL_MS</c>.
+/// </para>
+/// <para>
+/// Nếu <c>mqttBegin()</c> lúc khởi động đã bỏ qua vì chưa provision, hàm này sẽ **khởi tạo luôn** —
+/// đó là đường duy nhất để thiết bị lên MQTT ngay trong phiên đầu tiên mà không phải reboot.
+/// </para>
+/// <para>
+/// ⚠️ Gọi CẢ ở nhánh "đã provision từ trước" lúc boot, không chỉ nhánh vừa provision xong.
+/// Bỏ sót nhánh đó thì boot lần đầu chạy đẹp còn từ lần hai trở đi âm thầm chạy HTTPS-only —
+/// không log lỗi nào vì HTTPS vẫn hoạt động bình thường (IOT3-46).
+/// </para>
+/// </remarks>
+/// <returns>true nếu MQTT đang (hoặc vừa được) khởi tạo với cấu hình dùng được.</returns>
+bool mqttApplyConfig();
+
 // ---- Subscribe callback (S4-FW-05) ----
 
 // Signature callback handler downlink command. `payload` null-terminated,
@@ -120,5 +141,21 @@ uint32_t mqttPublishFailCount();
 uint32_t mqttConnectCount();        // số lần (re)connect thành công
 uint32_t mqttConsecutiveFailCount(); // streak fail liên tiếp (S4-FW-06 fallback)
 void     mqttResetConsecutiveFails();
+
+/// <summary>IOT3-44 — số lần connect bị TỪ CHỐI VÌ XÁC THỰC liên tiếp (state 4 hoặc 5).</summary>
+/// <remarks>
+/// Đếm tách hẳn khỏi <c>mqttConsecutiveFailCount()</c> (lỗi publish) và khỏi lỗi mạng
+/// (state −2/−3/−4). Phân biệt này là điểm mấu chốt: mất mạng thì chờ sẽ hết, còn sai
+/// credential thì chờ bao lâu cũng vô ích — chỉ xin credential mới qua <c>/provision</c>
+/// mới cứu được. Lỗi mạng xen giữa KHÔNG xoá streak, nếu không thì mạng chập chờn sẽ giữ
+/// bộ đếm ở 0 mãi và thiết bị không bao giờ tự lành.
+/// </remarks>
+uint32_t mqttAuthFailureCount();
+
+/// Ngưỡng khuyến nghị để đi re-provision (hiện là 5).
+int      mqttAuthFailureThreshold();
+
+/// Xoá streak — gọi sau khi đã re-provision, để lần hỏng sau đếm lại từ đầu.
+void     mqttResetAuthFailures();
 
 }  // namespace net

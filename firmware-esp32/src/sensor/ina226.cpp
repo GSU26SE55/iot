@@ -11,7 +11,7 @@
   #include "config.example.h"
 #endif
 
-#include "config/battery_mapping.h"
+#include "config/battery_map_runtime.h"
 #include "core/source_tags.h"   // S6-FW-03 (#65): canonical cross-source tags
 
 #include <Arduino.h>
@@ -45,16 +45,35 @@ bool ina226Begin() {
   }
 
   // Config shunt + max current → INA226 tự tính LSB.
-  // setMaxCurrentShunt(maxCurrent, shuntResistance).
-  int err = s_ina226.setMaxCurrentShunt(INA226_MAX_CURRENT_A, INA226_SHUNT_OHM);
+  // setMaxCurrentShunt(maxCurrent, shuntResistance, normalize).
+  //
+  // IOT3-07 — normalize=false BẮT BUỘC với maxCurrent = 200 A.
+  //
+  // Tham số thứ ba mặc định `true`, và khối normalize của thư viện làm tròn
+  // current_LSB về dạng 1/2/5 × 10ⁿ µA bằng một vòng lặp chỉ chạy `i < 4`
+  // ⇒ giá trị lớn nhất nó tạo được là 5 000 µA. Truy ngược:
+  //     current_LSB = maxCurrent / 32768
+  //     cần current_LSB × 1e6 + 1 ≤ 5000  ⇒  maxCurrent ≤ 163,8 A
+  // Với 200 A thì LSB = 6 103,5 µA, vượt trần ⇒ vòng lặp thoát với result=false
+  // ⇒ trả INA226_ERR_NORMALIZE_FAILED (0x8003) và INA226 không bao giờ init.
+  //
+  // Bỏ normalize thì LSB = 200/32768 = 6,104 mA (không tròn nhưng dùng tốt),
+  // calib = round(0,00512 / (6,104e-3 × 3,75e-4)) = 2 237 ≤ 32 767 (không phải
+  // tự chia đôi), _maxCurrent = 200,0 A. Không nhánh nào trả lỗi.
+  int err = s_ina226.setMaxCurrentShunt(INA226_MAX_CURRENT_A, INA226_SHUNT_OHM, false);
   if (err != INA226_ERR_NONE) {
-    Serial.printf("[ina226] setMaxCurrentShunt FAIL err=%d (max %.1fA, shunt %.3fΩ)\n",
+    // IOT3-08 — %.6f cho shunt: với 0,000375 Ω thì %.3f in ra "0.000",
+    // nhìn hệt như chưa cấu hình gì và làm người đọc log đi sai hướng.
+    Serial.printf("[ina226] setMaxCurrentShunt FAIL err=0x%04X (max %.1fA, shunt %.6fΩ)\n",
                   err, INA226_MAX_CURRENT_A, INA226_SHUNT_OHM);
+    Serial.println("[ina226]   0x8000 SHUNTVOLTAGE_HIGH  — maxCurrent × shunt > 81,90 mV");
+    Serial.println("[ina226]   0x8002 SHUNT_LOW          — thiếu -DINA226_MINIMAL_SHUNT_OHM=0.0001");
+    Serial.println("[ina226]   0x8003 NORMALIZE_FAILED   — thiếu tham số normalize=false");
     return false;
   }
 
   s_inited = true;
-  Serial.printf("[ina226] init OK addr=0x%02X shunt=%.3fΩ max=%.1fA\n",
+  Serial.printf("[ina226] init OK addr=0x%02X shunt=%.6fΩ max=%.1fA\n",
                 INA226_I2C_ADDRESS, INA226_SHUNT_OHM, INA226_MAX_CURRENT_A);
   return true;
 }
@@ -108,12 +127,9 @@ size_t ina226BuildRedundantReadings(const char* const* serials, size_t n,
     strncpy(r.serial, serials[k], sizeof(r.serial) - 1);
 
     // Lookup batteryAssetId từ mapping (fallback nếu backend chưa seed serial).
-    for (const auto& m : config::kBatteryMappings) {
-      if (strcmp(m.serial, r.serial) == 0) {
-        strncpy(r.batteryAssetId, m.batteryAssetId, sizeof(r.batteryAssetId) - 1);
-        break;
-      }
-    }
+    // IOT3-49 — qua bảng runtime (tự lui về bảng cứng khi chưa provision).
+    strncpy(r.batteryAssetId, batmap::assetIdForSerial(r.serial),
+            sizeof(r.batteryAssetId) - 1);
 
     r.voltage     = v;
     r.current     = i;

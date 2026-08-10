@@ -55,7 +55,7 @@ services:
     healthcheck:
       # Verify broker accept connection — dùng `nc` thay vì mosquitto_sub vì
       # mosquitto:2.0 image không kèm credential file để self-sub trong healthcheck.
-      test: ["CMD-SHELL", "timeout 2 sh -c '</dev/tcp/127.0.0.1/1883' || exit 1"]
+      test: ["CMD-SHELL", "nc -z -w 2 127.0.0.1 1883 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5

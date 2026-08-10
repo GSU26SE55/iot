@@ -9,6 +9,7 @@
   #include "config.example.h"
 #endif
 
+#include "config/battery_map_runtime.h"
 #include "config/battery_mapping.h"
 #include "core/source_tags.h"   // S6-FW-03 (#65): canonical cross-source tags
 
@@ -52,21 +53,13 @@ void postTransmission() {
 #endif
 }
 
-// Convert serial → unitId thông qua battery_mapping.
+// IOT3-49 — tra bảng ánh xạ RUNTIME (`/provision` cấp), không còn bảng cứng compile-time.
 uint8_t serialToUnitId(const char* serial) {
-  if (!serial) return 0;
-  for (const auto& m : config::kBatteryMappings) {
-    if (strcmp(m.serial, serial) == 0) return m.unitId;
-  }
-  return 0;
+  return batmap::unitIdForSerial(serial);
 }
 
-// Convert unitId → battery serial thông qua battery_mapping.
 const char* unitIdToSerial(uint8_t unitId) {
-  for (const auto& m : config::kBatteryMappings) {
-    if (m.unitId == unitId) return m.serial;
-  }
-  return nullptr;
+  return batmap::serialForUnitId(unitId);
 }
 
 void initializeReading(const char* batteryAssetSerial, core::SensorReading& out) {
@@ -75,12 +68,13 @@ void initializeReading(const char* batteryAssetSerial, core::SensorReading& out)
   if (batteryAssetSerial) {
     strncpy(out.serial, batteryAssetSerial, sizeof(out.serial) - 1);
   }
+  // batteryAssetId + cycleCount vẫn tra bảng cứng: backend KHÔNG gửi hai trường này
+  // (`BatteryMappingEntry` chỉ có serial + unitId + sensorSourceCode) và từ S3-FW-04 backend tự
+  // resolve serial → BatteryAssetId. Rỗng ở đây là bình thường, không phải lỗi.
+  strncpy(out.batteryAssetId, batmap::assetIdForSerial(out.serial),
+          sizeof(out.batteryAssetId) - 1);
   for (const auto& m : config::kBatteryMappings) {
-    if (strcmp(m.serial, out.serial) == 0) {
-      strncpy(out.batteryAssetId, m.batteryAssetId, sizeof(out.batteryAssetId) - 1);
-      out.cycleCount = m.initialCycleCount;
-      break;
-    }
+    if (strcmp(m.serial, out.serial) == 0) { out.cycleCount = m.initialCycleCount; break; }
   }
 }
 
@@ -310,16 +304,39 @@ bool modbusReadOne(uint8_t unitId,
 size_t modbusReadMultiDrop(core::SensorReading* out, size_t maxOut) {
   if (!s_inited || out == nullptr || maxOut == 0) return 0;
 
-  size_t produced = 0;
-  for (uint8_t i = 0; i < BMS_UNIT_ID_COUNT; ++i) {
-    if (produced >= maxOut) break;
-    uint8_t unitId = BMS_UNIT_ID_START + i;
-    const char* serial = unitIdToSerial(unitId);
-    if (!serial) {
-      Serial.printf("[modbus] unitId=%u không có trong battery_mapping — skip\n", unitId);
-      continue;
+  // IOT3-49 — duyệt theo BẢNG ÁNH XẠ RUNTIME, không còn quét dải
+  // `BMS_UNIT_ID_START .. +BMS_UNIT_ID_COUNT` rồi tra ngược ra serial.
+  //
+  // Lý do đổi chiều: unitId do BACKEND gán trong `batteryMappings[]`. Quét theo dải compile-time
+  // thì pin nào backend gán unitId nằm ngoài dải sẽ không bao giờ được đọc — và triệu chứng duy
+  // nhất là một dòng "skip", rất dễ đọc lướt qua.
+  const size_t nMap = batmap::count();
+  if (nMap == 0) {
+    static bool s_warned = false;
+    if (!s_warned) {
+      s_warned = true;
+      Serial.println("[modbus] bảng ánh xạ pin TRỐNG — không biết đọc unitId nào. "
+                     "Chạy /provision hoặc kiểm tra batteryMappings[] của thiết bị.");
     }
-    if (modbusReadOne(unitId, serial, out[produced])) {
+    return 0;
+  }
+  if (nMap > maxOut) {
+    static bool s_capWarned = false;
+    if (!s_capWarned) {
+      s_capWarned = true;
+      Serial.printf("[modbus] ⚠ bảng có %u pin nhưng buffer chỉ nhận %u — %u PIN CUỐI SẼ KHÔNG "
+                    "ĐƯỢC ĐỌC. Nới BMS_UNIT_ID_COUNT trong config.h cho khớp số pin thật.\n",
+                    static_cast<unsigned>(nMap), static_cast<unsigned>(maxOut),
+                    static_cast<unsigned>(nMap - maxOut));
+    }
+  }
+
+  size_t produced = 0;
+  for (size_t i = 0; i < nMap; ++i) {
+    if (produced >= maxOut) break;
+    const auto* e = batmap::at(i);
+    if (e == nullptr) continue;
+    if (modbusReadOne(e->unitId, e->serial, out[produced])) {
       produced++;
     }
     // Spacing giữa các poll để bus settle + không spam (Modbus T3.5).

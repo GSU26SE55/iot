@@ -10,6 +10,14 @@
 // File này gom về một chỗ. Phần kiểm định dạng PEM tách riêng thành hàm thuần
 // (`isLikelyPemCertificate`) để test được ở env:native — không cần phần cứng.
 //
+// IOT3-24 — nơi NẠP cert nằm ở đâu (sửa lại ghi chú cũ nói sai):
+//   - `tls_ca.cpp` CHỈ chứa phần thuần (kiểm định dạng + mô tả trạng thái).
+//   - Phần chạm phần cứng KHÔNG nằm ở file riêng nào cả. Mỗi đường TLS tự nạp:
+//       · HTTPS/OTA → `http_client.cpp::loadCaPemOnce()`
+//       · MQTT      → `mqtt_client.cpp::loadCaCert()`
+//     Cả hai đều ƯU TIÊN `kMqttCaCert` (net/ca_cert_embedded.h) rồi mới tới LittleFS.
+//   - Ghi chú cũ nhắc tới `tls_ca_device.cpp` — file đó CHƯA BAO GIỜ tồn tại.
+//
 
 #include <cstddef>
 
