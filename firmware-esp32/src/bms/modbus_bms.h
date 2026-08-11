@@ -41,6 +41,22 @@ bool modbusReadOne(uint8_t unitId,
                    const char* batteryAssetSerial,
                    core::SensorReading& outReading);
 
+enum class SwitchTarget : uint8_t {
+  Charge = 1,
+  Discharge = 2,
+};
+
+// State fields contain values read back from the BMS, never requested values.
+struct SwitchResult {
+  bool ok;
+  bool chargeEnabled;
+  bool dischargeEnabled;
+  char error[64];
+};
+
+bool modbusReadSwitchStatus(uint8_t unitId, uint16_t& outPacked);
+SwitchResult modbusWriteSwitch(uint8_t unitId, SwitchTarget target, bool enable);
+
 // S5-FW-03: Multi-drop poll toàn bộ BMS_UNIT_ID_START..START+COUNT-1.
 // Caller cấp `out` buffer ≥ BMS_UNIT_ID_COUNT. Trả số reading thành công
 // (skip BMS timeout, vẫn poll tiếp BMS khác để không bị block 1 BMS hỏng).
@@ -49,5 +65,7 @@ size_t modbusReadMultiDrop(core::SensorReading* out, size_t maxOut);
 // Stats — đếm số poll thành công / timeout cho logStatsPeriodic.
 uint32_t modbusPollOkCount();
 uint32_t modbusPollFailCount();
+uint32_t modbusWriteOkCount();
+uint32_t modbusWriteFailCount();
 
 }  // namespace bms

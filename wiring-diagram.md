@@ -25,10 +25,10 @@
 | **CAN RX (TWAI)** | GPIO6 | SN65HVD230 `CRX` | Chỉ khi dùng CAN |
 | **MQ-2 analog** | GPIO1 (ADC1) | MQ-2 `AO` | Đọc nồng độ khói |
 | **Water leak** | GPIO2 | Water sensor `DO/AO` | Digital hoặc analog |
-| **SD MOSI** | GPIO11 | SD module `MOSI` | SPI (queue lớn) |
-| **SD MISO** | GPIO13 | SD module `MISO` | SPI |
-| **SD SCK** | GPIO12 | SD module `SCK` | SPI |
-| **SD CS** | GPIO10 | SD module `CS` | SPI |
+| **SD CS** | GPIO14 | SD module `CS` | SPI (tránh GPIO 10-13 do trùng Flash/PSRAM Octal) |
+| **SD MOSI** | GPIO15 | SD module `MOSI` | SPI |
+| **SD SCK** | GPIO21 | SD module `SCK` | SPI |
+| **SD MISO** | GPIO47 | SD module `MISO` | SPI |
 | **Status LED** | GPIO48 | LED RGB onboard | Báo trạng thái (online/queue/error) |
 
 > Các GPIO trên là **gợi ý** — có thể đổi, nhưng phải khớp với `config.h` trong firmware. Tránh dùng GPIO strapping (0, 3, 45, 46) cho tín hiệu quan trọng.
