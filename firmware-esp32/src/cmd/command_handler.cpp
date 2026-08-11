@@ -20,6 +20,7 @@ namespace cmd {
 namespace {
 
 SetPollingHandler s_setPollingHandler = nullptr;
+BmsSwitchHandler s_bmsSwitchHandler = nullptr;
 
 uint32_t s_cmdReceived = 0;
 uint32_t s_ackOk       = 0;
@@ -27,19 +28,27 @@ uint32_t s_ackFailed   = 0;
 uint32_t s_unknownType = 0;
 
 // ---- Ack builders ----
-// Buffer đủ chứa ack ngắn (cmdId ≤ 64 + status + error ≤ 120) — 256 dư.
-constexpr size_t kAckBufLen = 256;
+// Buffer đủ chứa ack kèm object state (cmdId ≤ 64 + status + error ≤ 120).
+constexpr size_t kAckBufLen = 320;
 
-void publishAck(const char* cmdId, const char* status, const char* errOrNull) {
+void publishAck(const char* cmdId, const char* status, const char* errOrNull,
+                const char* serial = nullptr, const bool* charge = nullptr,
+                const bool* discharge = nullptr) {
   char ack[kAckBufLen];
   JsonDocument doc;
   doc["cmdId"]  = cmdId  ? cmdId  : "";
   doc["status"] = status ? status : "unknown";
   if (errOrNull && errOrNull[0] != '\0') doc["error"] = errOrNull;
+  if (serial && charge && discharge) {
+    JsonObject state = doc["state"].to<JsonObject>();
+    state["serial"] = serial;
+    state["chargeEnabled"] = *charge;
+    state["dischargeEnabled"] = *discharge;
+  }
   size_t n = serializeJson(doc, ack, sizeof(ack));
 
   if (n == 0) {
-    // Buffer overflow (kAckBufLen=256). Fallback: gửi minimal ack KHÔNG error
+    // Buffer overflow (kAckBufLen=320). Fallback: gửi minimal ack KHÔNG error
     // để backend ít nhất biết cmdId đã được handle. Truncate cmdId ở 32 char.
     Serial.printf("[cmd] ack serialize overflow (cmdId=%zu, err=%zu) — fallback minimal\n",
                   cmdId ? strlen(cmdId) : 0,
@@ -95,14 +104,34 @@ void handleRequestHeartbeat(const logic::ParsedCommand& parsed) {
 }
 
 void handleTriggerOta(const logic::ParsedCommand& parsed) {
-  // GH-745 — trước đây hàm này chỉ in "PLACEHOLDER" rồi ACK "ok" dù KHÔNG làm gì. OTA thật
-  // đã có từ Sprint 7 nhưng chưa bao giờ được nối vào, nên người vận hành bấm "cập nhật
-  // ngay" thấy báo thành công trong khi thiết bị vẫn đợi lịch 1 giờ.
   if (ota::otaRequestCheck()) {
     publishAck(parsed.cmdId, "ok", "ota check scheduled");
     return;
   }
   publishAck(parsed.cmdId, "rejected", ota::otaLastRejectReason());
+}
+
+void handleSetBmsSwitch(const logic::ParsedCommand& parsed) {
+  if (!parsed.hasSwitchParams) {
+    publishAck(parsed.cmdId, "failed", "missing or invalid serial/target/enable");
+    return;
+  }
+  if (!s_bmsSwitchHandler) {
+    publishAck(parsed.cmdId, "failed", "no BMS switch handler registered");
+    return;
+  }
+
+  bool charge = false;
+  bool discharge = false;
+  char error[64] = {0};
+  const bool ok = s_bmsSwitchHandler(
+      parsed.switchSerial, parsed.switchTarget, parsed.switchEnable,
+      &charge, &discharge, error, sizeof(error));
+  Serial.printf("[cmd] set_bms_switch serial=%s target=%u enable=%s -> %s\n",
+                parsed.switchSerial, parsed.switchTarget,
+                parsed.switchEnable ? "true" : "false", ok ? "OK" : "REJECTED");
+  publishAck(parsed.cmdId, ok ? "ok" : "rejected",
+             ok ? nullptr : error, parsed.switchSerial, &charge, &discharge);
 }
 
 // ---- Main dispatcher ----
@@ -128,6 +157,8 @@ void onCommandPayload(const char* payload, size_t len) {
       handleRequestHeartbeat(parsed); break;
     case logic::CommandKind::TriggerOta:
       handleTriggerOta(parsed); break;
+    case logic::CommandKind::SetBmsSwitch:
+      handleSetBmsSwitch(parsed); break;
     case logic::CommandKind::Unknown:
     default:
       s_unknownType++;
@@ -146,6 +177,10 @@ void handlerBegin() {
 
 void setPollingHandler(SetPollingHandler h) {
   s_setPollingHandler = h;
+}
+
+void setBmsSwitchHandler(BmsSwitchHandler h) {
+  s_bmsSwitchHandler = h;
 }
 
 uint32_t cmdReceivedCount()    { return s_cmdReceived; }

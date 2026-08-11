@@ -35,6 +35,7 @@ CommandKind classifyType(const char* type) {
   if (matches(type, "set_interval",      "set-interval"))      return CommandKind::SetInterval;
   if (matches(type, "request_heartbeat", "request-heartbeat")) return CommandKind::RequestHeartbeat;
   if (matches(type, "trigger_ota",       "trigger-ota"))       return CommandKind::TriggerOta;
+  if (matches(type, "set_bms_switch",    "set-bms-switch"))    return CommandKind::SetBmsSwitch;
   return CommandKind::Unknown;
 }
 
@@ -66,7 +67,7 @@ ParsedCommand parseCommandPayload(const char* json, size_t len) {
 
   r.kind = classifyType(r.type);
 
-  // params optional — chỉ parse pollingSeconds / pollingIntervalSeconds (cho set_interval).
+  // params optional — parse pollingSeconds / set_bms_switch params.
   JsonVariantConst params = doc["params"];
   if (!params.isNull() && params.is<JsonObjectConst>()) {
     if (params["pollingSeconds"].is<uint32_t>()) {
@@ -75,6 +76,34 @@ ParsedCommand parseCommandPayload(const char* json, size_t len) {
     } else if (params["pollingIntervalSeconds"].is<uint32_t>()) {
       r.pollingSeconds = params["pollingIntervalSeconds"].as<uint32_t>();
       r.hasPollingSeconds = true;
+    }
+
+    if (r.kind == CommandKind::SetBmsSwitch) {
+      const char* serial = params["serial"] | params["batteryAssetSerial"] | "";
+      copyField(serial, r.switchSerial, sizeof(r.switchSerial));
+
+      if (params["target"].is<uint8_t>()) {
+        r.switchTarget = params["target"].as<uint8_t>();
+      } else if (params["target"].is<const char*>()) {
+        const char* tStr = params["target"].as<const char*>();
+        if (strcasecmp(tStr, "charge") == 0) r.switchTarget = 1;
+        else if (strcasecmp(tStr, "discharge") == 0) r.switchTarget = 2;
+      }
+
+      // Enable: bool / int / string
+      if (params["enable"].is<bool>()) {
+        r.switchEnable = params["enable"].as<bool>();
+      } else if (params["enable"].is<int>()) {
+        r.switchEnable = params["enable"].as<int>() != 0;
+      } else if (params["enable"].is<const char*>()) {
+        const char* eStr = params["enable"].as<const char*>();
+        r.switchEnable = (strcasecmp(eStr, "true") == 0 || strcasecmp(eStr, "on") == 0 || strcasecmp(eStr, "enable") == 0);
+      }
+
+      if (r.switchSerial[0] != '\0' &&
+          (r.switchTarget == 1 || r.switchTarget == 2)) {
+        r.hasSwitchParams = true;
+      }
     }
   }
 

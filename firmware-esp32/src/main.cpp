@@ -704,6 +704,26 @@ void setup() {
                   static_cast<unsigned long>(newMs));
     return true;
   });
+  cmd::setBmsSwitchHandler([](const char* serial, uint8_t target, bool enable,
+                              bool* outCharge, bool* outDischarge,
+                              char* outError, size_t errorLen) -> bool {
+#if USE_MOCK_BMS
+    snprintf(outError, errorLen, "firmware dang chay che do mock - khong co bus BMS that");
+    return false;
+#else
+    const uint8_t unitId = batmap::unitIdForSerial(serial);
+    if (unitId == 0) {
+      snprintf(outError, errorLen, "serial khong co trong bang anh xa pin");
+      return false;
+    }
+    const auto result = bms::modbusWriteSwitch(
+        unitId, static_cast<bms::SwitchTarget>(target), enable);
+    if (outCharge) *outCharge = result.chargeEnabled;
+    if (outDischarge) *outDischarge = result.dischargeEnabled;
+    if (!result.ok) snprintf(outError, errorLen, "%s", result.error);
+    return result.ok;
+#endif
+  });
 
   if (!net::mqttBegin()) {
     Serial.println("[setup] MQTT chưa khởi tạo — chạy HTTPS-only (S4-FW-06 fallback)");

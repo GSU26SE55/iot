@@ -88,6 +88,14 @@ inline constexpr uint16_t kJkCycleCountAddress     = 0x12B0;
 inline constexpr uint16_t kJkSohAddress            = 0x12B8;
 inline constexpr uint16_t kJkSwitchStatusAddress   = 0x12C0;
 
+// JK RS485 Modbus Generic Protocol V1.1, base 0x1000:
+//   offset 0x0070 = BatChargeEN, offset 0x0074 = BatDisChargeEN.
+// Both fields are UINT32 and must be written as two registers with FC 0x10.
+inline constexpr uint16_t kJkChargeSwitchWriteAddress     = 0x1070;
+inline constexpr uint16_t kJkDischargeSwitchWriteAddress  = 0x1074;
+inline constexpr uint16_t kJkSwitchOnValue                = 0x0001;
+inline constexpr uint16_t kJkSwitchOffValue               = 0x0000;
+
 // ============== Preset register maps ==============
 
 // JBD BMS (LiFePO4 phổ biến) — verify on JBD-SP04S028 (4S 100A).
@@ -198,6 +206,8 @@ float    decodeJkPackCurrent(uint16_t highWord, uint16_t lowWord);  // mA -> A
 float    decodeJkTemperature(uint16_t raw);                          // 0.1 C
 float    decodeJkSoc(uint16_t packedBalanceAndSoc);                  // low byte
 float    decodeJkSoh(uint16_t packedSohAndPrecharge);                // high byte
+bool     jkChargeEnabled(uint16_t packedSwitches);                   // high byte
+bool     jkDischargeEnabled(uint16_t packedSwitches);                // low byte
 uint8_t  decodeJkChargingState(uint16_t packedSwitches, float currentAmps);
 
 // Returns true nếu map có field (offset != kRegMissing).

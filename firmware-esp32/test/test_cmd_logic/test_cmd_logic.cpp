@@ -254,6 +254,49 @@ void test_set_interval_ignores_wrongly_named_param() {
   TEST_ASSERT_EQUAL_UINT32(0, r.pollingSeconds);   // 0 = không đọc được → handler ack "failed"
 }
 
+// ---- set_bms_switch ----
+//
+void test_parse_set_bms_switch_charge_enable() {
+  const char* json =
+      "{\"cmdId\":\"c9\",\"type\":\"set_bms_switch\","
+      "\"params\":{\"serial\":\"BAT-2026-REAL-001\",\"target\":\"charge\",\"enable\":true}}";
+  ParsedCommand r = parseCommandPayload(json, strlen(json));
+  TEST_ASSERT_TRUE(r.ok);
+  TEST_ASSERT_EQUAL(static_cast<int>(CommandKind::SetBmsSwitch), static_cast<int>(r.kind));
+  TEST_ASSERT_TRUE(r.hasSwitchParams);
+  TEST_ASSERT_EQUAL_UINT8(1, r.switchTarget);
+  TEST_ASSERT_TRUE(r.switchEnable);
+  TEST_ASSERT_EQUAL_STRING("BAT-2026-REAL-001", r.switchSerial);
+}
+
+void test_parse_set_bms_switch_discharge_disable() {
+  const char* json =
+      "{\"cmdId\":\"c10\",\"type\":\"set_bms_switch\","
+      "\"params\":{\"serial\":\"BAT-1\",\"target\":\"discharge\",\"enable\":false}}";
+  ParsedCommand r = parseCommandPayload(json, strlen(json));
+  TEST_ASSERT_TRUE(r.hasSwitchParams);
+  TEST_ASSERT_EQUAL_UINT8(2, r.switchTarget);
+  TEST_ASSERT_FALSE(r.switchEnable);
+}
+
+/// Target lạ hoặc thiếu serial phải bị chặn ở parser, không được lọt xuống bus Modbus.
+void test_parse_set_bms_switch_rejects_bad_params() {
+  const char* badTarget =
+      "{\"cmdId\":\"c13\",\"type\":\"set_bms_switch\","
+      "\"params\":{\"serial\":\"BAT-1\",\"target\":\"both\",\"enable\":true}}";
+  TEST_ASSERT_FALSE(parseCommandPayload(badTarget, strlen(badTarget)).hasSwitchParams);
+
+  const char* combinedTarget =
+      "{\"cmdId\":\"c13-all\",\"type\":\"set_bms_switch\","
+      "\"params\":{\"serial\":\"BAT-1\",\"target\":\"all\",\"enable\":true}}";
+  TEST_ASSERT_FALSE(parseCommandPayload(combinedTarget, strlen(combinedTarget)).hasSwitchParams);
+
+  const char* noSerial =
+      "{\"cmdId\":\"c14\",\"type\":\"set_bms_switch\","
+      "\"params\":{\"target\":\"charge\",\"enable\":true}}";
+  TEST_ASSERT_FALSE(parseCommandPayload(noSerial, strlen(noSerial)).hasSwitchParams);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
 
@@ -290,6 +333,11 @@ int main(int, char**) {
   RUN_TEST(test_admin_dropdown_legacy_types_are_all_unknown);
   RUN_TEST(test_only_three_supported_types_exist);
   RUN_TEST(test_set_interval_ignores_wrongly_named_param);
+
+  // parseCommandPayload — set_bms_switch
+  RUN_TEST(test_parse_set_bms_switch_charge_enable);
+  RUN_TEST(test_parse_set_bms_switch_discharge_disable);
+  RUN_TEST(test_parse_set_bms_switch_rejects_bad_params);
 
   return UNITY_END();
 }

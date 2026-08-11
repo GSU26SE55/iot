@@ -116,6 +116,24 @@ void test_jk_charging_state_uses_switches_and_current_direction() {
   TEST_ASSERT_EQUAL_UINT8(1, decodeJkChargingState(0x0000, 1.0f));
 }
 
+void test_jk_switch_helpers_decode_high_and_low_bytes() {
+  TEST_ASSERT_TRUE(jkChargeEnabled(0x0100));
+  TEST_ASSERT_FALSE(jkDischargeEnabled(0x0100));
+  TEST_ASSERT_FALSE(jkChargeEnabled(0x0001));
+  TEST_ASSERT_TRUE(jkDischargeEnabled(0x0001));
+  TEST_ASSERT_TRUE(jkChargeEnabled(0xFFFF));
+  TEST_ASSERT_TRUE(jkDischargeEnabled(0xFFFF));
+  TEST_ASSERT_FALSE(jkChargeEnabled(0x0000));
+  TEST_ASSERT_FALSE(jkDischargeEnabled(0x0000));
+}
+
+void test_jk_switch_write_addresses_match_modbus_v11() {
+  TEST_ASSERT_EQUAL_HEX16(0x1070, bms::kJkChargeSwitchWriteAddress);
+  TEST_ASSERT_EQUAL_HEX16(0x1074, bms::kJkDischargeSwitchWriteAddress);
+  TEST_ASSERT_EQUAL_HEX16(0x0001, bms::kJkSwitchOnValue);
+  TEST_ASSERT_EQUAL_HEX16(0x0000, bms::kJkSwitchOffValue);
+}
+
 // ---- Charging state mapping ----
 
 void test_charging_state_idle() {
@@ -251,6 +269,8 @@ int main(int, char**) {
   RUN_TEST(test_jk_realtime_values_match_hardware_capture);
   RUN_TEST(test_jk_signed_current_decode);
   RUN_TEST(test_jk_charging_state_uses_switches_and_current_direction);
+  RUN_TEST(test_jk_switch_helpers_decode_high_and_low_bytes);
+  RUN_TEST(test_jk_switch_write_addresses_match_modbus_v11);
 
   // Charging state
   RUN_TEST(test_charging_state_idle);

@@ -29,7 +29,16 @@ ModbusMaster   s_modbus;
 
 uint32_t s_pollOk   = 0;
 uint32_t s_pollFail = 0;
+uint32_t s_writeOk  = 0;
+uint32_t s_writeFail= 0;
 bool     s_inited   = false;
+
+SwitchResult switchError(const char* msg) {
+  SwitchResult r{};
+  r.ok = false;
+  snprintf(r.error, sizeof(r.error), "%s", msg ? msg : "unknown error");
+  return r;
+}
 
 // S5-FW-02: DE/RE callbacks. ModbusMaster lib gọi pre/postTransmission để
 // switch direction trước/sau send.
@@ -348,5 +357,121 @@ size_t modbusReadMultiDrop(core::SensorReading* out, size_t maxOut) {
 
 uint32_t modbusPollOkCount()   { return s_pollOk; }
 uint32_t modbusPollFailCount() { return s_pollFail; }
+uint32_t modbusWriteOkCount()  { return s_writeOk; }
+uint32_t modbusWriteFailCount(){ return s_writeFail; }
+
+bool modbusReadSwitchStatus(uint8_t unitId, uint16_t& outPacked) {
+  outPacked = 0;
+  if (!s_inited || unitId == 0) return false;
+
+#if BMS_MODEL != 3
+  return false;
+#else
+  s_modbus.begin(unitId, s_rs485Serial);
+  uint16_t switches[1] = {0};
+  if (!readJkRegisters(kJkSwitchStatusAddress, 1, switches)) return false;
+  outPacked = switches[0];
+  return true;
+#endif
+}
+
+SwitchResult modbusWriteSwitch(uint8_t unitId, SwitchTarget target, bool enable) {
+  if (!s_inited) {
+    s_writeFail++;
+    return switchError("Modbus BMS chua khoi tao");
+  }
+  if (unitId == 0) {
+    s_writeFail++;
+    return switchError("Modbus unitId khong hop le");
+  }
+
+#if BMS_MODEL != 3
+  s_writeFail++;
+  return switchError("model BMS nay chua ho tro dieu khien tu xa");
+#else
+  uint16_t address = kRegMissing;
+  switch (target) {
+    case SwitchTarget::Charge:
+      address = kJkChargeSwitchWriteAddress;
+      break;
+    case SwitchTarget::Discharge:
+      address = kJkDischargeSwitchWriteAddress;
+      break;
+    default:
+      s_writeFail++;
+      return switchError("muc tieu cong tac khong hop le");
+  }
+
+  if (address == kRegMissing) {
+    SwitchResult rejected = switchError("chua verify thanh ghi ghi cho model BMS nay");
+    uint16_t packed = 0;
+    if (modbusReadSwitchStatus(unitId, packed)) {
+      rejected.chargeEnabled = jkChargeEnabled(packed);
+      rejected.dischargeEnabled = jkDischargeEnabled(packed);
+    }
+    s_writeFail++;
+    return rejected;
+  }
+
+  s_modbus.begin(unitId, s_rs485Serial);
+  const uint16_t value = enable ? kJkSwitchOnValue : kJkSwitchOffValue;
+  // Protocol V1.1 defines these switches as UINT32. Its reference frame is
+  // `01 10 10 70 00 02 04 00 00 00 01 ...`, so FC 0x06/single-register
+  // writes are not valid even though the logical value itself is only 0/1.
+  auto writeSwitchValue = [&]() {
+    s_modbus.setTransmitBuffer(0, 0x0000);
+    s_modbus.setTransmitBuffer(1, value);
+    return s_modbus.writeMultipleRegisters(address, 2);
+  };
+  uint8_t code = writeSwitchValue();
+  for (uint8_t retry = 0;
+       retry < BMS_POLL_RETRY && code != s_modbus.ku8MBSuccess;
+       ++retry) {
+    delay(20);
+    code = writeSwitchValue();
+  }
+
+  if (code != s_modbus.ku8MBSuccess) {
+    SwitchResult failed = switchError("BMS tu choi hoac khong phan hoi lenh ghi");
+    uint16_t packed = 0;
+    if (modbusReadSwitchStatus(unitId, packed)) {
+      failed.chargeEnabled = jkChargeEnabled(packed);
+      failed.dischargeEnabled = jkDischargeEnabled(packed);
+    }
+    Serial.printf("[modbus] write unitId=%u addr=0x%04X value=0x%04X FAIL code=0x%02X\n",
+                  unitId, address, value, code);
+    s_writeFail++;
+    return failed;
+  }
+
+  delay(50);
+  uint16_t packed = 0;
+  if (!modbusReadSwitchStatus(unitId, packed)) {
+    s_writeFail++;
+    return switchError("ghi xong nhung khong doc lai duoc trang thai BMS");
+  }
+
+  SwitchResult result{};
+  result.chargeEnabled = jkChargeEnabled(packed);
+  result.dischargeEnabled = jkDischargeEnabled(packed);
+  const bool actual = target == SwitchTarget::Charge
+      ? result.chargeEnabled
+      : result.dischargeEnabled;
+  if (actual != enable) {
+    snprintf(result.error, sizeof(result.error),
+             "BMS khong ap dung trang thai yeu cau sau khi ghi");
+    Serial.printf("[modbus] write unitId=%u addr=0x%04X verify MISMATCH packed=0x%04X\n",
+                  unitId, address, packed);
+    s_writeFail++;
+    return result;
+  }
+
+  result.ok = true;
+  Serial.printf("[modbus] write unitId=%u addr=0x%04X value=0x%04X OK packed=0x%04X\n",
+                unitId, address, value, packed);
+  s_writeOk++;
+  return result;
+#endif
+}
 
 }  // namespace bms

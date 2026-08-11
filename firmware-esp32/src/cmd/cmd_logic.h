@@ -24,6 +24,7 @@ enum class CommandKind : uint8_t {
   SetInterval      = 1,
   TriggerOta       = 2,
   RequestHeartbeat = 3,
+  SetBmsSwitch     = 4,
 };
 
 constexpr uint32_t kPollingMinSec = 1;
@@ -45,6 +46,10 @@ struct ParsedCommand {
   CommandKind kind;                        // classifyType(type)
   bool        hasPollingSeconds;           // true nếu params.pollingSeconds hoặc pollingIntervalSeconds present
   uint32_t    pollingSeconds;              // 0 nếu !hasPollingSeconds
+  bool        hasSwitchParams;             // true nếu set_bms_switch params hợp lệ
+  char        switchSerial[64];            // serial của pin
+  uint8_t     switchTarget;                // 1 = Charge, 2 = Discharge
+  bool        switchEnable;                // true = bật, false = tắt
   char        parseError[120];             // "" nếu ok
 };
 

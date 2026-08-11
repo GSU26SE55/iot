@@ -11,7 +11,7 @@ import android.os.Bundle;
 import android.provider.Settings;
 import android.view.View;
 import android.webkit.HttpAuthHandler;
-import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -23,19 +23,18 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import org.json.JSONObject;
+import java.util.Arrays;
 
 public final class MainActivity extends Activity {
     private static final String PORTAL_URL = "http://192.168.4.1:8080/";
     private static final String PORTAL_USER = "admin";
-    private static final String PORTAL_PASSWORD = "12345678";
+    private static final String PORTAL_PASSWORD = "solar-setup-2026";
     private static final int CAMERA_PERMISSION_REQUEST = 41;
-    private static final int QR_SCAN_REQUEST = 42;
-
+ Optimize, Optimize, Rating Optimize, Ratings Op Optimize, Ratings, Floyd.
     private WebView webView;
     private TextView connectionStatus;
     private ProgressBar progressBar;
-    private boolean scannerWaitingForPermission;
+    private PermissionRequest pendingCameraRequest;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -75,6 +74,7 @@ public final class MainActivity extends Activity {
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
+        settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
@@ -82,13 +82,11 @@ public final class MainActivity extends Activity {
                 settings.getUserAgentString() + " SolarBMSSetup/1.0"
         );
 
-        // Chỉ trang portal nội bộ được phép gọi bridge này; mọi điều hướng khác bị chặn ở dưới.
-        webView.addJavascriptInterface(new PortalBridge(), "SolarSetupNative");
-
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                if (isPortalUri(request.getUrl())) return false;
+                Uri uri = request.getUrl();
+                if (isPortalUri(uri)) return false;
                 Toast.makeText(
                         MainActivity.this,
                         "App chỉ mở trang cấu hình của Solar Gateway.",
@@ -139,34 +137,37 @@ public final class MainActivity extends Activity {
                 progressBar.setProgress(newProgress);
                 progressBar.setVisibility(newProgress < 100 ? View.VISIBLE : View.GONE);
             }
+
+            @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                runOnUiThread(() -> handleWebPermissionRequest(request));
+            }
+
+            @Override
+            public void onPermissionRequestCanceled(PermissionRequest request) {
+                if (pendingCameraRequest == request) pendingCameraRequest = null;
+            }
         });
     }
 
-    private final class PortalBridge {
-        @JavascriptInterface
-        public void scanQr() {
-            runOnUiThread(MainActivity.this::startNativeQrScanner);
-        }
-    }
-
-    private void startNativeQrScanner() {
-        Uri current = Uri.parse(webView.getUrl() == null ? "" : webView.getUrl());
-        if (!isPortalUri(current)) {
-            deliverScannerFailure("portal chưa sẵn sàng");
+    private void handleWebPermissionRequest(PermissionRequest request) {
+        boolean wantsCamera = Arrays.asList(request.getResources())
+                .contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE);
+        if (!isPortalUri(request.getOrigin()) || !wantsCamera) {
+            request.deny();
             return;
         }
 
-        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            scannerWaitingForPermission = true;
-            requestPermissions(
-                    new String[]{Manifest.permission.CAMERA},
-                    CAMERA_PERMISSION_REQUEST
-            );
+        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            request.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
             return;
         }
 
-        Intent intent = new Intent(this, QrScannerActivity.class);
-        startActivityForResult(intent, QR_SCAN_REQUEST);
+        pendingCameraRequest = request;
+        requestPermissions(
+                new String[]{Manifest.permission.CAMERA},
+                CAMERA_PERMISSION_REQUEST
+        );
     }
 
     private boolean isPortalUri(Uri uri) {
@@ -195,39 +196,6 @@ public final class MainActivity extends Activity {
         startActivity(intent);
     }
 
-    private void deliverQrToPortal(String rawValue) {
-        String script = "window.applyNativeQr && window.applyNativeQr("
-                + JSONObject.quote(rawValue) + ")";
-        webView.evaluateJavascript(script, null);
-    }
-
-    private void deliverScannerFailure(String message) {
-        String script = "window.nativeQrScanFailed && window.nativeQrScanFailed("
-                + JSONObject.quote(message) + ")";
-        webView.evaluateJavascript(script, null);
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != QR_SCAN_REQUEST) return;
-
-        if (resultCode == RESULT_OK && data != null) {
-            String rawValue = data.getStringExtra(QrScannerActivity.EXTRA_QR_VALUE);
-            if (rawValue != null && !rawValue.trim().isEmpty()) {
-                deliverQrToPortal(rawValue);
-                return;
-            }
-            deliverScannerFailure("QR không có dữ liệu");
-            return;
-        }
-
-        webView.evaluateJavascript(
-                "window.nativeQrScanCancelled && window.nativeQrScanCancelled()",
-                null
-        );
-    }
-
     @Override
     public void onRequestPermissionsResult(
             int requestCode,
@@ -239,13 +207,16 @@ public final class MainActivity extends Activity {
 
         boolean granted = grantResults.length > 0
                 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
-        if (scannerWaitingForPermission) {
-            scannerWaitingForPermission = false;
+        if (pendingCameraRequest != null) {
             if (granted) {
-                startNativeQrScanner();
+                pendingCameraRequest.grant(
+                        new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE}
+                );
             } else {
-                deliverScannerFailure(getString(R.string.camera_required));
+                pendingCameraRequest.deny();
+                Toast.makeText(this, R.string.camera_required, Toast.LENGTH_LONG).show();
             }
+            pendingCameraRequest = null;
         }
     }
 
@@ -266,7 +237,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        webView.removeJavascriptInterface("SolarSetupNative");
+        if (pendingCameraRequest != null) pendingCameraRequest.deny();
         webView.stopLoading();
         webView.destroy();
         super.onDestroy();

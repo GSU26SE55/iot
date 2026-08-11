@@ -33,6 +33,9 @@ namespace cmd {
 
 // Handler callback main wire vào. Trả true nếu apply thành công.
 using SetPollingHandler = bool (*)(uint32_t newPollingIntervalMs);
+using BmsSwitchHandler = bool (*)(const char* serial, uint8_t target, bool enable,
+                                  bool* outCharge, bool* outDischarge,
+                                  char* outError, size_t errorLen);
 
 // Init: register MQTT callback (gọi sau mqttBegin + setCommandCallback).
 // Gọi 1 lần trong setup().
@@ -40,6 +43,7 @@ void handlerBegin();
 
 // Wire handler đổi pollingInterval. main.cpp đăng ký lambda thao tác s_provCfg.
 void setPollingHandler(SetPollingHandler h);
+void setBmsSwitchHandler(BmsSwitchHandler h);
 
 // Stats (logStatsPeriodic).
 uint32_t cmdReceivedCount();
