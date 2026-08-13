@@ -84,6 +84,17 @@ pipeline {
                             set -eu
                             cd firmware-esp32
                             cp include/config.example.h include/config.h
+
+                            grep -Eq \
+                              '^#define[[:space:]]+BACKEND_URL[[:space:]]+"https://api[.]solars[.]io[.]vn"$' \
+                              include/config.h
+                            grep -Eq \
+                              '^#define[[:space:]]+MQTT_BROKER_HOST[[:space:]]+"mqtt[.]solars[.]io[.]vn"([[:space:]]|$)' \
+                              include/config.h
+                            grep -Eq \
+                              '^#define[[:space:]]+TLS_ALLOW_INSECURE[[:space:]]+0$' \
+                              include/config.h
+
                             pio run -e esp32-s3-devkitc-1
                             pio run -e esp32-s3-real
                             pio run -e esp32-s3-uartlog

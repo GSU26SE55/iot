@@ -47,13 +47,14 @@
 // --------- Serial ----------
 #define SERIAL_BAUD     115200
 
-// ============== Sprint 1 — Backend ingest (S1-FW-01 placeholder) =================
+// ============== Backend ingest =================
 
-// `BACKEND_URL` — gốc backend BatteryService (placeholder theo tasksprint S1-FW-01).
+// `BACKEND_URL` — public ApiGateway origin. This non-secret production default is safe
+// to compile into the generic firmware; device identity/API credentials still come from NVS.
 // Dev local:   "https://10.0.0.10:7200" (laptop chạy docker compose, ESP32 cùng LAN)
-// Staging:     "https://api-dev.gsu26se55.com"
+// Production:  "https://api.solars.io.vn"
 // LƯU Ý: HTTPS scheme — Sprint 1 dùng setInsecure() trong dev, Sprint 3 thay bằng CA cert.
-#define BACKEND_URL         "https://api.example.com"
+#define BACKEND_URL         "https://api.solars.io.vn"
 
 // Endpoint ingest theo legacy contract (Sprint 1 MVP — backward compat NI §7.4).
 // Sprint 3 (S3-FW-04) giữ URL nhưng đổi schema sang production contract.
@@ -127,10 +128,10 @@
 // `WiFiClientSecure` và `WiFiClient` là hai KIỂU khác nhau, chọn bằng `#if` lúc biên dịch.
 // Trường `mqttUseTls` backend gửi xuống chỉ được lưu để ĐỐI CHIẾU và cảnh báo khi lệch.
 //
-// Việc duy nhất phải điền tay trong cả file này: `BACKEND_URL`, `DEVICE_CODE`, `API_KEY`
-// (hoặc nạp qua CLI/trang cấu hình) và mật khẩu AP setup `SETUP_AP_PASSWORD`.
+// Endpoint public đã có default production. Các giá trị riêng từng thiết bị vẫn phải provision:
+// `DEVICE_CODE`, `API_KEY`, MQTT credential và mật khẩu AP setup `SETUP_AP_PASSWORD`.
 
-#define MQTT_BROKER_HOST    "mqtt.example.com" // DNS ổn định; không dùng IP DHCP của router
+#define MQTT_BROKER_HOST    "mqtt.solars.io.vn" // DNS ổn định; không dùng IP DHCP của router
 #define MQTT_BROKER_PORT    8883             // 1883 plain | 8883 TLS
 #define MQTT_USE_TLS        1                // 0 = plain (chỉ dev), 1 = TLS (production)
 #define MQTT_USERNAME       "gw-esp32-mvp-001"   // backend lower-case deviceCode
