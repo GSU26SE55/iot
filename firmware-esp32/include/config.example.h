@@ -112,7 +112,7 @@
 // ⚠️ Mật khẩu dưới đây PHẢI ≥ 8 ký tự (yêu cầu của WPA2) và PHẢI đổi trước khi giao khách.
 //    AP không mật khẩu nghĩa là bất kỳ ai đi ngang cũng đổi được mạng và API key của thiết bị —
 //    mà API key là thứ mở toàn bộ đường HTTPS lên backend.
-//    Đây là MỘT TRONG HAI giá trị duy nhất còn phải điền tay (cùng BACKEND_URL).
+//    Đây là giá trị bắt buộc phải cá nhân hóa cho từng thiết bị trước khi giao khách.
 // SETUP_AP_PASSWORD đã được khai báo một lần ở khối portal phía trên.
 
 // ============== Sprint 4 — MQTT broker (S4-FW-01..06) =================
