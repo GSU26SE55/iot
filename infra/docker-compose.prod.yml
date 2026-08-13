@@ -1,142 +1,96 @@
-# ==================================================================
-# IOT3-81 — MQTT broker cho PRODUCTION.
-#
-# `backend/docker-compose.prod.yml` (khối chú thích quanh dòng 429) đã trỏ tới file này từ trước,
-# nhưng file thì chưa hề tồn tại — nghĩa là quy trình triển khai broker production được viết ra
-# mà chưa bao giờ chạy được.
-#
-# Broker thuộc repo `capstone/iot`, KHÔNG thuộc backend (quyết định kiến trúc). Backend chỉ chạy
-# MQTT *client* (`MqttBridgeBackgroundService`) nối tới broker này.
-#
-# ------------------------------------------------------------------
-# CHẠY
-# ------------------------------------------------------------------
-#   # 1. Backend phải lên TRƯỚC — network `backend_solar-net` do nó tạo ra.
-#   cd /opt/solar/backend && docker compose -f docker-compose.prod.yml up -d
-#
-#   # 2. Sinh cert (một lần, và mỗi khi cert sắp hết hạn):
-#   cd /opt/solar/iot && ./infra/mqtt/scripts/gen-certs.sh <fqdn-hoặc-ip-broker>
-#   #    ⚠️ Script sẽ SINH LẠI `firmware-esp32/src/net/ca_cert_embedded.h` (IOT3-82).
-#   #    CA đổi ⇒ PHẢI build + nạp lại firmware, nếu không mọi thiết bị mất kết nối.
-#
-#   # 3. Sinh file passwd cho tài khoản `backend-bridge` — xem IOT3-83, KHÔNG dùng bootstrap.sh
-#   #    của bản dev (nó `echo` mật khẩu ra stdout và `chmod 0644`).
-#
-#   # 4. Lên broker:
-#   cd /opt/solar/iot && docker compose -f infra/docker-compose.prod.yml up -d
-#
-# ------------------------------------------------------------------
-# SÁU ĐIỂM KHÁC BẢN DEV (`backend/docker-compose.yml`) — mỗi điểm là một lỗi đã lường trước
-# ------------------------------------------------------------------
-#  1. `user: "1883:1883"` — không chạy bằng root. Image mosquitto:2.0 mặc định hạ quyền xuống
-#     uid 1883 sau khi mở cổng, nhưng khai tường minh mới chặn được trường hợp một bản image
-#     sau này đổi hành vi.
-#  2. CHỈ publish 8883. Bản dev mở cả 1883 cho tiện; ở production thì đó là một cổng nhận
-#     username/mật khẩu dạng chữ thường trên Internet.
-#  3. Mount `passwd` là THƯ MỤC (`./mqtt/mosquitto:/mosquitto/config-src:ro`), không phải file lẻ.
-#     Backend ghi bằng `File.Move` (đổi inode); bind mount file lẻ không truyền đủ thay đổi đó vào
-#     container nên `passwd-watch` không thấy mtime đổi và không bao giờ bắn SIGHUP — thiết bị mới
-#     bị từ chối trong im lặng (IOT3-106/M1). `:ro` là đủ: BatteryService ghi qua mount RIÊNG của
-#     nó (`/mosquitto-config:rw` khai ở `backend/docker-compose.prod.yml`), không qua mount này.
-#  4. Mount `config/conf.d` — `gen-certs.sh` sinh `tls.conf` vào đó. Thiếu mount này thì broker
-#     lên nhưng KHÔNG có listener 8883, và triệu chứng ở thiết bị chỉ là "connect timeout".
-#  5. Vòng `passwd-watch` + SIGHUP — Mosquitto 2.0 chỉ đọc lại `password_file` khi nhận SIGHUP.
-#     Cách khác là cấp Docker socket cho container ứng dụng, tức trao quyền điều khiển cả máy
-#     chủ chỉ để bảo broker đọc lại một file.
-#  6. `networks.solar-net.external` — nối vào network SẴN CÓ của backend thay vì tạo network
-#     riêng. Không có dòng này thì broker và backend nằm hai network khác nhau và không thấy nhau.
-# ==================================================================
+# Production MQTT broker. Backend runs in k3s and connects through
+# mqtt.solars.io.vn:8883; therefore this stack is intentionally independent of
+# every backend Docker network.
+name: solar-iot
 
 services:
   mosquitto:
-    image: eclipse-mosquitto:2.0
-    container_name: solar-mosquitto
+    image: ${MOSQUITTO_IMAGE:?MOSQUITTO_IMAGE must be an immutable image@sha256 digest}
+    container_name: solar-iot-mosquitto
     restart: unless-stopped
+    init: true
 
-    # (1) không chạy bằng root
     user: "1883:1883"
+    group_add:
+      # Allows uid 1883 to traverse/read the root-owned credential and TLS
+      # directories shared with the k3s BatteryService/cert sync process.
+      - "${SOLAR_RUNTIME_GID:-10001}"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
 
-    # (2) chỉ TLS ra ngoài. Cổng 1883 vẫn tồn tại BÊN TRONG network cho healthcheck nội bộ,
-    #     nhưng không publish ra host.
     ports:
-      - "${MQTT_TLS_PORT:-8883}:8883"
+      # Never publish plaintext 1883. It exists only inside the container for
+      # the authenticated health check.
+      - "${MQTT_BIND_IP:-0.0.0.0}:${MQTT_TLS_PORT:-8883}:8883/tcp"
 
     volumes:
-      - ./mqtt/mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mqtt/production/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mqtt/production/tls.conf:/mosquitto/config/conf.d/tls.conf:ro
       - ./mqtt/mosquitto/config/acl.conf:/mosquitto/config/acl.conf:ro
-      # (4) tls.conf do gen-certs.sh sinh vào đây
-      - ./mqtt/mosquitto/config/conf.d:/mosquitto/config/conf.d:ro
-      # (3) IOT3-106/M1 — mount THƯ MỤC, không phải file lẻ, và ĐỂ `:ro`.
-      #
-      # Sửa lại hai điểm so với bản viết ở IOT3-81:
-      #   a. File lẻ: backend ghi bằng `File.Move` (đổi inode) nên container không thấy thay đổi
-      #      đầy đủ ⇒ `passwd-watch` không bắn SIGHUP ⇒ thiết bị mới bị từ chối trong im lặng.
-      #   b. `:rw` là THỪA. Ghi chú cũ nói "BatteryService cập nhật file này" — nhưng BatteryService
-      #      là container KHÁC, nó ghi qua mount riêng của nó (`/mosquitto-config:rw` khai trong
-      #      `backend/docker-compose.prod.yml`), không phải qua mount của broker. Broker chỉ đọc.
-      - ./mqtt/mosquitto:/mosquitto/config-src:ro
-      - ./mqtt/mosquitto/certs:/mosquitto/certs:ro
-      - mosquitto-data:/mosquitto/data
-      - mosquitto-log:/mosquitto/log
+      # Mount directories, not individual files: BatteryService replaces passwd
+      # atomically, which changes its inode.
+      - ${MQTT_AUTH_DIR:-/opt/solar-iot/secrets/mosquitto/auth}:/mosquitto/config-src:ro
+      - ${MQTT_TLS_DIR:-/opt/solar-iot/secrets/mosquitto/tls}:/mosquitto/certs:ro
+      - ${MQTT_DATA_DIR:-/opt/solar-iot/data/mosquitto/data}:/mosquitto/data
+      - ${MQTT_LOG_DIR:-/opt/solar-iot/data/mosquitto/log}:/mosquitto/log
 
-    # (5) broker tự nạp lại khi passwd đổi.
-    # Dùng vòng so mốc sửa đổi thay vì inotify vì image mosquitto:2.0 không có inotify-tools;
-    # 5 giây đủ nhanh cho việc cấp/thu hồi thiết bị.
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+
+    # Mosquitto only reloads password_file after SIGHUP. Polling the directory
+    # avoids granting the backend access to the Docker socket.
     entrypoint:
       - /bin/sh
-      - -c
+      - -ec
       - |
+        test -s /mosquitto/config-src/passwd
+        test -s /mosquitto/certs/tls.crt
+        test -s /mosquitto/certs/tls.key
         (
           last=""
           while :; do
-            cur=$$(stat -c %Y /mosquitto/config-src/passwd 2>/dev/null || echo none)
-            if [ -n "$$last" ] && [ "$$cur" != "$$last" ]; then
-              echo "[passwd-watch] file doi -> SIGHUP mosquitto"
+            current=$$(stat -c %Y /mosquitto/config-src/passwd 2>/dev/null || echo missing)
+            if [ -n "$$last" ] && [ "$$current" != "$$last" ]; then
+              echo "[passwd-watch] credential file changed; reloading Mosquitto"
               kill -HUP 1 2>/dev/null || true
             fi
-            last="$$cur"
+            last="$$current"
             sleep 5
           done
         ) &
         exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
 
     environment:
-      # Dùng lại tài khoản bridge cho healthcheck: ACL đã cho nó `readwrite solar/#`,
-      # nên không phải sinh thêm user chỉ để thăm dò.
       MQTT_HEALTH_USER: ${Mqtt__Username:-backend-bridge}
-      MQTT_HEALTH_PASS: ${Mqtt__Password:?BAT BUOC — dat Mqtt__Password trong /opt/solar/.env.prod (xem IOT3-83)}
+      MQTT_HEALTH_PASS: ${Mqtt__Password:?Mqtt__Password is required in the VPS runtime secret file}
 
     healthcheck:
-      # Thăm dò bằng PUBLISH CÓ XÁC THỰC qua listener nội bộ 1883, không phải chỉ mở socket:
-      # mở được socket mà auth hỏng thì vẫn phải báo unhealthy.
-      #
-      # KHÔNG dùng `</dev/tcp/...`: đó là tính năng của bash, image này chạy BusyBox ash.
-      test: ["CMD-SHELL", "mosquitto_pub -h 127.0.0.1 -p 1883 -u \"$$MQTT_HEALTH_USER\" -P \"$$MQTT_HEALTH_PASS\" -t solar/healthcheck -m ok -q 1"]
+      test:
+        - CMD-SHELL
+        - >-
+          mosquitto_pub -h 127.0.0.1 -p 1883
+          -u "$$MQTT_HEALTH_USER" -P "$$MQTT_HEALTH_PASS"
+          -t solar/healthcheck -m ok -q 1
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 15s
 
     logging:
       driver: json-file
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: 10m
+        max-file: "5"
 
     mem_limit: 256m
-    cpus: "0.25"
+    cpus: 0.35
+    pids_limit: 128
+    stop_grace_period: 30s
 
-    networks: [solar-net]
-
-volumes:
-  mosquitto-data:
-  mosquitto-log:
+    networks: [mqtt]
 
 networks:
-  # (6) network do backend tạo. Tên mặc định của Docker Compose là `<tên thư mục>_<tên network>`;
-  # thư mục triển khai backend là `/opt/solar/backend` nên ra `backend_solar-net`.
-  # Triển khai vào thư mục tên khác thì phải sửa `name:` dưới đây cho khớp, nếu không
-  # `docker compose up` báo "network not found".
-  solar-net:
-    external: true
-    name: ${SOLAR_NETWORK_NAME:-backend_solar-net}
+  mqtt:
+    driver: bridge
