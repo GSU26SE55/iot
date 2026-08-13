@@ -1,0 +1,276 @@
+// Paste this reviewed file into the centrally managed
+// `solar-iot-production` Pipeline job. Never load the production pipeline from
+// an untrusted pull-request workspace.
+pipeline {
+    agent {
+        label 'docker-linux'
+    }
+
+    parameters {
+        string(
+            name: 'GIT_SHA',
+            defaultValue: '',
+            description: 'Exact main commit to deploy'
+        )
+    }
+
+    options {
+        disableConcurrentBuilds()
+        timestamps()
+        timeout(time: 90, unit: 'MINUTES')
+        buildDiscarder(
+            logRotator(
+                numToKeepStr: '30',
+                artifactNumToKeepStr: '15'
+            )
+        )
+        skipDefaultCheckout(true)
+    }
+
+    environment {
+        REPOSITORY_URL = 'https://github.com/GSU26SE55/iot.git'
+        REGISTRY_HOST = 'ghcr.io'
+        MOSQUITTO_MIRROR = 'ghcr.io/gsu26se55/iot-mosquitto'
+        MOSQUITTO_UPSTREAM = 'eclipse-mosquitto@sha256:212f89e1eaeb2c322d6441b64396e3346026674db8fa9c27beac293405c32b3c'
+    }
+
+    stages {
+        stage('Validate immutable main revision') {
+            steps {
+                script {
+                    if (!(params.GIT_SHA ==~ /[0-9a-f]{40}/)) {
+                        error('GIT_SHA must contain exactly 40 lower-case hex characters')
+                    }
+                    env.RELEASE_SHA = params.GIT_SHA
+                }
+
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: 'refs/heads/main']],
+                    doGenerateSubmoduleConfigurations: false,
+                    extensions: [[
+                        $class: 'CloneOption',
+                        noTags: true,
+                        shallow: false
+                    ]],
+                    userRemoteConfigs: [[
+                        url: env.REPOSITORY_URL,
+                        credentialsId: 'iot-github-read'
+                    ]]
+                ])
+
+                sh '''
+                    set -eu
+                    actual_sha="$(git rev-parse HEAD)"
+                    test "${actual_sha}" = "${RELEASE_SHA}" || {
+                      echo "Refusing stale release: main=${actual_sha}, requested=${RELEASE_SHA}" >&2
+                      exit 1
+                    }
+                    git diff --check
+                    shellcheck deploy/scripts/*.sh
+
+                    for tool in \
+                      docker python3.11 pio shellcheck trivy syft cosign openssl
+                    do
+                      command -v "${tool}" >/dev/null 2>&1 || {
+                        echo "Missing required Jenkins tool: ${tool}" >&2
+                        exit 1
+                      }
+                    done
+                    docker info >/dev/null
+                    docker buildx version >/dev/null
+                '''
+            }
+        }
+
+        stage('Rebuild firmware and simulator contracts') {
+            steps {
+                sh '''
+                    set -eu
+
+                    python3.11 -m unittest discover \
+                      -s tools/simulator \
+                      -p 'test_*.py' \
+                      -v
+
+                    cd firmware-esp32
+                    pio test -e native --verbose
+                    cp include/config.example.h include/config.h
+                    pio run -e esp32-s3-devkitc-1
+                    pio run -e esp32-s3-real
+                    pio run -e esp32-s3-uartlog
+                    pio run -e esp32-s3-real-uartlog
+                    pio run -e example-blink
+
+                    mkdir -p ../firmware-artifacts
+                    cp .pio/build/esp32-s3-devkitc-1/firmware.bin \
+                      ../firmware-artifacts/esp32-s3-devkitc-1.bin
+                    cp .pio/build/esp32-s3-real/firmware.bin \
+                      ../firmware-artifacts/esp32-s3-real.bin
+                    (cd ../firmware-artifacts && sha256sum ./*.bin > SHA256SUMS)
+                '''
+            }
+
+            post {
+                success {
+                    archiveArtifacts(
+                        artifacts: 'firmware-artifacts/*',
+                        fingerprint: true
+                    )
+                }
+            }
+        }
+
+        stage('Mirror, scan and sign Mosquitto') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'iot-registry-write',
+                        usernameVariable: 'REGISTRY_USERNAME',
+                        passwordVariable: 'REGISTRY_PASSWORD'
+                    ),
+                    file(
+                        credentialsId: 'ai-cosign-private-key',
+                        variable: 'COSIGN_PRIVATE_KEY'
+                    ),
+                    file(
+                        credentialsId: 'ai-cosign-public-key',
+                        variable: 'COSIGN_PUBLIC_KEY'
+                    ),
+                    string(
+                        credentialsId: 'ai-cosign-password',
+                        variable: 'COSIGN_PASSWORD'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+
+                        docker_config="$(mktemp -d)"
+                        trap 'rm -rf "${docker_config}"' EXIT
+                        export DOCKER_CONFIG="${docker_config}"
+
+                        printf '%s' "${REGISTRY_PASSWORD}" |
+                          docker login "${REGISTRY_HOST}" \
+                            --username "${REGISTRY_USERNAME}" \
+                            --password-stdin
+
+                        mirror_tag="${MOSQUITTO_MIRROR}:${RELEASE_SHA}"
+                        docker pull "${MOSQUITTO_UPSTREAM}"
+                        docker tag "${MOSQUITTO_UPSTREAM}" "${mirror_tag}"
+
+                        if ! trivy image \
+                          --ignore-unfixed \
+                          --exit-code 1 \
+                          --severity HIGH,CRITICAL \
+                          --format json \
+                          --output trivy-mosquitto-production.json \
+                          "${mirror_tag}"
+                        then
+                          trivy convert \
+                            --format table \
+                            --severity HIGH,CRITICAL \
+                            trivy-mosquitto-production.json
+                          exit 1
+                        fi
+                        syft "${mirror_tag}" \
+                          -o cyclonedx-json=sbom-mosquitto-production.cdx.json
+
+                        docker push "${mirror_tag}"
+                        docker pull "${mirror_tag}"
+                        image_ref="$(
+                          docker image inspect "${mirror_tag}" \
+                            --format '{{range .RepoDigests}}{{println .}}{{end}}' |
+                            grep -E "^${MOSQUITTO_MIRROR}@sha256:[0-9a-f]{64}$" |
+                            head -n 1
+                        )"
+                        test -n "${image_ref}"
+
+                        printf 'MOSQUITTO_IMAGE=%s\n' "${image_ref}" \
+                          > deploy/production/image-lock.env
+                        COSIGN_PASSWORD="${COSIGN_PASSWORD}" \
+                          cosign sign --yes --key "${COSIGN_PRIVATE_KEY}" "${image_ref}"
+                        cosign verify --key "${COSIGN_PUBLIC_KEY}" "${image_ref}"
+                    '''
+                }
+            }
+
+            post {
+                always {
+                    archiveArtifacts(
+                        allowEmptyArchive: true,
+                        artifacts: 'trivy-mosquitto-production.json,sbom-mosquitto-production.cdx.json'
+                    )
+                }
+            }
+        }
+
+        stage('Deploy IoT Docker VPS') {
+            steps {
+                lock(resource: 'solar-platform-prod') {
+                    sshagent(credentials: ['platform-vps-ssh']) {
+                        withCredentials([
+                            string(
+                                credentialsId: 'platform-vps-target',
+                                variable: 'VPS_TARGET'
+                            ),
+                            file(
+                                credentialsId: 'platform-vps-known-hosts',
+                                variable: 'VPS_KNOWN_HOSTS'
+                            )
+                        ]) {
+                            sh '''
+                                set -eu
+
+                                payload="iot-deployment-${RELEASE_SHA}.tar.gz"
+                                remote_dir="/opt/solar-iot/incoming/${RELEASE_SHA}-${BUILD_NUMBER}"
+                                tar -czf "${payload}" infra deploy
+
+                                ssh \
+                                  -o BatchMode=yes \
+                                  -o StrictHostKeyChecking=yes \
+                                  -o UserKnownHostsFile="${VPS_KNOWN_HOSTS}" \
+                                  "${VPS_TARGET}" \
+                                  "install -d -m 0750 '${remote_dir}'"
+                                scp \
+                                  -o BatchMode=yes \
+                                  -o StrictHostKeyChecking=yes \
+                                  -o UserKnownHostsFile="${VPS_KNOWN_HOSTS}" \
+                                  "${payload}" \
+                                  "${VPS_TARGET}:${remote_dir}/payload.tar.gz"
+                                ssh \
+                                  -o BatchMode=yes \
+                                  -o StrictHostKeyChecking=yes \
+                                  -o UserKnownHostsFile="${VPS_KNOWN_HOSTS}" \
+                                  "${VPS_TARGET}" \
+                                  "set -eu; \
+                                   tar -xzf '${remote_dir}/payload.tar.gz' -C '${remote_dir}'; \
+                                   chmod 0555 '${remote_dir}'/deploy/scripts/*.sh; \
+                                   '${remote_dir}/deploy/scripts/deploy-production.sh' '${RELEASE_SHA}'"
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "IoT production deployment succeeded for ${params.GIT_SHA}"
+        }
+        failure {
+            echo 'IoT production deployment failed; the deploy script attempted rollback'
+        }
+        always {
+            sh '''
+                docker logout ghcr.io >/dev/null 2>&1 || true
+                if [ -n "${RELEASE_SHA:-}" ]; then
+                  docker image rm \
+                    "${MOSQUITTO_MIRROR}:${RELEASE_SHA}" \
+                    >/dev/null 2>&1 || true
+                fi
+            '''
+            deleteDir()
+        }
+    }
+}

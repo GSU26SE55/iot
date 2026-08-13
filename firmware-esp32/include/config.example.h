@@ -29,7 +29,7 @@
 #define CONFIG_PORTAL_USER            "admin"
 #define CONFIG_PORTAL_PASSWORD        "12345678"
 #define CONFIG_PORTAL_HOSTNAME        "solar-gateway"
-#define SETUP_AP_PASSWORD             "12345678"
+#define SETUP_AP_PASSWORD             "solar-setup-2026"
 // Có Wi-Fi cũ nhưng mất kết nối lâu hơn ngưỡng này thì mở AP recovery.
 #define CONFIG_PORTAL_AP_FALLBACK_MS  30000UL
 
@@ -112,7 +112,7 @@
 //    AP không mật khẩu nghĩa là bất kỳ ai đi ngang cũng đổi được mạng và API key của thiết bị —
 //    mà API key là thứ mở toàn bộ đường HTTPS lên backend.
 //    Đây là MỘT TRONG HAI giá trị duy nhất còn phải điền tay (cùng BACKEND_URL).
-#define SETUP_AP_PASSWORD   "solar-setup-2026"
+// SETUP_AP_PASSWORD đã được khai báo một lần ở khối portal phía trên.
 
 // ============== Sprint 4 — MQTT broker (S4-FW-01..06) =================
 //
