@@ -4,7 +4,11 @@
 # Tác dụng:
 #   1. Xoá directory `passwd` nếu Docker đã auto-tạo do bind mount fail trước đó.
 #   2. Generate `passwd` file thật với user backend-bridge.
-#   3. Set permission 0700 (Mosquitto 2.0 từ chối load nếu world-readable).
+#   3. Set permission 0644 — Mosquitto trong container chạy uid 1883, không match uid
+#      của người ghi file, nên PHẢI đọc được từ uid khác. Mosquitto 2.0 chỉ WARN
+#      "world readable", vẫn load bình thường. File chỉ chứa hash PBKDF2, không có
+#      plaintext. (IOT3-22 — dòng cũ ghi 0700 kèm "từ chối load" là SAI, và trái với
+#      chính `chmod 0644` ở phần thân script bên dưới.)
 #
 # Cách dùng:
 #   ./infra/mqtt/bootstrap.sh                                     # password ngẫu nhiên

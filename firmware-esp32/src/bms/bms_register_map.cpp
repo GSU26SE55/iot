@@ -92,9 +92,17 @@ float decodeJkSoh(uint16_t packedSohAndPrecharge) {
   return static_cast<float>((packedSohAndPrecharge >> 8) & 0x00FFu);
 }
 
+bool jkChargeEnabled(uint16_t packedSwitches) {
+  return ((packedSwitches >> 8) & 0x00FFu) != 0;
+}
+
+bool jkDischargeEnabled(uint16_t packedSwitches) {
+  return (packedSwitches & 0x00FFu) != 0;
+}
+
 uint8_t decodeJkChargingState(uint16_t packedSwitches, float currentAmps) {
-  const bool chargeEnabled = ((packedSwitches >> 8) & 0x00FFu) != 0;
-  const bool dischargeEnabled = (packedSwitches & 0x00FFu) != 0;
+  const bool chargeEnabled = jkChargeEnabled(packedSwitches);
+  const bool dischargeEnabled = jkDischargeEnabled(packedSwitches);
   constexpr float kActiveCurrentAmps = 0.05f;
 
   if (chargeEnabled && currentAmps > kActiveCurrentAmps) return 2;

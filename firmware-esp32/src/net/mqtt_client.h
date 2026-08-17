@@ -46,25 +46,85 @@ void mqttTick();
 bool mqttIsConnected();
 
 // ---- Publish helpers (S4-FW-04) ----
+//
+// GH-746 — MỨC BẢO ĐẢM THẬT CỦA ĐƯỜNG PUBLISH LÀ **QoS 0**.
+//
+// Trước đây phần doc dưới đây ghi "QoS 1" ở cả 4 hàm, trong khi `publishWithStats()` có
+// nguyên dòng `(void)qos;` — tham số bị vứt thẳng. PubSubClient v2.8 chỉ có
+// `publish(topic, payload, len, retain)`, KHÔNG hề có overload QoS. Bản thân doc cũ cũng tự
+// mâu thuẫn: vừa ghi "QoS 1" vừa ghi "KHÔNG đợi PUBACK" — mà QoS 1 theo định nghĩa LÀ chờ
+// PUBACK.
+//
+// Lưu ý phân biệt hai CHIỀU (chỗ dễ nhầm nhất):
+//   - Chiều VÀO  (subscribe cmd, LWT): QoS 1 — PubSubClient hỗ trợ thật.
+//   - Chiều RA   (4 hàm publish dưới): QoS 0 — best-effort.
+//
+// Hệ quả phải biết: `true` chỉ có nghĩa "đã đẩy được vào socket TCP", KHÔNG phải "broker đã
+// nhận". Mất kết nối ngay sau đó là bản tin biến mất mà không ai báo. Caller nào coi `true`
+// là đã-gửi-chắc-chắn thì đang tự tạo lỗ mất dữ liệu.
+//
+// Muốn bảo đảm thật phải đổi thư viện (esp-mqtt / AsyncMqttClient) — việc riêng, không nằm
+// trong GH-746 vốn chỉ yêu cầu "sửa contract cho khớp thực tế".
+
+/// Mức bảo đảm của đường publish. Là HẰNG SỐ để cam kết được kiểm bằng test, thay vì nằm
+/// trong lời văn rồi trôi khỏi hiện thực như trước.
+enum class PublishGuarantee : uint8_t {
+  /// QoS 0 — gửi một lần, không xác nhận, có thể mất.
+  BestEffortQos0 = 0,
+  /// QoS 1 — có PUBACK, ít nhất một lần. CHƯA hỗ trợ (cần đổi thư viện).
+  AtLeastOnceQos1 = 1,
+};
+
+constexpr PublishGuarantee kPublishGuarantee = PublishGuarantee::BestEffortQos0;
 
 // Publish telemetry cho 1 pin. Backend topic schema yêu cầu batterySerial
 // trong topic path — caller phải split batch multi-source theo pin trước khi gọi.
 //
-// QoS 1, retain=false. Trả true nếu PubSubClient::publish accept (đã đẩy vào
-// out queue, KHÔNG đợi PUBACK). Trả false nếu chưa connect hoặc buffer overflow.
+// retain=false. Trả true nếu PubSubClient::publish accept (đã đẩy vào out queue,
+// KHÔNG đợi PUBACK — xem kPublishGuarantee). False nếu chưa connect hoặc buffer overflow.
 bool mqttPublishTelemetry(const char* batterySerial,
                           const char* payload,
                           size_t      payloadLen);
 
-// Publish heartbeat. QoS 1, retain=false.
+// Publish heartbeat. retain=false.
 bool mqttPublishHeartbeat(const char* payload, size_t payloadLen);
 
-// Publish status ("online" / "offline"). QoS 1, retain=true.
-// Caller chỉ publish "online" — "offline" tự lo qua LWT khi disconnect.
+// Publish status ("online" / "offline"). retain=true.
+// Caller chỉ publish "online" — "offline" tự lo qua LWT khi disconnect (LWT ĐƯỢC set QoS 1).
 bool mqttPublishStatus(const char* payload, size_t payloadLen);
 
-// Publish command ack (S4-FW-05). QoS 1, retain=false.
+// Publish command ack (S4-FW-05). retain=false.
 bool mqttPublishCmdAck(const char* payload, size_t payloadLen);
+
+/// GH-747 — gọi SAU khi deviceCode đổi lúc đang chạy.
+///
+/// Phiên MQTT đang mở mang LWT và subscription của deviceCode CŨ; topic publish thì lấy
+/// deviceCode runtime. Không ép kết nối lại thì thiết bị publish sang topic mới trong khi
+/// broker vẫn khoá ACL theo phiên cũ, còn lệnh downlink vẫn về topic cũ — câm cả hai chiều.
+///
+/// Hàm này ngắt kết nối để tick kế tiếp dựng lại LWT + topic + subscribe theo code mới.
+void mqttOnIdentityChanged();
+
+/// <summary>
+/// IOT3-41 — gọi SAU khi <c>mqttcfg</c> đổi (provision trả cấu hình mới, hoặc đặt tay qua CLI).
+/// </summary>
+/// <remarks>
+/// <para>
+/// Ba việc: <c>setServer()</c> theo broker mới · ngắt phiên cũ để dựng lại LWT/subscribe ·
+/// cho phép nối lại ngay thay vì đợi hết <c>MQTT_RECONNECT_INTERVAL_MS</c>.
+/// </para>
+/// <para>
+/// Nếu <c>mqttBegin()</c> lúc khởi động đã bỏ qua vì chưa provision, hàm này sẽ **khởi tạo luôn** —
+/// đó là đường duy nhất để thiết bị lên MQTT ngay trong phiên đầu tiên mà không phải reboot.
+/// </para>
+/// <para>
+/// ⚠️ Gọi CẢ ở nhánh "đã provision từ trước" lúc boot, không chỉ nhánh vừa provision xong.
+/// Bỏ sót nhánh đó thì boot lần đầu chạy đẹp còn từ lần hai trở đi âm thầm chạy HTTPS-only —
+/// không log lỗi nào vì HTTPS vẫn hoạt động bình thường (IOT3-46).
+/// </para>
+/// </remarks>
+/// <returns>true nếu MQTT đang (hoặc vừa được) khởi tạo với cấu hình dùng được.</returns>
+bool mqttApplyConfig();
 
 // ---- Subscribe callback (S4-FW-05) ----
 
@@ -81,5 +141,21 @@ uint32_t mqttPublishFailCount();
 uint32_t mqttConnectCount();        // số lần (re)connect thành công
 uint32_t mqttConsecutiveFailCount(); // streak fail liên tiếp (S4-FW-06 fallback)
 void     mqttResetConsecutiveFails();
+
+/// <summary>IOT3-44 — số lần connect bị TỪ CHỐI VÌ XÁC THỰC liên tiếp (state 4 hoặc 5).</summary>
+/// <remarks>
+/// Đếm tách hẳn khỏi <c>mqttConsecutiveFailCount()</c> (lỗi publish) và khỏi lỗi mạng
+/// (state −2/−3/−4). Phân biệt này là điểm mấu chốt: mất mạng thì chờ sẽ hết, còn sai
+/// credential thì chờ bao lâu cũng vô ích — chỉ xin credential mới qua <c>/provision</c>
+/// mới cứu được. Lỗi mạng xen giữa KHÔNG xoá streak, nếu không thì mạng chập chờn sẽ giữ
+/// bộ đếm ở 0 mãi và thiết bị không bao giờ tự lành.
+/// </remarks>
+uint32_t mqttAuthFailureCount();
+
+/// Ngưỡng khuyến nghị để đi re-provision (hiện là 5).
+int      mqttAuthFailureThreshold();
+
+/// Xoá streak — gọi sau khi đã re-provision, để lần hỏng sau đếm lại từ đầu.
+void     mqttResetAuthFailures();
 
 }  // namespace net

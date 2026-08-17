@@ -14,8 +14,19 @@
 
 namespace identity {
 
-constexpr size_t kMaxApiKeyLen     = 96;   // "iotk_" + 64 base62 + null
-constexpr size_t kMaxDeviceCodeLen = 64;   // backend max length
+// GH-749 — số KÝ TỰ tối đa, lấy đúng theo cột backend:
+//   device_code       HasMaxLength(64)
+//   api_key_plaintext HasMaxLength(128)
+constexpr size_t kMaxApiKeyChars     = 128;
+constexpr size_t kMaxDeviceCodeChars = 64;
+
+// Cỡ BUFFER = số ký tự + 1 cho ký tự kết thúc chuỗi.
+//
+// Bản cũ đặt buffer đúng bằng số ký tự (64), nên một deviceCode 64 ký tự — hoàn toàn hợp lệ
+// với backend — vẫn bị cắt mất ký tự cuối. Lỗi này nằm im vì code cũ cắt trong im lặng; nay
+// giá trị quá khổ bị TỪ CHỐI nên phải chắc chắn mọi giá trị hợp lệ đều vừa, kẻo chặn nhầm.
+constexpr size_t kMaxApiKeyLen     = kMaxApiKeyChars + 1;
+constexpr size_t kMaxDeviceCodeLen = kMaxDeviceCodeChars + 1;
 
 // Khởi tạo runtime store. Gọi 1 lần trong setup() SAU storage::nvsBegin().
 // Đọc NVS → nếu thiếu thì fallback về compile-time macros.
@@ -28,6 +39,11 @@ const char* deviceCode();
 // Setters — ghi vào NVS + reload runtime cache. Trả false nếu NVS fail.
 bool setApiKey(const char* newKey);
 bool setDeviceCode(const char* newCode);
+
+// Mark the device as intentionally unpaired. Unlike resetToDefaults(), this
+// suppresses compile-time identity fallbacks on the next boot so the web
+// setup flow asks for a new QR code.
+bool prepareForPairing();
 
 // Reset cả 2 về compile-time defaults (erase NVS).
 bool resetToDefaults();

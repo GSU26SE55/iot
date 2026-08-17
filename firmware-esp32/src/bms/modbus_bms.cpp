@@ -9,6 +9,7 @@
   #include "config.example.h"
 #endif
 
+#include "config/battery_map_runtime.h"
 #include "config/battery_mapping.h"
 #include "core/source_tags.h"   // S6-FW-03 (#65): canonical cross-source tags
 
@@ -28,7 +29,16 @@ ModbusMaster   s_modbus;
 
 uint32_t s_pollOk   = 0;
 uint32_t s_pollFail = 0;
+uint32_t s_writeOk  = 0;
+uint32_t s_writeFail= 0;
 bool     s_inited   = false;
+
+SwitchResult switchError(const char* msg) {
+  SwitchResult r{};
+  r.ok = false;
+  snprintf(r.error, sizeof(r.error), "%s", msg ? msg : "unknown error");
+  return r;
+}
 
 // S5-FW-02: DE/RE callbacks. ModbusMaster lib gọi pre/postTransmission để
 // switch direction trước/sau send.
@@ -52,21 +62,13 @@ void postTransmission() {
 #endif
 }
 
-// Convert serial → unitId thông qua battery_mapping.
+// IOT3-49 — tra bảng ánh xạ RUNTIME (`/provision` cấp), không còn bảng cứng compile-time.
 uint8_t serialToUnitId(const char* serial) {
-  if (!serial) return 0;
-  for (const auto& m : config::kBatteryMappings) {
-    if (strcmp(m.serial, serial) == 0) return m.unitId;
-  }
-  return 0;
+  return batmap::unitIdForSerial(serial);
 }
 
-// Convert unitId → battery serial thông qua battery_mapping.
 const char* unitIdToSerial(uint8_t unitId) {
-  for (const auto& m : config::kBatteryMappings) {
-    if (m.unitId == unitId) return m.serial;
-  }
-  return nullptr;
+  return batmap::serialForUnitId(unitId);
 }
 
 void initializeReading(const char* batteryAssetSerial, core::SensorReading& out) {
@@ -75,12 +77,13 @@ void initializeReading(const char* batteryAssetSerial, core::SensorReading& out)
   if (batteryAssetSerial) {
     strncpy(out.serial, batteryAssetSerial, sizeof(out.serial) - 1);
   }
+  // batteryAssetId + cycleCount vẫn tra bảng cứng: backend KHÔNG gửi hai trường này
+  // (`BatteryMappingEntry` chỉ có serial + unitId + sensorSourceCode) và từ S3-FW-04 backend tự
+  // resolve serial → BatteryAssetId. Rỗng ở đây là bình thường, không phải lỗi.
+  strncpy(out.batteryAssetId, batmap::assetIdForSerial(out.serial),
+          sizeof(out.batteryAssetId) - 1);
   for (const auto& m : config::kBatteryMappings) {
-    if (strcmp(m.serial, out.serial) == 0) {
-      strncpy(out.batteryAssetId, m.batteryAssetId, sizeof(out.batteryAssetId) - 1);
-      out.cycleCount = m.initialCycleCount;
-      break;
-    }
+    if (strcmp(m.serial, out.serial) == 0) { out.cycleCount = m.initialCycleCount; break; }
   }
 }
 
@@ -310,16 +313,39 @@ bool modbusReadOne(uint8_t unitId,
 size_t modbusReadMultiDrop(core::SensorReading* out, size_t maxOut) {
   if (!s_inited || out == nullptr || maxOut == 0) return 0;
 
-  size_t produced = 0;
-  for (uint8_t i = 0; i < BMS_UNIT_ID_COUNT; ++i) {
-    if (produced >= maxOut) break;
-    uint8_t unitId = BMS_UNIT_ID_START + i;
-    const char* serial = unitIdToSerial(unitId);
-    if (!serial) {
-      Serial.printf("[modbus] unitId=%u không có trong battery_mapping — skip\n", unitId);
-      continue;
+  // IOT3-49 — duyệt theo BẢNG ÁNH XẠ RUNTIME, không còn quét dải
+  // `BMS_UNIT_ID_START .. +BMS_UNIT_ID_COUNT` rồi tra ngược ra serial.
+  //
+  // Lý do đổi chiều: unitId do BACKEND gán trong `batteryMappings[]`. Quét theo dải compile-time
+  // thì pin nào backend gán unitId nằm ngoài dải sẽ không bao giờ được đọc — và triệu chứng duy
+  // nhất là một dòng "skip", rất dễ đọc lướt qua.
+  const size_t nMap = batmap::count();
+  if (nMap == 0) {
+    static bool s_warned = false;
+    if (!s_warned) {
+      s_warned = true;
+      Serial.println("[modbus] bảng ánh xạ pin TRỐNG — không biết đọc unitId nào. "
+                     "Chạy /provision hoặc kiểm tra batteryMappings[] của thiết bị.");
     }
-    if (modbusReadOne(unitId, serial, out[produced])) {
+    return 0;
+  }
+  if (nMap > maxOut) {
+    static bool s_capWarned = false;
+    if (!s_capWarned) {
+      s_capWarned = true;
+      Serial.printf("[modbus] ⚠ bảng có %u pin nhưng buffer chỉ nhận %u — %u PIN CUỐI SẼ KHÔNG "
+                    "ĐƯỢC ĐỌC. Nới BMS_UNIT_ID_COUNT trong config.h cho khớp số pin thật.\n",
+                    static_cast<unsigned>(nMap), static_cast<unsigned>(maxOut),
+                    static_cast<unsigned>(nMap - maxOut));
+    }
+  }
+
+  size_t produced = 0;
+  for (size_t i = 0; i < nMap; ++i) {
+    if (produced >= maxOut) break;
+    const auto* e = batmap::at(i);
+    if (e == nullptr) continue;
+    if (modbusReadOne(e->unitId, e->serial, out[produced])) {
       produced++;
     }
     // Spacing giữa các poll để bus settle + không spam (Modbus T3.5).
@@ -331,5 +357,121 @@ size_t modbusReadMultiDrop(core::SensorReading* out, size_t maxOut) {
 
 uint32_t modbusPollOkCount()   { return s_pollOk; }
 uint32_t modbusPollFailCount() { return s_pollFail; }
+uint32_t modbusWriteOkCount()  { return s_writeOk; }
+uint32_t modbusWriteFailCount(){ return s_writeFail; }
+
+bool modbusReadSwitchStatus(uint8_t unitId, uint16_t& outPacked) {
+  outPacked = 0;
+  if (!s_inited || unitId == 0) return false;
+
+#if BMS_MODEL != 3
+  return false;
+#else
+  s_modbus.begin(unitId, s_rs485Serial);
+  uint16_t switches[1] = {0};
+  if (!readJkRegisters(kJkSwitchStatusAddress, 1, switches)) return false;
+  outPacked = switches[0];
+  return true;
+#endif
+}
+
+SwitchResult modbusWriteSwitch(uint8_t unitId, SwitchTarget target, bool enable) {
+  if (!s_inited) {
+    s_writeFail++;
+    return switchError("Modbus BMS chua khoi tao");
+  }
+  if (unitId == 0) {
+    s_writeFail++;
+    return switchError("Modbus unitId khong hop le");
+  }
+
+#if BMS_MODEL != 3
+  s_writeFail++;
+  return switchError("model BMS nay chua ho tro dieu khien tu xa");
+#else
+  uint16_t address = kRegMissing;
+  switch (target) {
+    case SwitchTarget::Charge:
+      address = kJkChargeSwitchWriteAddress;
+      break;
+    case SwitchTarget::Discharge:
+      address = kJkDischargeSwitchWriteAddress;
+      break;
+    default:
+      s_writeFail++;
+      return switchError("muc tieu cong tac khong hop le");
+  }
+
+  if (address == kRegMissing) {
+    SwitchResult rejected = switchError("chua verify thanh ghi ghi cho model BMS nay");
+    uint16_t packed = 0;
+    if (modbusReadSwitchStatus(unitId, packed)) {
+      rejected.chargeEnabled = jkChargeEnabled(packed);
+      rejected.dischargeEnabled = jkDischargeEnabled(packed);
+    }
+    s_writeFail++;
+    return rejected;
+  }
+
+  s_modbus.begin(unitId, s_rs485Serial);
+  const uint16_t value = enable ? kJkSwitchOnValue : kJkSwitchOffValue;
+  // Protocol V1.1 defines these switches as UINT32. Its reference frame is
+  // `01 10 10 70 00 02 04 00 00 00 01 ...`, so FC 0x06/single-register
+  // writes are not valid even though the logical value itself is only 0/1.
+  auto writeSwitchValue = [&]() {
+    s_modbus.setTransmitBuffer(0, 0x0000);
+    s_modbus.setTransmitBuffer(1, value);
+    return s_modbus.writeMultipleRegisters(address, 2);
+  };
+  uint8_t code = writeSwitchValue();
+  for (uint8_t retry = 0;
+       retry < BMS_POLL_RETRY && code != s_modbus.ku8MBSuccess;
+       ++retry) {
+    delay(20);
+    code = writeSwitchValue();
+  }
+
+  if (code != s_modbus.ku8MBSuccess) {
+    SwitchResult failed = switchError("BMS tu choi hoac khong phan hoi lenh ghi");
+    uint16_t packed = 0;
+    if (modbusReadSwitchStatus(unitId, packed)) {
+      failed.chargeEnabled = jkChargeEnabled(packed);
+      failed.dischargeEnabled = jkDischargeEnabled(packed);
+    }
+    Serial.printf("[modbus] write unitId=%u addr=0x%04X value=0x%04X FAIL code=0x%02X\n",
+                  unitId, address, value, code);
+    s_writeFail++;
+    return failed;
+  }
+
+  delay(50);
+  uint16_t packed = 0;
+  if (!modbusReadSwitchStatus(unitId, packed)) {
+    s_writeFail++;
+    return switchError("ghi xong nhung khong doc lai duoc trang thai BMS");
+  }
+
+  SwitchResult result{};
+  result.chargeEnabled = jkChargeEnabled(packed);
+  result.dischargeEnabled = jkDischargeEnabled(packed);
+  const bool actual = target == SwitchTarget::Charge
+      ? result.chargeEnabled
+      : result.dischargeEnabled;
+  if (actual != enable) {
+    snprintf(result.error, sizeof(result.error),
+             "BMS khong ap dung trang thai yeu cau sau khi ghi");
+    Serial.printf("[modbus] write unitId=%u addr=0x%04X verify MISMATCH packed=0x%04X\n",
+                  unitId, address, packed);
+    s_writeFail++;
+    return result;
+  }
+
+  result.ok = true;
+  Serial.printf("[modbus] write unitId=%u addr=0x%04X value=0x%04X OK packed=0x%04X\n",
+                unitId, address, value, packed);
+  s_writeOk++;
+  return result;
+#endif
+}
 
 }  // namespace bms

@@ -86,8 +86,9 @@ void test_v3_production_fields() {
   TEST_ASSERT_FALSE(it["batteryAssetId"].is<const char*>());
 
   // Time + deviceTimestamp (clock skew check #IoT2-15)
-  TEST_ASSERT_EQUAL_STRING("2026-06-14T08:15:30Z", it["time"]);
-  TEST_ASSERT_EQUAL_STRING("2026-06-14T08:15:30Z", it["deviceTimestamp"]);
+  // Timestamp được vá ms = index item (fix đụng PK (Time, BatteryAssetId) backend).
+  TEST_ASSERT_EQUAL_STRING("2026-06-14T08:15:30.000Z", it["time"]);
+  TEST_ASSERT_EQUAL_STRING("2026-06-14T08:15:30.000Z", it["deviceTimestamp"]);
 
   // Sensor values
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 12.6f, it["voltage"].as<float>());

@@ -16,15 +16,32 @@
 #include <Arduino.h>
 #include <WiFi.h>
 
+#include "config/wifi_config.h"
+#include "net/setup_portal.h"
+
+#if __has_include("config.h")
+  #include "config.h"
+#else
+  #include "config.example.h"
+#endif
+
+#ifndef CONFIG_PORTAL_AP_FALLBACK_MS
+  #define CONFIG_PORTAL_AP_FALLBACK_MS core::kRecoveryAfterOfflineMsDefault
+#endif
+
 namespace net {
 
 namespace {
 constexpr uint32_t kReconnectThrottleMs = 5000;
 
-const char*  s_ssid     = nullptr;
-const char*  s_password = nullptr;
+// IOT3-50 — KHÔNG cache SSID/mật khẩu ở đây. `wificfg::` là nguồn chân lý duy nhất; cache lại
+// là tự tạo nguồn thứ hai, và hai nguồn thì sớm muộn cũng lệch.
 uint32_t     s_lastReconnectMs = 0;
 bool         s_wasConnected    = false;   // edge detect connect/disconnect
+
+// IOT3-51 — máy trạng thái.
+WifiPhase s_phase        = WifiPhase::Unconfigured;
+uint32_t  s_offlineSince = 0;      // millis lúc bắt đầu mất mạng; 0 = đang có mạng
 
 void onWiFiEvent(WiFiEvent_t event) {
   switch (event) {
@@ -47,46 +64,110 @@ void onWiFiEvent(WiFiEvent_t event) {
 }
 }  // namespace
 
-void wifiBegin(const char* ssid, const char* password) {
-  s_ssid     = ssid;
-  s_password = password;
-
+void wifiBegin() {
   WiFi.onEvent(onWiFiEvent);
-  WiFi.mode(WIFI_STA);
+  WiFi.mode(portalIsActive() ? WIFI_AP_STA : WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.persistent(false);          // tránh ghi creds vào NVS (Sprint 2 sẽ quản lý riêng)
   WiFi.setSleep(false);            // tăng độ ổn định MQTT/HTTPS (tiêu thụ thêm ~30mA)
 
-  WiFi.begin(ssid, password);
-
-  Serial.printf("[wifi] connecting to \"%s\" ", ssid);
-  uint32_t t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 30000) {
-    delay(500);
-    Serial.print('.');
+  if (!wificfg::isConfigured()) {
+    Serial.println("[wifi] CHƯA CẤU HÌNH mạng — bỏ qua bước nối.");
+    Serial.println("[wifi]   → trang cấu hình sẽ tự mở ở tick đầu tiên của loop().");
+    Serial.println("[wifi]   → hoặc dùng Serial CLI: `set wifi <ssid> <mật khẩu>`");
+    s_phase = WifiPhase::Unconfigured;
+    return;
   }
-  Serial.println();
+  s_phase = WifiPhase::Connecting;
 
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.printf("[wifi] connected ip=%s rssi=%ddBm mac=%s\n",
-                  WiFi.localIP().toString().c_str(),
-                  WiFi.RSSI(),
-                  WiFi.macAddress().c_str());
-  } else {
-    Serial.println("[wifi] initial connect FAILED — will retry in loop");
-  }
+  WiFi.begin(wificfg::ssid(), wificfg::password());
+  s_offlineSince = millis();
+  s_lastReconnectMs = millis();
+  Serial.printf("[wifi] connecting to \"%s\" in background; setup AP remains available\n",
+                wificfg::ssid());
 }
 
 void wifiTick() {
-  if (WiFi.status() == WL_CONNECTED) return;
+  const uint32_t now = millis();
 
-  uint32_t now = millis();
+  // Trang cấu hình phải được bơm TRƯỚC mọi quyết định khác — nó là thứ duy nhất cho người ta
+  // đường thoát khi thiết bị không nối được mạng.
+  if (portalIsActive()) portalTick();
+
+  // IOT3-51 — QUYẾT ĐỊNH nằm ở `core::decideWifiPhase` (thuần, test ở env:native);
+  // phần dưới đây chỉ THI HÀNH: bật/tắt AP, gọi WiFi.begin, in log.
+  const bool connected = (WiFi.status() == WL_CONNECTED);
+  const uint32_t offlineMsNow =
+      (connected || s_offlineSince == 0) ? 0 : (now - s_offlineSince);
+  const core::WifiPhaseDecision decision =
+      core::decideWifiPhase(wificfg::isConfigured(), connected, offlineMsNow,
+                            CONFIG_PORTAL_AP_FALLBACK_MS);
+
+  // ---------------- có mạng ----------------
+  if (decision == core::WifiPhaseDecision::Connected) {
+    if (s_phase != WifiPhase::Connected) {
+      Serial.printf("[wifi] có mạng trở lại sau %lus\n",
+                    static_cast<unsigned long>(wifiOfflineDurationMs() / 1000UL));
+      s_phase = WifiPhase::Connected;
+    }
+    s_offlineSince = 0;
+    return;
+  }
+
+  // ---------------- chưa cấu hình ----------------
+  if (decision == core::WifiPhaseDecision::Unconfigured) {
+    if (s_phase != WifiPhase::Unconfigured) {
+      Serial.println("[wifi] không có SSID trong NVS — chuyển sang chế độ cài đặt");
+      s_phase = WifiPhase::Unconfigured;
+    }
+    if (!portalIsActive()) portalStart(PortalMode::FirstTimeSetup);
+    return;
+  }
+
+  // ---------------- mất mạng ----------------
+  if (s_offlineSince == 0) s_offlineSince = now;
+  const uint32_t offlineMs = now - s_offlineSince;
+
+  if (decision == core::WifiPhaseDecision::Recovery) {
+    if (s_phase != WifiPhase::Recovery) {
+      Serial.printf("[wifi] mất mạng %lu phút — chế độ PHỤC HỒI; "
+                    "AP cài đặt vẫn sẵn sàng\n",
+                    static_cast<unsigned long>(offlineMs / 60000UL));
+      s_phase = WifiPhase::Recovery;
+    }
+    // Nhánh dự phòng cho thiết bị nâng cấp từ firmware cũ. Bản hiện tại
+    // đã mở portal ngay lúc boot nên thường không đi vào lệnh này.
+    if (!portalIsActive()) portalStart(PortalMode::Recovery);
+  } else if (s_phase != WifiPhase::Connecting) {
+    s_phase = WifiPhase::Connecting;
+  }
+
+  // AP setup luôn chạy song song. WiFi.disconnect()/begin() chỉ đổi phần STA;
+  // portalTick() sẽ khôi phục AP nếu driver làm mất radio bit.
   if (now - s_lastReconnectMs < kReconnectThrottleMs) return;
   s_lastReconnectMs = now;
 
   Serial.println("[wifi] reconnecting...");
   WiFi.disconnect();
-  WiFi.begin(s_ssid, s_password);
+  WiFi.begin(wificfg::ssid(), wificfg::password());
+}
+
+WifiPhase wifiPhase() { return s_phase; }
+
+uint32_t wifiOfflineDurationMs() {
+  return s_offlineSince == 0 ? 0 : (millis() - s_offlineSince);
+}
+
+bool wifiReconfigure(const char* ssid, const char* password) {
+  if (!wificfg::save(ssid, password)) return false;   // đã log lý do
+
+  Serial.printf("[wifi] đổi sang mạng \"%s\" — nối lại ngay, không khởi động lại\n",
+                wificfg::ssid());
+  WiFi.disconnect();
+  // Xoá throttle để wifiTick() không phải đợi thêm 5 giây nữa mới thử.
+  s_lastReconnectMs = 0;
+  WiFi.begin(wificfg::ssid(), wificfg::password());
+  return true;
 }
 
 bool wifiIsConnected() {

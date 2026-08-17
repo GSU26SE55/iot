@@ -19,3 +19,15 @@ firmware-esp32/include/config.h
 
 # Sprint 0 — Infra
 infra/.env
+
+# Production deployment secrets/runtime state stay on the VPS, never in Git.
+deploy/production/*.env
+!deploy/production/*.env.example
+
+# loop-engine — sinh tự động, không commit
+.loop/out/
+.loop/cache/
+.loop/runs/
+.loop/guard.json
+.loop/last-run.json
+.loop/dispute.md

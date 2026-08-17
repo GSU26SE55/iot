@@ -1,0 +1,96 @@
+# Production MQTT broker. Backend runs in k3s and connects through
+# mqtt.solars.io.vn:8883; therefore this stack is intentionally independent of
+# every backend Docker network.
+name: solar-iot
+
+services:
+  mosquitto:
+    image: ${MOSQUITTO_IMAGE:?MOSQUITTO_IMAGE must be an immutable image@sha256 digest}
+    container_name: solar-iot-mosquitto
+    restart: unless-stopped
+    init: true
+
+    user: "1883:1883"
+    group_add:
+      # Allows uid 1883 to traverse/read the root-owned credential and TLS
+      # directories shared with the k3s BatteryService/cert sync process.
+      - "${SOLAR_RUNTIME_GID:-10001}"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+
+    ports:
+      # Never publish plaintext 1883. It exists only inside the container for
+      # the authenticated health check.
+      - "${MQTT_BIND_IP:-0.0.0.0}:${MQTT_TLS_PORT:-8883}:8883/tcp"
+
+    volumes:
+      - ./mqtt/production/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mqtt/production/tls.conf:/mosquitto/config/conf.d/tls.conf:ro
+      - ./mqtt/mosquitto/config/acl.conf:/mosquitto/config/acl.conf:ro
+      # Mount directories, not individual files: BatteryService replaces passwd
+      # atomically, which changes its inode.
+      - ${MQTT_AUTH_DIR:-/opt/solar-iot/secrets/mosquitto/auth}:/mosquitto/config-src:ro
+      - ${MQTT_TLS_DIR:-/opt/solar-iot/secrets/mosquitto/tls}:/mosquitto/certs:ro
+      - ${MQTT_DATA_DIR:-/opt/solar-iot/data/mosquitto/data}:/mosquitto/data
+      - ${MQTT_LOG_DIR:-/opt/solar-iot/data/mosquitto/log}:/mosquitto/log
+
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+
+    # Mosquitto only reloads password_file after SIGHUP. Polling the directory
+    # avoids granting the backend access to the Docker socket.
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        test -s /mosquitto/config-src/passwd
+        test -s /mosquitto/certs/tls.crt
+        test -s /mosquitto/certs/tls.key
+        (
+          last=""
+          while :; do
+            current=$$(stat -c %Y /mosquitto/config-src/passwd 2>/dev/null || echo missing)
+            if [ -n "$$last" ] && [ "$$current" != "$$last" ]; then
+              echo "[passwd-watch] credential file changed; reloading Mosquitto"
+              kill -HUP 1 2>/dev/null || true
+            fi
+            last="$$current"
+            sleep 5
+          done
+        ) &
+        exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
+
+    environment:
+      MQTT_HEALTH_USER: ${Mqtt__Username:-backend-bridge}
+      MQTT_HEALTH_PASS: ${Mqtt__Password:?Mqtt__Password is required in the VPS runtime secret file}
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mosquitto_pub -h 127.0.0.1 -p 1883
+          -u "$$MQTT_HEALTH_USER" -P "$$MQTT_HEALTH_PASS"
+          -t solar/healthcheck -m ok -q 1
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+    mem_limit: 256m
+    cpus: 0.35
+    pids_limit: 128
+    stop_grace_period: 30s
+
+    networks: [mqtt]
+
+networks:
+  mqtt:
+    driver: bridge

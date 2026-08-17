@@ -70,7 +70,8 @@ void test_payload_item_fields() {
 
   TEST_ASSERT_EQUAL_STRING("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
                            it["batteryAssetId"]);
-  TEST_ASSERT_EQUAL_STRING("2026-06-13T09:00:00Z", it["time"]);
+  // Timestamp được vá ms = index item (fix đụng PK (Time, BatteryAssetId) backend).
+  TEST_ASSERT_EQUAL_STRING("2026-06-13T09:00:00.000Z", it["time"]);
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 13.10f, it["voltage"].as<float>());
   TEST_ASSERT_FLOAT_WITHIN(0.001f,  0.50f, it["current"].as<float>());
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 30.10f, it["temperature"].as<float>());

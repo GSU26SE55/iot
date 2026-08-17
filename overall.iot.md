@@ -103,7 +103,7 @@
 | STT | Thiết bị | SL | Thông số / Model | Mục đích |
 |-----|----------|-----|------------------|----------|
 | 21 | Cảm biến nhiệt-ẩm | 2 | SHT31 / DHT22 | Ambient temp + humidity (AmbientReading) |
-| 22 | Cảm biến khói | 1 | MQ-2 / MQ-135 | Smoke incident → EnvironmentalIncident |
+| 22 | Cảm biến khí cháy | 1 | MQ-2 / MQ-135 | GasLeak incident → EnvironmentalIncident (MQ-2 là gas sensor; báo `GasLeak`, không phải `Smoke` — NS-24 #664. `Smoke` dành cho cảm biến khói quang học tương lai) |
 | 23 | Cảm biến rò nước | 1 | Water leak sensor | Water incident |
 
 ## A7. Hệ thống nguồn

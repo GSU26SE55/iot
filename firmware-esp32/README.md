@@ -9,6 +9,19 @@ Roadmap firmware:
 - **Sprint 5** ← **HIỆN TẠI** — Modbus RTU BMS + INA226 + DS18B20 + SHT31 + USE_MOCK_BMS dispatcher
 - Sprint 7 — OTA
 
+## Browser setup portal
+
+Firmware exposes a small configuration app directly from the ESP32:
+
+- Connected to the router: `http://<ESP32-IP>:8080` or `http://solar-gateway.local:8080`
+- First setup or prolonged Wi-Fi failure: join `SolarGW-XXXX`, then open `http://192.168.4.1` for the captive Wi-Fi/device setup
+- The full authenticated app is also reachable at `http://192.168.4.1:8080` while that setup AP is active
+- Default example login: `admin` / `change-me-now` (change `CONFIG_PORTAL_PASSWORD` in `include/config.h` before flashing)
+
+The port-8080 app can update Wi-Fi, Backend URL, device credentials and MQTT broker settings. Values are stored in the same `wificfg`, `mqttcfg`, identity and backend NVS stores used by the firmware and override `config.h` on later boots. Passwords are write-only: the API only returns flags that indicate whether a password exists. MQTT TLS remains a compile-time firmware choice.
+
+The captive portal waits indefinitely on a device without Wi-Fi configuration. Recovery mode starts after a configured device has remained offline for an extended period and closes after ten minutes so the station can keep retrying its previous router.
+
 ## Sprint 4 quick reference
 
 ```

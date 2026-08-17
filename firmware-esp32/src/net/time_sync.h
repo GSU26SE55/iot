@@ -29,4 +29,9 @@ uint32_t timeEpoch();
 // outBuf phải ≥ 21 byte. Trả false nếu chưa sync (outBuf để rỗng).
 bool isoNow(char* outBuf, size_t outBufLen);
 
+/// GH-736 — như isoNow() nhưng lùi lại `secondsAgo` giây.
+/// Dùng khi sự cố được PHÁT HIỆN lúc offline và chỉ GỬI ĐƯỢC sau khi có mạng: phải ghi
+/// đúng thời điểm phát hiện, không phải thời điểm gửi.
+bool isoNowMinus(uint32_t secondsAgo, char* outBuf, size_t outBufLen);
+
 }  // namespace net

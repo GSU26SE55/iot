@@ -3,6 +3,8 @@
 // ==================================================================
 #include "sensor/environmental_incident.h"
 
+#include "net/backoff.h"
+
 #if __has_include("config.h")
   #include "config.h"
 #else
@@ -29,6 +31,7 @@ char s_siteId[kSiteIdBufLen] = {0};
 constexpr size_t kIncidentPayloadBuf = 384;
 
 uint32_t s_reportOk   = 0;
+uint32_t s_dropped = 0;
 uint32_t s_reportFail = 0;
 
 }  // namespace
@@ -40,19 +43,22 @@ void envIncidentSetSiteId(const char* siteIdGuid) {
   Serial.printf("[env-incident] siteId set: %s\n", s_siteId);
 }
 
-bool envIncidentReport(IncidentType type, IncidentSeverity severity, const char* notes) {
+IncidentReportResult envIncidentReport(IncidentType type, IncidentSeverity severity,
+                                       const char* notes, uint32_t detectedSecondsAgo) {
   // Backend SiteId REQUIRED — chưa provision xong thì backend reject (400). Skip.
   if (s_siteId[0] == '\0') {
     Serial.println("[env-incident] siteId chưa set (provision chưa xong?) — skip report");
     s_reportFail++;
-    return false;
+    return IncidentReportResult::Transient;   // provision xong thì gửi được
   }
 
   char ts[24];
-  if (!net::isoNow(ts, sizeof(ts))) {
+  // GH-736 — ghi thời điểm PHÁT HIỆN, không phải thời điểm gửi. Sự cố phát hiện lúc mất
+  // mạng có thể chỉ gửi được hàng giờ sau.
+  if (!net::isoNowMinus(detectedSecondsAgo, ts, sizeof(ts))) {
     Serial.println("[env-incident] NTP chưa sync — skip report");
     s_reportFail++;
-    return false;
+    return IncidentReportResult::Transient;   // sync xong thì gửi được
   }
 
   char payload[kIncidentPayloadBuf];
@@ -70,7 +76,7 @@ bool envIncidentReport(IncidentType type, IncidentSeverity severity, const char*
   if (n == 0 || n >= sizeof(payload)) {
     Serial.println("[env-incident] payload serialize FAIL — buffer overflow");
     s_reportFail++;
-    return false;
+    return IncidentReportResult::Permanent;   // payload quá to: gửi lại vẫn thế
   }
 
   net::PostResult res = net::httpPostJson(BACKEND_ENV_INCIDENT_PATH, payload, n);
@@ -80,13 +86,31 @@ bool envIncidentReport(IncidentType type, IncidentSeverity severity, const char*
     Serial.printf("[env-incident] reported type=%d severity=%d (%d) [%lums]\n",
                   static_cast<int>(type), static_cast<int>(severity), res.httpCode,
                   static_cast<unsigned long>(res.durationMs));
-    return true;
+    return IncidentReportResult::Success;
   }
+
   s_reportFail++;
-  Serial.printf("[env-incident] report FAIL code=%d resp=\"%s\"\n",
+
+  // GH-741 — dùng lại đúng bảng phân loại của đường telemetry (net::isTransientFailure,
+  // Sprint 3) thay vì gộp mọi lỗi thành false. Trước đây 403 cũng bị retry mỗi tick:
+  // MQ-2 1s + rò nước 0,5s = ~180 request/phút, vô hạn, không bao giờ tự khỏi.
+  if (net::isTransientFailure(res.httpCode)) {
+    Serial.printf("[env-incident] report FAIL code=%d (tạm thời, sẽ thử lại) resp=\"%s\"\n",
+                  res.httpCode, res.responseSnippet);
+    return IncidentReportResult::Transient;
+  }
+
+  s_dropped++;
+  Serial.printf("[env-incident] report BỎ code=%d (vĩnh viễn) resp=\"%s\"\n",
                 res.httpCode, res.responseSnippet);
-  return false;
+  if (res.httpCode == 401 || res.httpCode == 403) {
+    Serial.println("[env-incident]   → nhiều khả năng API key thiếu scope EnvironmentalIngest,");
+    Serial.println("[env-incident]     hoặc thiết bị đã bị revoke. Kiểm tra provisioning.");
+  }
+  return IncidentReportResult::Permanent;
 }
+
+uint32_t envIncidentDroppedCount() { return s_dropped; }
 
 uint32_t envIncidentReportOkCount()   { return s_reportOk; }
 uint32_t envIncidentReportFailCount() { return s_reportFail; }

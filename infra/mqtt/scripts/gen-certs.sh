@@ -16,7 +16,8 @@
 #   ./infra/mqtt/scripts/gen-certs.sh --force                      # ghi đè cert cũ
 #
 # Sau khi chạy:
-#   1. Uncomment block `listener 8883` trong mosquitto.conf.
+#   1. (tự động) script sinh luôn `mosquitto/config/conf.d/tls.conf` khai listener 8883.
+#      KHÔNG còn bước uncomment tay trong mosquitto.conf.
 #   2. `docker compose restart mosquitto`.
 #   3. Test: mosquitto_pub -h localhost -p 8883 --cafile ca.crt -t test -m ok
 #   4. ESP32: copy ca.crt → firmware-esp32/data/ca_cert.pem
@@ -168,6 +169,80 @@ chmod 0600 "$CFG_CA" "$CFG_SRV"
 # Cleanup: giữ ca.cnf/server.cnf cho regen, xóa csr + ext + srl trung gian
 rm -f "$SRV_CSR" "$SRV_EXT" "$CERTS_DIR/ca.srl"
 
+# --- 6b) Sinh conf.d/tls.conf (2026-07-31) ---
+# Trước đây bước này là "uncomment tay block listener 8883 trong mosquitto.conf" → hoặc bị quên
+# (TLS không bao giờ bật), hoặc làm khi chưa có cert (broker fail to start). Nay listener TLS được
+# sinh RA CÙNG cert, nên hai thứ không bao giờ lệch nhau.
+#
+# Lưu ý Mosquitto 2.0 (đã kiểm chứng bằng broker thật 31/07/2026):
+#   - `password_file` và `acl_file` là option TOÀN CỤC. Khai lại trong conf.d sẽ làm broker CHẾT với
+#     "Error: Duplicate password_file value in configuration." ⇒ tls.conf KHÔNG được lặp 2 dòng này;
+#     chúng đã áp cho mọi listener, kể cả 8883.
+#   - `allow_anonymous` thì per-listener, nên VẪN phải khai trong tls.conf — thiếu nó là cổng 8883
+#     cho vào tự do trong khi 1883 vẫn siết.
+CONF_D="$(cd "$SCRIPT_DIR/../mosquitto/config" && pwd)/conf.d"
+mkdir -p "$CONF_D"
+cat > "$CONF_D/tls.conf" <<EOF
+# SINH TỰ ĐỘNG bởi scripts/gen-certs.sh — đừng sửa tay, chạy lại script để cập nhật.
+# Xoá file này (hoặc xoá certs/) là tắt TLS, broker vẫn chạy với cổng 1883.
+listener 8883 0.0.0.0
+cafile /mosquitto/certs/ca.crt
+certfile /mosquitto/certs/server.crt
+keyfile /mosquitto/certs/server.key
+require_certificate false
+tls_version tlsv1.2
+
+# allow_anonymous là per-listener ⇒ BẮT BUỘC khai cho 8883.
+# KHÔNG khai password_file/acl_file ở đây: chúng toàn cục, lặp lại là broker fail to start.
+allow_anonymous false
+EOF
+chmod 0644 "$CONF_D/tls.conf"
+
+echo ""
+# ------------------------------------------------------------------
+# IOT3-82 — sinh lại CA nhúng trong firmware.
+#
+# Vì sao BẮT BUỘC làm ở đây: firmware KHÔNG đọc CA từ LittleFS nữa (ảnh mklittlefs không mount
+# được nên phân vùng bị xoá mỗi lần boot), mà nhúng thẳng vào `src/net/ca_cert_embedded.h`.
+# Chạy lại script này mà quên cập nhật file đó thì broker có CA mới còn firmware vẫn giữ CA cũ,
+# và triệu chứng DUY NHẤT là bắt tay TLS hỏng với `-9984 X509 Certificate verification failed`
+# — không có dòng log nào nói rằng CA đã lệch.
+#
+# Chỉ ghi khi CA THẬT SỰ đổi: header này nằm trong git, ghi đè vô cớ tạo diff rác mỗi lần chạy.
+# ------------------------------------------------------------------
+EMBEDDED_CA_H="$(cd "$SCRIPT_DIR/../../.." && pwd)/firmware-esp32/src/net/ca_cert_embedded.h"
+
+if [ ! -f "$EMBEDDED_CA_H" ]; then
+  echo "[gen-certs] ⚠ KHÔNG thấy $EMBEDDED_CA_H — bỏ qua bước nhúng CA."
+  echo "[gen-certs]   Nếu bạn chạy script từ một bản checkout khác, hãy tự cập nhật file đó."
+elif grep -qF "$(sed -n '2p' "$CA_CRT")" "$EMBEDDED_CA_H" 2>/dev/null; then
+  echo "[gen-certs] CA nhúng trong firmware đã khớp ca.crt — không cần sinh lại."
+else
+  CA_HEADER_TMP="$(mktemp)"
+  {
+    sed -n '1,/^#pragma once$/p' "$EMBEDDED_CA_H"
+    echo ""
+    echo "// Không dùng PROGMEM: header này được include trước <Arduino.h> nên macro"
+    echo "// đó chưa tồn tại. Trên ESP32 hằng const nằm sẵn ở flash, không tốn RAM."
+    echo "static const char kMqttCaCert[] = R\"CERT("
+    cat "$CA_CRT"
+    echo ")CERT\";"
+  } > "$CA_HEADER_TMP"
+  mv "$CA_HEADER_TMP" "$EMBEDDED_CA_H"
+
+  echo "=============================================================="
+  echo "[gen-certs] ⚠⚠ CA ĐÃ ĐỔI — firmware PHẢI được build và nạp lại ⚠⚠"
+  echo ""
+  echo "  Đã cập nhật: $EMBEDDED_CA_H"
+  echo ""
+  echo "  Mọi thiết bị đang chạy firmware CŨ sẽ KHÔNG nối được broker nữa."
+  echo "  Triệu chứng: [mqtt] connect FAIL state=-2 và mbedTLS -9984."
+  echo ""
+  echo "    cd firmware-esp32 && pio run -e esp32-s3-real -t upload"
+  echo "    (hoặc đẩy OTA — xem Sprint 7)"
+  echo "=============================================================="
+fi
+
 echo ""
 # --- 7) Expiry awareness output ---
 SRV_EXPIRY=$(openssl x509 -in "$SRV_CRT" -noout -enddate | sed 's/notAfter=//')
@@ -193,7 +268,7 @@ echo "    × Email/Slack/Paste keys — secret leak."
 echo "    × Chạy gen-certs.sh bằng sudo/root — file sẽ owned by root, broker container không đọc được."
 echo ""
 echo "  Next steps:"
-echo "    1. Uncomment block 'listener 8883' trong mosquitto.conf"
+echo "    1. (đã tự động) conf.d/tls.conf vừa được sinh — KHÔNG cần sửa mosquitto.conf nữa"
 echo "    2. docker compose restart mosquitto"
 echo "    3. Test TLS:"
 echo "         mosquitto_pub -h $CN -p 8883 --cafile $CA_CRT \\"

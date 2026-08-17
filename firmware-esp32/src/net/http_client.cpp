@@ -14,15 +14,29 @@
 
 #include <Arduino.h>
 #include <HTTPClient.h>
+#include <WiFiClient.h>
 #include <WiFiClientSecure.h>
+#include <LittleFS.h>
+
+#include "net/tls_ca.h"
+#include "net/ca_cert_embedded.h"       // IOT3-23: CA nhúng dùng chung với mqtt_client
+#include "net/host_resolver.h"
+#include "core/net_config_rules.h"
 #include <string.h>
 
 #include "config/device_identity.h"     // S2-FW-01 + S2-FW-04: runtime credentials
+#include "config/runtime_config.h"
 
 #if __has_include("config.h")
   #include "config.h"
 #else
   #include "config.example.h"
+#endif
+
+// Backward compatibility for existing private config.h files created before
+// the shared HTTP/MQTT CA path was introduced.
+#ifndef TLS_CA_CERT_PATH
+  #define TLS_CA_CERT_PATH MQTT_CA_CERT_PATH
 #endif
 
 namespace net {
@@ -31,7 +45,56 @@ namespace {
 // Static để không cấp phát lại heap mỗi request — TLS handshake tốn 30–60kB heap;
 // reuse giúp keep-alive (cùng host).
 WiFiClientSecure s_tlsClient;
+WiFiClient       s_plainClient;
 bool             s_tlsConfigured = false;
+
+struct HttpTarget {
+  String url;
+  String originalAuthority;
+};
+
+HttpTarget buildHttpTarget(const char* path) {
+  const String base(runtimecfg::backendUrl());
+  HttpTarget target{base + (path ? path : ""), String()};
+
+  // Chỉ thay hostname bằng IP cho HTTP nội bộ. Với HTTPS phải giữ hostname
+  // để SNI/certificate verification khớp domain production.
+  constexpr const char* scheme = "http://";
+  if (!base.startsWith(scheme)) return target;
+
+  const int authorityStart = strlen(scheme);
+  int authorityEnd = base.indexOf('/', authorityStart);
+  if (authorityEnd < 0) authorityEnd = base.length();
+  const String authority = base.substring(authorityStart, authorityEnd);
+
+  // Portal không chấp nhận URL có userinfo. IPv6 literal cũng không phải `.local`,
+  // nên dấu ':' cuối cùng ở đây chính là separator của port nếu có.
+  int portSeparator = authority.lastIndexOf(':');
+  String host = portSeparator >= 0 ? authority.substring(0, portSeparator) : authority;
+  const String port = portSeparator >= 0 ? authority.substring(portSeparator) : String();
+  if (!core::isMdnsHostname(host.c_str())) return target;
+
+  IPAddress resolved;
+  if (!resolveMdnsHost(host.c_str(), resolved)) return target;
+
+  target.originalAuthority = authority;
+  target.url = base.substring(0, authorityStart) + resolved.toString() + port
+             + base.substring(authorityEnd) + (path ? path : "");
+  return target;
+}
+
+void addOriginalHostHeader(HTTPClient& http, const HttpTarget& target) {
+  if (target.originalAuthority.length() > 0) {
+    http.addHeader("Host", target.originalAuthority);
+  }
+}
+
+bool beginRequest(HTTPClient& http, const String& url) {
+  if (url.startsWith("https://")) return http.begin(s_tlsClient, url);
+  if (url.startsWith("http://")) return http.begin(s_plainClient, url);
+  Serial.printf("[http] unsupported URL scheme: %s\n", url.c_str());
+  return false;
+}
 
 size_t copyResponseFull(HTTPClient& http,
                         char* snippet, size_t snippetLen,
@@ -66,11 +129,13 @@ PostResult postJsonInternal(const char* path,
   if (outRespBytes) *outRespBytes = 0;
 
   if (!s_tlsConfigured) httpClientBegin();
+  if (!s_tlsConfigured) {          // GH-735 — không có CA thì không gửi đi đâu cả.
+    res.durationMs = 0;
+    return res;
+  }
 
-  String url;
-  url.reserve(96 + (path ? strlen(path) : 0));
-  url += BACKEND_URL;
-  url += path;
+  const HttpTarget target = buildHttpTarget(path);
+  const String& url = target.url;
 
   HTTPClient http;
   http.setReuse(true);
@@ -78,13 +143,14 @@ PostResult postJsonInternal(const char* path,
   http.setConnectTimeout(HTTP_TIMEOUT_MS);
 
   uint32_t t0 = millis();
-  if (!http.begin(s_tlsClient, url)) {
+  if (!beginRequest(http, url)) {
     Serial.printf("[http] begin() failed url=%s\n", url.c_str());
     res.durationMs = millis() - t0;
     return res;
   }
 
   // S2-FW-04: 2 header bắt buộc đọc từ identity store runtime.
+  addOriginalHostHeader(http, target);
   http.addHeader("Content-Type",   "application/json");
   http.addHeader("X-Api-Key",      identity::apiKey());
   http.addHeader("X-Device-Code",  identity::deviceCode());
@@ -135,11 +201,13 @@ PostResult httpGetJsonRecv(const char* path,
   if (outRespBytes) *outRespBytes = 0;
 
   if (!s_tlsConfigured) httpClientBegin();
+  if (!s_tlsConfigured) {          // GH-735 — không có CA thì không gửi đi đâu cả.
+    res.durationMs = 0;
+    return res;
+  }
 
-  String url;
-  url.reserve(96 + (path ? strlen(path) : 0));
-  url += BACKEND_URL;
-  url += path;
+  const HttpTarget target = buildHttpTarget(path);
+  const String& url = target.url;
 
   HTTPClient http;
   http.setReuse(true);
@@ -147,12 +215,13 @@ PostResult httpGetJsonRecv(const char* path,
   http.setConnectTimeout(HTTP_TIMEOUT_MS);
 
   uint32_t t0 = millis();
-  if (!http.begin(s_tlsClient, url)) {
+  if (!beginRequest(http, url)) {
     Serial.printf("[http] GET begin() failed url=%s\n", url.c_str());
     res.durationMs = millis() - t0;
     return res;
   }
 
+  addOriginalHostHeader(http, target);
   http.addHeader("X-Api-Key",     identity::apiKey());
   http.addHeader("X-Device-Code", identity::deviceCode());
   http.addHeader("Accept",        "application/json");
@@ -190,11 +259,13 @@ PostResult httpPutJson(const char* path, const char* body, size_t bodyLen) {
   res.responseSnippet[0] = '\0';
 
   if (!s_tlsConfigured) httpClientBegin();
+  if (!s_tlsConfigured) {          // GH-735 — không có CA thì không gửi đi đâu cả.
+    res.durationMs = 0;
+    return res;
+  }
 
-  String url;
-  url.reserve(96 + (path ? strlen(path) : 0));
-  url += BACKEND_URL;
-  url += path;
+  const HttpTarget target = buildHttpTarget(path);
+  const String& url = target.url;
 
   HTTPClient http;
   http.setReuse(true);
@@ -202,12 +273,13 @@ PostResult httpPutJson(const char* path, const char* body, size_t bodyLen) {
   http.setConnectTimeout(HTTP_TIMEOUT_MS);
 
   uint32_t t0 = millis();
-  if (!http.begin(s_tlsClient, url)) {
+  if (!beginRequest(http, url)) {
     Serial.printf("[http] PUT begin() failed url=%s\n", url.c_str());
     res.durationMs = millis() - t0;
     return res;
   }
 
+  addOriginalHostHeader(http, target);
   http.addHeader("Content-Type",  "application/json");
   http.addHeader("X-Api-Key",     identity::apiKey());
   http.addHeader("X-Device-Code", identity::deviceCode());
@@ -232,12 +304,92 @@ PostResult httpPutJson(const char* path, const char* body, size_t bodyLen) {
   return res;
 }
 
+namespace {
+
+// Cache CA PEM. setCACert() giữ CON TRỎ chứ không copy, nên chuỗi phải sống lâu hơn
+// mọi kết nối ⇒ static, không phải biến cục bộ.
+String s_caPem;
+bool   s_caLoaded    = false;
+bool   s_caAttempted = false;
+bool   s_insecureMode = false;
+
+tls::CaLoadStatus loadCaPemOnce() {
+  if (s_caLoaded) return tls::CaLoadStatus::Ok;
+  if (s_caAttempted && !s_caLoaded) return tls::CaLoadStatus::FileMissing;
+  s_caAttempted = true;
+
+  // IOT3-23 — ƯU TIÊN CA NHÚNG, giống hệt mqtt_client.cpp::loadCaCert().
+  //
+  // Trước đây đường HTTPS chỉ đọc LittleFS trong khi đường MQTT đã chuyển sang CA
+  // nhúng (ca_cert_embedded.h). Lý do phải nhúng — ghi ngay trong header đó — là
+  // "ảnh mklittlefs không mount được nên phân vùng bị xoá sạch mỗi lần boot, cuốn
+  // theo ca_cert.pem". Nếu điều đó đúng thì LittleFS.begin(false) ở dưới trả false,
+  // TLS_ALLOW_INSECURE=0 khiến httpConfigureTls() fail-closed, và postJsonInternal()
+  // return ngay ⇒ provision + heartbeat + OTA + đẩy bù hàng đợi CHẾT HẾT, trong khi
+  // telemetry vẫn chảy qua MQTT nên dashboard trông vẫn bình thường.
+  //
+  // Đặt CA nhúng TRƯỚC LittleFS (ngược với thứ tự "ưu tiên file để thay tại hiện
+  // trường") là có chủ ý: giữ hai đường TLS CÙNG MỘT logic quan trọng hơn, vì chính
+  // việc hai đường xử lý khác nhau đã tạo ra lỗ hổng này.
+  if (kMqttCaCert[0] != '\0' &&
+      tls::isLikelyPemCertificate(kMqttCaCert, strlen(kMqttCaCert))) {
+    s_caPem = String(kMqttCaCert);
+    s_caLoaded = true;
+    return tls::CaLoadStatus::Ok;
+  }
+
+  // formatOnFail=false CÓ CHỦ Ý: format sẽ xoá luôn hàng đợi offline và chính file CA
+  // (xem GH-936). Thà báo lỗi còn hơn tự ý xoá dữ liệu.
+  if (!LittleFS.begin(false)) return tls::CaLoadStatus::FilesystemUnavailable;
+  if (!LittleFS.exists(TLS_CA_CERT_PATH)) return tls::CaLoadStatus::FileMissing;
+
+  File f = LittleFS.open(TLS_CA_CERT_PATH, "r");
+  if (!f) return tls::CaLoadStatus::FileUnreadable;
+  s_caPem = f.readString();
+  f.close();
+
+  if (!tls::isLikelyPemCertificate(s_caPem.c_str(), s_caPem.length()))
+    return tls::CaLoadStatus::NotPemFormat;
+
+  s_caLoaded = true;
+  return tls::CaLoadStatus::Ok;
+}
+
+}  // namespace
+
+bool httpConfigureTls(WiFiClientSecure& client) {
+  const tls::CaLoadStatus st = loadCaPemOnce();
+  if (st == tls::CaLoadStatus::Ok) {
+    client.setCACert(s_caPem.c_str());
+    s_insecureMode = false;
+    return true;
+  }
+
+#if TLS_ALLOW_INSECURE
+  // Lối thoát dev — cố ý ồn ào để không ai vô tình để lọt lên production.
+  Serial.printf("[http] *** TLS KHÔNG VERIFY *** (%s). CHỈ dùng cho dev — "
+                "TLS_ALLOW_INSECURE=1.\n", tls::describe(st));
+  client.setInsecure();
+  s_insecureMode = true;
+  return true;
+#else
+  // GH-735 — FAIL CLOSED. Trước đây nhánh này gọi setInsecure(), nghĩa là thiếu CA thì
+  // firmware vẫn chạy nhưng nhận mọi chứng chỉ: kẻ đứng giữa trả về bản mô tả firmware
+  // giả kèm SHA khớp là thiết bị flash luôn. Không nạp được CA thì KHÔNG kết nối.
+  Serial.printf("[http] TLS FAIL: %s. Từ chối kết nối.\n", tls::describe(st));
+  Serial.printf("[http]   → copy CA vào data%s rồi `pio run -t uploadfs`\n", TLS_CA_CERT_PATH);
+  s_insecureMode = false;
+  return false;
+#endif
+}
+
+bool httpTlsIsInsecure() { return s_insecureMode; }
+
 void httpClientBegin() {
   if (s_tlsConfigured) return;
-  // PILOT: bỏ qua verify CA. Sprint 3+ phải set root CA.
-  s_tlsClient.setInsecure();
-  s_tlsConfigured = true;
-  Serial.println("[http] TLS configured (INSECURE — dev only)");
+  s_tlsConfigured = httpConfigureTls(s_tlsClient);
+  if (s_tlsConfigured)
+    Serial.println("[http] TLS configured (verify CA)");
 }
 
 PostResult httpPostJson(const char* path,

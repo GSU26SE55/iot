@@ -7,8 +7,12 @@
 #include <ArduinoJson.h>
 #include <string.h>
 
+#include "config/battery_map_runtime.h"
+#include "config/mqtt_config.h"
 #include "config/nvs_store.h"
+#include "core/source_tags.h"
 #include "net/http_client.h"
+#include "net/mqtt_client.h"
 #include "net/time_sync.h"
 
 #if __has_include("config.h")
@@ -33,6 +37,76 @@ void copySafe(char* dst, size_t dstLen, const char* src) {
   if (src == nullptr) { dst[0] = '\0'; return; }
   strncpy(dst, src, dstLen - 1);
   dst[dstLen - 1] = '\0';
+}
+
+/// <summary>IOT3-42 — nhận sáu trường MQTT trong `data` và áp vào `mqttcfg`.</summary>
+/// <remarks>
+/// Backend cam kết trả "cả sáu trường hoặc không trường nào" (`IotDeviceProvisionResultDto`),
+/// nên `mqttBrokerHost` rỗng/null là cờ duy nhất cần xét: nghĩa là `Mqtt:Enabled=false`.
+/// Trường hợp đó KHÔNG ghi đè NVS — thiết bị đã từng được cấp credential rồi mà backend tạm tắt
+/// MQTT thì xoá đi là lần bật lại phải provision thủ công.
+/// </remarks>
+void applyMqttFromProvision(JsonObject data) {
+  const char* brokerHost = data["mqttBrokerHost"] | "";
+  if (brokerHost[0] == '\0') {
+    Serial.println("[provision] MQTT chưa bật ở backend — HTTPS-only (giữ nguyên cấu hình cũ)");
+    return;
+  }
+
+  const int   brokerPort = data["mqttBrokerPort"]  | 0;
+  const bool  useTls     = data["mqttUseTls"]      | false;
+  const char* prefix     = data["mqttTopicPrefix"] | "";
+  const char* user       = data["mqttUsername"]    | "";
+  const char* pass       = data["mqttPassword"]    | "";
+
+  if (!mqttcfg::applyFromProvision(brokerHost, brokerPort, useTls,
+                                   prefix[0] == '\0' ? nullptr : prefix, user, pass)) {
+    // Không đổi (đã đúng sẵn) hoặc bị từ chối — `applyFromProvision` đã log lý do.
+    // Vẫn phải cho `mqttApplyConfig()` chạy MỘT lần: nhánh này gặp cả ở boot đã-provision, khi
+    // MQTT chưa hề được khởi tạo. Hàm đó tự nhận biết và chỉ init nếu chưa init.
+    net::mqttApplyConfig();
+    return;
+  }
+  net::mqttApplyConfig();
+}
+
+/// <summary>IOT3-49 — nhận `batteryMappings[]` và ghi vào bảng runtime.</summary>
+void applyBatteryMappingsFromProvision(JsonObject data) {
+  JsonArray arr = data["batteryMappings"].as<JsonArray>();
+  if (arr.isNull()) {
+    Serial.println("[provision] response không có batteryMappings[] — giữ bảng pin đang dùng");
+    return;
+  }
+
+  core::BatteryMapEntry entries[core::kMaxBatteryMapEntries];
+  size_t n = 0;
+  size_t skipped = 0;
+  for (JsonObject item : arr) {
+    if (n >= core::kMaxBatteryMapEntries) { ++skipped; continue; }
+
+    const char* serial = item["batteryAssetSerial"] | "";
+    const int   unitId = item["unitId"]             | 0;
+    const char* code   = item["sensorSourceCode"]   | core::kSourceCodePrimary;
+
+    const auto err = core::validateBatteryMapEntry(serial, unitId, code);
+    if (err != core::BatteryMapError::Ok) {
+      Serial.printf("[provision] BỎ mapping serial='%s' unitId=%d — %s\n",
+                    serial, unitId, core::describeBatteryMapError(err));
+      ++skipped;
+      continue;
+    }
+
+    core::BatteryMapEntry& e = entries[n++];
+    copySafe(e.serial, sizeof(e.serial), serial);
+    copySafe(e.sensorSourceCode, sizeof(e.sensorSourceCode), code);
+    e.unitId = static_cast<uint8_t>(unitId);
+  }
+
+  if (skipped > 0) {
+    Serial.printf("[provision] ⚠ %u mapping bị BỎ QUA — số liệu của những pin đó sẽ KHÔNG được gửi\n",
+                  static_cast<unsigned>(skipped));
+  }
+  batmap::applyFromProvision(entries, n);
 }
 }  // namespace
 
@@ -88,8 +162,13 @@ bool runProvisionFlow(const char* firmwareVersion,
     return false;
   }
 
-  // 2) POST với response buffer 2KB (configJson có thể chứa BatteryMappings list)
-  char respBuf[2048];
+  // 2) POST với response buffer 4KB.
+  //
+  // IOT3-43 — nâng từ 2048. `batteryMappings[]` + `supportedSensors[]` đã ăn gần hết 2KB cũ; sáu
+  // trường MQTT (host/port/tls/prefix/user/pass) thêm ~200 byte nữa là tràn. Tràn ở đây KHÔNG nổ
+  // ầm ĩ: `httpPostJsonRecv` cắt cụt, JSON thành sai cú pháp, và thông báo duy nhất là
+  // "[provision] FAIL: parse JSON IncompleteInput" — nhìn hệt như lỗi mạng.
+  char respBuf[4096];
   size_t respLen = 0;
   Serial.printf("[provision] POST %s body=%u bytes\n",
                 kEndpoint, static_cast<unsigned>(bodyLen));
@@ -150,7 +229,14 @@ bool runProvisionFlow(const char* firmwareVersion,
   copySafe(outConfig.siteId,    sizeof(outConfig.siteId),    siteId);
   copySafe(outConfig.ntpServer, sizeof(outConfig.ntpServer), ntpServer);
 
-  // 6) Log theo S2-FW-02 AC: "provisioned, polling=5s"
+  // 6) IOT3-42 — sáu trường MQTT. Backend cam kết "cả sáu hoặc không trường nào"
+  //    (IotDeviceProvisionResultDto), nên chỉ cần lấy `mqttBrokerHost` làm cờ.
+  applyMqttFromProvision(data);
+
+  // 7) IOT3-49 — bảng ánh xạ pin. Backend đã trả từ IoT-2 nhưng trước đây bị bỏ qua hoàn toàn.
+  applyBatteryMappingsFromProvision(data);
+
+  // 8) Log theo S2-FW-02 AC: "provisioned, polling=5s"
   Serial.printf("[provision] provisioned, polling=%ds, heartbeat=%ds, site=%s, ntp=%s\n",
                 pollSec, hbSec, siteId, ntpServer);
   return true;
