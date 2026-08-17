@@ -196,15 +196,23 @@ pipeline {
                         sh '''
                             set -eu
 
+                            # PlatformIO materializes upstream build caches and development-only
+                            # dependency metadata under .pio. Scan the repository inputs, not those
+                            # generated files or the firmware binaries archived by the prior stage.
                             trivy fs \
                               --ignore-unfixed \
                               --exit-code 1 \
                               --severity HIGH,CRITICAL \
                               --scanners vuln,secret,misconfig \
+                              --skip-dirs firmware-esp32/.pio \
+                              --skip-dirs firmware-artifacts \
                               --format json \
                               --output trivy-iot-fs.json \
                               .
-                            syft dir:. -o cyclonedx-json=sbom-iot.cdx.json
+                            syft dir:. \
+                              --exclude './firmware-esp32/.pio/**' \
+                              --exclude './firmware-artifacts/**' \
+                              -o cyclonedx-json=sbom-iot.cdx.json
                         '''
                     }
                     post {
