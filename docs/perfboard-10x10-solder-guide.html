@@ -1,0 +1,793 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sơ đồ hàn PY-10×10CM — Node ESP32-S3 giám sát pin (UART trực tiếp)</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#eef2f7; --bg2:#ffffff; --bg3:#f1f5f9; --line:#d8e0e9;
+  --tx:#0f1b2a; --tx2:#4a5a6b; --tx3:#8496a8;
+  --acc:#0e9f6e; --acc2:#1570ef; --warn:#b54708; --dan:#d92d20;
+  --mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+}
+body{background:var(--bg);color:var(--tx);font:14px/1.55 "Segoe UI",system-ui,-apple-system,sans-serif;overflow:hidden}
+kbd{font:11px var(--mono);background:var(--bg3);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 5px}
+
+#app{display:grid;grid-template-rows:auto 1fr auto;height:100vh}
+
+header{display:flex;align-items:center;gap:16px;padding:11px 18px;background:#fff;border-bottom:1px solid var(--line)}
+header h1{font-size:15px;font-weight:650;letter-spacing:.2px;white-space:nowrap}
+header .sub{font-size:11.5px;color:var(--tx3);white-space:nowrap}
+header .grow{flex:1}
+.badge{font:11px var(--mono);background:var(--bg3);border:1px solid var(--line);padding:3px 9px;border-radius:99px;color:var(--tx2);white-space:nowrap}
+.badge b{color:var(--acc)}
+
+#main{display:grid;grid-template-columns:225px minmax(0,1fr) 320px;min-height:0}
+@media(max-width:1280px){#main{grid-template-columns:195px minmax(0,1fr) 270px}}
+@media(max-width:1000px){
+  #main{grid-template-columns:1fr;grid-template-rows:auto 56vh 1fr}
+  #steplist{display:flex;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line)}
+  #steplist .grp{display:none}
+  .sitem{white-space:nowrap}
+  #panel{border-left:0;border-top:1px solid var(--line)}
+}
+
+#steplist{background:#fff;border-right:1px solid var(--line);overflow-y:auto;padding:8px 0}
+#steplist .grp{font:10.5px var(--mono);letter-spacing:.12em;color:var(--tx3);padding:12px 14px 6px;text-transform:uppercase}
+.sitem{display:flex;gap:10px;align-items:flex-start;padding:7px 12px 7px 14px;cursor:pointer;border-left:3px solid transparent;color:var(--tx2);font-size:12.6px}
+.sitem:hover{background:#f0f5fb;color:var(--tx)}
+.sitem .n{flex:0 0 20px;height:20px;border-radius:50%;background:var(--bg3);border:1px solid var(--line);font:10.5px/18px var(--mono);text-align:center;color:var(--tx3)}
+.sitem.done .n{background:#d9f5e8;border-color:#7fd6b4;color:#08744f}
+.sitem.cur{background:#e7f0fe;border-left-color:var(--acc2);color:#0b3a78;font-weight:650}
+.sitem.cur .n{background:var(--acc2);border-color:var(--acc2);color:#fff;font-weight:700}
+
+#stage{position:relative;overflow:auto;background:#e6ecf3;display:flex;align-items:center;justify-content:center;padding:8px}
+#pcb{width:100%;height:100%;max-width:min(100%,98vh)}
+#legend{position:absolute;left:14px;bottom:12px;display:flex;flex-wrap:wrap;gap:6px 12px;max-width:64%;
+  background:#ffffffee;border:1px solid var(--line);border-radius:8px;padding:8px 11px;box-shadow:0 2px 8px #0b1b2e14}
+#legend span{font:10.5px var(--mono);color:var(--tx2);display:flex;align-items:center;gap:5px}
+#legend i{width:15px;height:3px;border-radius:2px;display:inline-block}
+#viewctl{position:absolute;right:14px;top:12px;display:flex;gap:6px}
+#viewctl button{font:11px var(--mono);background:#fff;border:1px solid var(--line);color:var(--tx2);border-radius:6px;padding:5px 9px;cursor:pointer;box-shadow:0 1px 3px #0b1b2e12}
+#viewctl button:hover{color:var(--tx);border-color:var(--acc2)}
+#viewctl button.on{color:#fff;background:var(--acc2);border-color:var(--acc2);font-weight:700}
+
+#panel{background:#fff;border-left:1px solid var(--line);overflow-y:auto;padding:16px 16px 40px}
+#panel h2{font-size:16px;margin-bottom:2px;line-height:1.3}
+#panel .stepno{font:10.5px var(--mono);letter-spacing:.14em;color:var(--acc2);text-transform:uppercase;margin-bottom:8px}
+#panel .desc{color:var(--tx2);font-size:13px;margin:10px 0 4px}
+#panel .desc ul,#panel .desc ol{margin:6px 0 6px 18px}
+#panel .desc li{margin:3px 0}
+#panel .desc b{color:var(--tx)}
+#panel .desc code{font:11.5px var(--mono);background:#eef4fb;padding:1px 5px;border-radius:4px;color:#0b4a9c}
+.note{border-left:3px solid var(--warn);background:#fff7ed;color:#7c3a06;padding:8px 10px;border-radius:0 6px 6px 0;font-size:12.3px;margin:10px 0}
+.note b{color:#5c2b04}
+.note.dan{border-color:var(--dan);background:#fef3f2;color:#912018}
+.note.dan b{color:#7a271a}
+.note.ok{border-color:var(--acc);background:#ecfdf5;color:#05603a}
+.note.ok b{color:#04432a}
+h3.sec{font:10.5px var(--mono);letter-spacing:.14em;color:var(--tx3);text-transform:uppercase;margin:18px 0 7px;border-top:1px solid var(--line);padding-top:12px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:5px 6px;border-bottom:1px solid #e8eef4;vertical-align:top}
+th{color:var(--tx3);font:10.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;font-weight:400}
+td.k{font:11.5px var(--mono);color:#0b4a9c;white-space:nowrap}
+td.d{color:var(--tx2)}
+.chip{display:inline-block;font:10.5px var(--mono);border-radius:4px;padding:1px 6px;border:1px solid;font-weight:700}
+
+footer{display:flex;align-items:center;gap:14px;padding:10px 18px;background:#fff;border-top:1px solid var(--line)}
+footer button{font:13px/1 "Segoe UI",sans-serif;font-weight:600;background:var(--bg3);border:1px solid var(--line);color:var(--tx);
+  padding:9px 18px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:7px}
+footer button:hover:not(:disabled){border-color:var(--acc2);color:var(--acc2)}
+footer button:disabled{opacity:.4;cursor:not-allowed}
+footer button.pri{background:var(--acc2);border-color:var(--acc2);color:#fff}
+footer button.pri:hover:not(:disabled){color:#fff;background:#0e5fd8}
+#bar{flex:1;height:6px;background:#e3eaf2;border-radius:99px;overflow:hidden}
+#barin{height:100%;width:0;background:linear-gradient(90deg,var(--acc2),var(--acc));transition:width .25s}
+#pos{font:12px var(--mono);color:var(--tx2);white-space:nowrap}
+.hint{font-size:11px;color:var(--tx3);white-space:nowrap}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>🔧 Sơ đồ hàn PY-10×10CM — Node ESP32-S3 giám sát pin</h1>
+    <span class="sub">35 cột × 36 hàng · 2.54 mm · đọc BMS bằng <b>UART trực tiếp</b></span>
+    <span class="grow"></span>
+    <span class="badge">Chân theo <b>config.h</b></span>
+  </header>
+
+  <div id="main">
+    <nav id="steplist"></nav>
+    <div id="stage">
+      <svg id="pcb" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div id="viewctl">
+        <button id="btnLabel">Nhãn mọi bước</button>
+        <button id="btnGrid" class="on">Toạ độ</button>
+        <button id="btnAll">Hiện tất cả</button>
+      </div>
+      <div id="legend"></div>
+    </div>
+    <aside id="panel"></aside>
+  </div>
+
+  <footer>
+    <button id="prev">◀ Lùi</button>
+    <button id="next" class="pri">Tiến ▶</button>
+    <div id="bar"><div id="barin"></div></div>
+    <span id="pos"></span>
+    <span class="hint">⟵ ⟶ để chuyển bước</span>
+  </footer>
+</div>
+<script>
+/* ============================================================
+   BOARD: PY-10*10CM 2.54MM — 35 cột (số 01..35) × 36 hàng (chữ A..Z rồi A..J)
+   Toạ độ trong tài liệu dùng SỐ cho cả 2 trục: (cột, hàng), hàng 1 = A.
+   Chữ trên silk lặp lại 2 vòng nên không dùng làm địa chỉ chính.
+   ============================================================ */
+const COLS=35, ROWS=36, P=30, M=58;
+const W=M*2+(COLS-1)*P, H=M*2+(ROWS-1)*P;
+const X=c=>M+(c-1)*P, Y=r=>M+(r-1)*P;
+const ROWL=i=>i<=26?String.fromCharCode(64+i):String.fromCharCode(64+i-26)+'′';
+
+const C={v5:'#d92d20',v33:'#dc6803',gnd:'#475467',dig:'#1570ef',ana:'#7839ee',bus:'#067647',spi:'#92400e',hv:'#be185d'};
+const LEGEND=[['v5','5V (đỏ)'],['v33','3V3 (cam)'],['gnd','GND (xám)'],['dig','Tín hiệu số'],
+  ['bus','UART tới BMS'],['spi','SPI thẻ nhớ'],['ana','Analog / ADC'],['hv','Dây đo áp pack ≈29V']];
+
+/* ---------- ESP32-S3 DevKitC-1 ---------- */
+const ESP_L=['3V3','3V3','RST','IO4','IO5','IO6','IO7','IO15','IO16','IO17','IO18','IO8','IO19','IO20','IO3','IO46','IO9','IO10','IO11','IO12','IO13','IO14'];
+const ESP_R=['GND','GND','5V','IO43','IO44','IO1','IO2','IO42','IO41','IO40','IO39','IO38','IO37','IO36','IO35','IO0','IO45','IO48','IO47','IO21','GND','GND'];
+const ESP_USE={'3V3':'ra 3V3','IO4':'DS18B20','IO5':'SD MOSI','IO7':'SD MISO','IO8':'I2C SDA','IO9':'I2C SCL',
+  'IO14':'SD CS','IO17':'UART TX','IO18':'UART RX','5V':'nguồn vào','GND':'mass',
+  'IO1':'MQ-2 AO','IO2':'rò nước','IO21':'SD SCK'};
+const ESP_TOP=11;
+
+/* ---------- VÙNG ---------- */
+const ZONES=[
+ {id:'Z1',step:1,c:1,r:2,w:22,h:5, t:'VÙNG NGUỒN — jack DC 5V · cầu chì · tụ lọc',col:'#ff5c5c'},
+ {id:'Z2',step:1,c:1,r:7,w:35,h:3, t:'3 RAIL: 5V / GND / 3V3',col:'#ffb020'},
+ {id:'Z3',step:1,c:1,r:10,w:10,h:25,t:'VÙNG SỐ — UART · 1-Wire · thẻ SD',col:'#38bdf8'},
+ {id:'Z4',step:1,c:11,r:10,w:12,h:25,t:'VÙNG MCU',col:'#3ddc97',lb:1},
+ {id:'Z5',step:1,c:23,r:10,w:13,h:25,t:'VÙNG CẢM BIẾN / ANALOG',col:'#c084fc',lb:2}
+];
+
+/* ---------- CHÚ THÍCH NGAY TRÊN HÌNH (giải thích nhanh, khỏi phải đọc panel) ---------- */
+const ANNOT=[
+ {step:12,c:22,r:23,col:'ana',lines:['CHIA ÁP: R4+R5 nối tiếp','5V → 3.33V (tỉ lệ 20⁄30)','● = điểm giữa, câu ra ADC']},
+];
+
+/* ---------- BUS: dây đồng trần 0.8mm hàn dọc theo lỗ ---------- */
+const BUS=[
+ {id:'RAIL5V', step:3,a:[1,7], b:[35,7], col:'v5', t:'RAIL 5V'},
+ {id:'RAILGND',step:3,a:[1,8], b:[35,8], col:'gnd',t:'RAIL GND (chính)'},
+ {id:'RAIL3V3',step:3,a:[1,9], b:[35,9], col:'v33',t:'RAIL 3V3'},
+ {id:'SP2', step:4,a:[2,10], b:[2,34], col:'gnd',t:'GND dọc — cạnh trái'},
+ {id:'SP10',step:4,a:[10,10],b:[10,34],col:'gnd',t:'GND dọc — vùng số'},
+ {id:'SP22',step:4,a:[22,10],b:[22,34],col:'gnd',t:'GND dọc — cạnh phải MCU'},
+ {id:'SP33',step:4,a:[33,10],b:[33,34],col:'gnd',t:'GND dọc — vùng cảm biến'},
+ {id:'RAILGS',step:4,a:[1,34],b:[35,34],col:'gnd',t:'RAIL GND cảm biến (đáy)'}
+];
+
+/* ---------- LINH KIỆN ---------- */
+const PARTS=[
+ {id:'ESP32',step:2,kind:'mcu',c:11.45,r:10.45,w:10.1,h:22.1,t:'ESP32-S3 DevKitC-1 (N16R8)',
+  sub:'2 socket cái 22 chân · 2 hàng cách 9 ô = 22.86 mm'},
+
+ {id:'JDC',step:5,kind:'mod',c:2,r:2,w:5,h:5,t:'J-DC 5.5×2.5',sub:'jack adapter 5V/3A · center-positive',
+   pinsR:[['+',6,3],['−',6,5]]},
+ {id:'F1', step:5,kind:'fuse',a:[9,3],b:[12,3],t:'F1',sub:'cầu chì / polyfuse 2A trên đường +5V'},
+
+ {id:'C1',step:6,kind:'ecap',c:15,r:3.6,w:3,h:3,t:'C1 1000µF/16V',sub:'chống sụt áp khi WiFi phát',pinsR:[['+',16,7],['−',17,8]]},
+ {id:'C2',step:6,kind:'cap',c:19.6,r:4.6,w:2,h:2,t:'C2 100nF',sub:'lọc cao tần cho rail',pinsR:[['+',20,7],['−',21,8]]},
+ {id:'C8',step:6,kind:'cap',c:23.3,r:13.4,w:1.8,h:1.8,t:'C8 100nF',sub:'sát chân 5V của ESP32',pinsR:[['5V',24,13],['G',24,14]]},
+
+ {id:'XBMS',step:7,kind:'term',c:1,r:18,n:3,t:'X2 · cổng UART BMS',
+   sub:'Terminal 3P — chỉ GND/RX/TX, KHÔNG có chân nguồn',pins:['GND','BMS-RX','BMS-TX']},
+ {id:'R6',step:7,kind:'res',a:[5,20],b:[8,20],t:'R6 1kΩ',sub:'nối tiếp bảo vệ đường ESP32 TX'},
+ {id:'R7',step:7,kind:'res',a:[5,21],b:[8,21],t:'R7 1kΩ',sub:'nối tiếp bảo vệ đường ESP32 RX'},
+ {id:'R8',step:7,kind:'res',a:[9,22],b:[9,25],t:'R8 20kΩ',sub:'CHỈ hàn nếu đo được BMS TX = 5V (xem ghi chú)',opt:1},
+
+ {id:'XDS',step:9,kind:'term',c:1,r:13,n:3,t:'X3',sub:'Terminal 3P → DS18B20',pins:['3V3','DATA','GND']},
+ {id:'R2',step:9,kind:'res',a:[3,11],b:[3,14],t:'R2 4.7kΩ',sub:'pull-up 1-Wire — thiếu là không đọc được'},
+
+ {id:'JINA',step:10,kind:'hdr',c:25,r:17,n:8,t:'J-INA226',sub:'HW-899 · I2C 0x40 · board thật có 8 chân',
+   pins:['VCC','GND','SCL','SDA','ALE','VBS','IN−','IN+'],unused:['IN−','IN+']},
+ {id:'JSHT',step:10,kind:'hdr',c:29,r:17,n:4,t:'J-SHT3X',sub:'I2C 0x44',pins:['VCC','GND','SCL','SDA']},
+
+ {id:'R3',step:11,kind:'res',a:[27,22],b:[30,22],t:'R3 120Ω',sub:'nối tiếp dây cảm biến VBS'},
+ {id:'XVBS',step:11,kind:'term',c:35,r:22,n:2,t:'X4',sub:'Terminal 2P → cực pack (≈29V)',pins:['PACK+','PACK−']},
+
+ {id:'XMQ',step:12,kind:'term',c:35,r:26,n:4,t:'X5',sub:'Terminal 4P → MQ-2 (chạy 5V) · board thật có 4 chân',
+   pins:['5V','GND','AO','DO'],unused:['DO']},
+ {id:'R4',step:12,kind:'res',a:[28,28],b:[31,28],t:'R4 10kΩ',sub:'nhánh trên bộ chia áp'},
+ {id:'R5',step:12,kind:'res',a:[28,29],b:[28,32],t:'R5 20kΩ',sub:'nhánh dưới → GND (5V×20/30 ≈ 3.3V)'},
+ {id:'C3',step:12,kind:'cap',c:23.5,r:16.6,w:1.8,h:1.8,t:'C3 100nF',sub:'lọc nhiễu ADC, sát chân IO1',pinsR:[['S',24,16],['G',24,17]]},
+
+ {id:'XW',step:13,kind:'term',c:35,r:30,n:4,t:'X6',sub:'Terminal 4P → cảm biến mưa LM393 (3V3!) · board thật có 4 chân',
+   pins:['AO','3V3','GND','DO'],unused:['AO']},
+
+ {id:'U3',step:14,kind:'mod',c:3,r:25,w:6,h:8,t:'U3 · module microSD',sub:'HS0724 · chỉ 3.3V',
+   pinsR:[['CS',8,26],['SCK',8,27],['MOSI',8,28],['MISO',8,29],['VCC',8,30],['GND',8,31]]},
+ {id:'C7',step:14,kind:'ecap',c:8.7,r:30.4,w:2,h:3,lt:'below',t:'C7 100µF',sub:'chống sụt áp khi ghi thẻ',pinsR:[['+',9,30],['−',10,32]]}
+];
+
+/* ---------- DÂY: dây bọc nhựa 24AWG, chỉ hàn ở 2 đầu ---------- */
+const WIRES=[
+ {id:'h2', step:4,col:'gnd',p:[[2,10],[2.5,9.5],[2.5,8.5],[2,8]],t:'GND dọc → rail GND (nhảy qua rail 3V3)'},
+ {id:'h10',step:4,col:'gnd',p:[[10,10],[10.5,9.5],[10.5,8.5],[10,8]],t:'GND dọc → rail GND'},
+ {id:'h22',step:4,col:'gnd',p:[[22,10],[22.5,9.5],[22.5,8.5],[22,8]],t:'GND dọc → rail GND'},
+ {id:'h33',step:4,col:'gnd',p:[[33,10],[33.5,9.5],[33.5,8.5],[33,8]],t:'GND dọc → rail GND'},
+
+ {id:'w1',step:5,col:'v5', p:[[6,3],[9,3]],t:'Jack DC (+) → cầu chì',th:5},
+ {id:'w2',step:5,col:'v5', p:[[12,3],[12,7]],t:'cầu chì → rail 5V',th:5},
+ {id:'w3',step:5,col:'gnd',p:[[6,5],[6,8]],t:'Jack DC (−) → rail GND',th:5},
+
+ {id:'w9', step:6,col:'v5', p:[[21,7],[21,13]],t:'rail 5V → ESP32 5V'},
+ {id:'w10',step:6,col:'gnd',p:[[21,11],[22,11]],t:'ESP32 GND → GND dọc'},
+ {id:'w11',step:6,col:'gnd',p:[[21,12],[22,12]],t:'ESP32 GND → GND dọc'},
+ {id:'w12',step:6,col:'gnd',p:[[21,31],[22,31]],t:'ESP32 GND → GND dọc'},
+ {id:'w13',step:6,col:'gnd',p:[[21,32],[22,32]],t:'ESP32 GND → GND dọc'},
+ {id:'w14',step:6,col:'v33',p:[[12,11],[12,9]],t:'ESP32 3V3 (ngõ ra) → rail 3V3'},
+ {id:'w15',step:6,col:'v5', p:[[24,13],[21,13]],t:'C8 → chân 5V'},
+ {id:'w16',step:6,col:'gnd',p:[[24,14],[22,14]],t:'C8 → GND dọc'},
+
+ {id:'w17',step:7,col:'gnd',p:[[1,18],[2,18]],t:'X2.GND → GND dọc — BẮT BUỘC, mass chung với BMS',th:5},
+ {id:'w18',step:7,col:'bus',p:[[1,19],[5,20]],t:'X2.BMS-RX → R6'},
+ {id:'w19',step:7,col:'bus',p:[[1,20],[5,21]],t:'X2.BMS-TX → R7'},
+ {id:'w20',step:7,col:'bus',p:[[8,21],[9,22]],t:'nút R7 → R8 (chỉ khi lắp R8)',dash:1},
+ {id:'w21',step:7,col:'gnd',p:[[9,25],[10,25]],t:'R8 → GND dọc (chỉ khi lắp R8)',dash:1},
+
+ {id:'w22',step:8,col:'bus',p:[[8,20],[12,20]],t:'R6 → IO17 (ESP32 TX → BMS RX)'},
+ {id:'w23',step:8,col:'bus',p:[[8,21],[12,21]],t:'R7 → IO18 (BMS TX → ESP32 RX)'},
+
+ {id:'w24',step:9,col:'v33',p:[[3,11],[3,9]],t:'R2 4.7kΩ → rail 3V3'},
+ {id:'w25',step:9,col:'dig',p:[[1,14],[12,14]],t:'DATA → IO4 (chân dưới R2 hàn chung lỗ (3,14))'},
+ {id:'w26',step:9,col:'v33',p:[[1,13],[1,10],[1,9]],t:'X3.3V3 → rail 3V3'},
+ {id:'w27',step:9,col:'gnd',p:[[1,15],[2,15]],t:'X3.GND → GND dọc'},
+
+ {id:'w28',step:10,col:'dig',p:[[12,22],[23,22],[23,20],[25,20]],t:'IO8 SDA → J-INA.SDA — làn trên, đừng để chạm làn SCL bên dưới'},
+ {id:'w29',step:10,col:'dig',p:[[25,20],[29,20]],t:'SDA → J-SHT.SDA'},
+ {id:'w30',step:10,col:'dig',p:[[12,27],[24,27],[24,19],[25,19]],t:'IO9 SCL → J-INA.SCL — làn dưới, tách hẳn khỏi làn SDA phía trên'},
+ {id:'w31',step:10,col:'dig',p:[[25,19],[29,19]],t:'SCL → J-SHT.SCL'},
+ {id:'w32',step:10,col:'v33',p:[[25,17],[26,16],[26,10],[26,9]],t:'J-INA.VCC → rail 3V3'},
+ {id:'w33',step:10,col:'v33',p:[[29,17],[30,16],[30,10],[30,9]],t:'J-SHT.VCC → rail 3V3'},
+ {id:'w34',step:10,col:'gnd',p:[[25,18],[29,18]],t:'GND I2C nối chuỗi'},
+ {id:'w35',step:10,col:'gnd',p:[[29,18],[33,18]],t:'GND I2C → GND dọc phải'},
+
+ {id:'w36',step:11,col:'hv',p:[[25,22],[27,22]],t:'J-INA.VBS → R3 120Ω'},
+ {id:'w37',step:11,col:'hv',p:[[30,22],[35,22]],t:'R3 → X4.PACK+ (≈29V — bọc gen co nhiệt)'},
+ {id:'w38',step:11,col:'gnd',p:[[35,23],[33,23]],t:'X4.PACK− → GND dọc phải'},
+
+ {id:'w39',step:12,col:'v5', p:[[35,26],[32,26],[32,10],[32,7]],t:'rail 5V → X5.5V (MQ-2 cần 5V)'},
+ {id:'w40',step:12,col:'gnd',p:[[35,27],[33,27]],t:'X5.GND → GND dọc phải'},
+ {id:'w41',step:12,col:'ana',p:[[35,28],[31,28]],t:'AO (mức 5V) → R4 10kΩ — giữ thật ngắn'},
+ {id:'w42',step:12,col:'ana',p:[[28,28],[28,29]],t:'điểm chia áp → R5 20kΩ'},
+ {id:'w43',step:12,col:'gnd',p:[[28,32],[28,34]],t:'R5 → rail GND cảm biến'},
+ {id:'w44',step:12,col:'ana',p:[[28,28],[23,28],[23,16],[24,16]],t:'điểm chia (≈3.3V) → C3'},
+ {id:'w45',step:12,col:'ana',p:[[24,16],[21,16]],t:'C3 → IO1 (ADC1_CH0)'},
+ {id:'w46',step:12,col:'gnd',p:[[24,17],[24.6,17],[24.6,15],[22,15]],t:'C3 → GND dọc — vòng tránh dây analog ở cột 23'},
+
+ {id:'w47',step:13,col:'v33',p:[[35,31],[34,31],[34,10],[34,9]],t:'rail 3V3 → X6.3V3 (tuyệt đối không cấp 5V)'},
+ {id:'w48',step:13,col:'gnd',p:[[35,32],[33,32]],t:'X6.GND → GND dọc phải'},
+ {id:'w49',step:13,col:'dig',p:[[35,33],[22.6,33],[22.6,17.5],[21,17]],t:'DO → IO2 (INPUT_PULLUP, ướt = LOW)'},
+
+ {id:'w50',step:14,col:'spi',p:[[8,26],[11,26],[11,32],[12,32]],t:'CS → IO14 — làn cột 11'},
+ {id:'w51',step:14,col:'spi',p:[[8,27],[14,27],[14,33],[21,33],[21,30]],t:'SCK → IO21 — làn cột 14, tách hẳn 3 dây kia'},
+ {id:'w52',step:14,col:'spi',p:[[8,28],[9,28],[9,15],[12,15]],t:'MOSI → IO5 — làn cột 9'},
+ {id:'w53',step:14,col:'spi',p:[[8,29],[9.6,29],[9.6,17],[12,17]],t:'MISO → IO7 — làn cột 9.6, đi ngoài làn MOSI'},
+ {id:'w54',step:14,col:'v33',p:[[8,30],[13,30],[13,9]],t:'SD VCC → rail 3V3 — làn cột 13, tránh chạy sát 4 dây SPI'},
+ {id:'w55',step:14,col:'gnd',p:[[8,31],[10,31]],t:'SD GND → GND dọc'},
+ {id:'w56',step:14,col:'v33',p:[[9,30],[8,30]],t:'C7 (+) → SD VCC'}
+];
+
+/* ---------- NETLIST ---------- */
+const NET=[
+ ['IO17','X2.BMS-RX qua R6 1kΩ','UART1 TX — ESP32 phát sang BMS'],
+ ['IO18','X2.BMS-TX qua R7 1kΩ','UART1 RX — ESP32 nhận từ BMS'],
+ ['GND','X2.GND (1,18) → GND dọc cột 2 → rail GND','mass chung với BMS — bắt buộc, không chung mass là đọc ra rác'],
+ ['IO8','SDA','INA226 0x40 + SHT3X 0x44'],['IO9','SCL','bus I2C chung, 100 kHz'],
+ ['IO4','DS18B20 DATA','kèm 4.7 kΩ kéo lên 3V3'],['IO1','MQ-2 AO','qua chia áp 10k/20k + 100 nF'],
+ ['IO2','LM393 DO','ướt = LOW (INPUT_PULLUP)'],['IO14','SD CS','SPI'],['IO5','SD MOSI','SPI'],
+ ['IO7','SD MISO','SPI'],['IO21','SD SCK','SPI 4 MHz'],['IO48','LED RGB onboard','không cần dây ngoài'],
+ ['IO16','— không dùng','chỉ cần khi lắp MAX485 (DE/RE). config đang để DE_PIN = -1'],
+ ['5V','rail 5V','LM2596 hoặc jack DC — chọn bằng JP1'],
+ ['3V3','rail 3V3','lấy từ chân 3V3 của ESP32, tổng tải < 300 mA']
+];
+
+/* ============================================================ 16 BƯỚC ============================================================ */
+const STEPS=[
+{n:1,g:'Chuẩn bị',t:'Bố cục & nguyên tắc chống nhiễu',
+ d:`<p>Board <b>PY-10*10CM 2.54MM</b>: vùng lỗ <b>35 cột × 36 hàng</b>, silk in số <code>01–35</code> ở cạnh ngang và chữ
+ <code>A…Z</code> rồi <code>A′…J′</code> ở cạnh dọc, pad chia thành khối 5×5 bằng nét đứt trắng.</p>
+ <div class="note"><b>Cách đọc toạ độ:</b> tài liệu này ghi <b>(cột, hàng)</b> bằng số cho cả hai trục — hàng 1 = A, hàng 26 = Z, hàng 27 = A′…
+ Lý do không dùng chữ làm địa chỉ: bảng chữ trên board <b>lặp lại 2 vòng</b> nên "hàng V" là mơ hồ. Cạnh trái/phải sơ đồ vẫn in chữ để bạn dò mắt cho nhanh.</div>
+ <p>Board chia 5 vùng để dòng nhiễu của nguồn không chạy chung đường về với dây cảm biến:</p>
+ <ul>
+   <li><b>Hàng 2–6:</b> nguồn vào (jack DC 5V, cầu chì, tụ lọc).</li>
+   <li><b>Hàng 7–9:</b> 3 rail nằm sát nhau — 5V, GND, 3V3.</li>
+   <li><b>Cột 1–10:</b> vùng số (UART ra BMS, 1-Wire, thẻ SD).</li>
+   <li><b>Cột 11–22:</b> ESP32-S3.</li>
+   <li><b>Cột 23–35:</b> vùng cảm biến/analog (I2C, MQ-2, rò nước).</li>
+ </ul>
+ <div class="note ok"><b>4 quy tắc chống nhiễu:</b><br>
+ 1. Rail <b>5V và GND đi sát nhau</b> (hàng 7 và 8) → vòng dòng nhỏ, ít bức xạ.<br>
+ 2. <b>4 đường GND dọc</b> (cột 2, 10, 22, 33) tạo lưới mass: mọi linh kiện có đường về ngắn, ngay cạnh dây tín hiệu của nó.<br>
+ 3. Dòng nặng của nguồn về <b>rail GND trên (hàng 8)</b>; mass cảm biến analog về <b>rail GND đáy (hàng 34)</b>.<br>
+ 4. Bộ chia áp đặt <b>sát terminal cảm biến</b>, không đặt sát ESP32 — dây mức 5V càng ngắn càng tốt.</div>
+ <div class="note"><b>Vật tư nối:</b> rail và đường GND dọc dùng <b>dây đồng trần 0.6–0.8 mm</b> hàn xuyên từng lỗ.
+ Còn lại dùng <b>dây bọc nhựa 24AWG</b>, chỉ hàn 2 đầu — dây bọc bắc ngang rail trần là bình thường.
+ Chỉ <b>trần chạm trần</b> mới là lỗi.</div>
+ <div class="note dan"><b>Đường dây trong hình vẽ theo hướng đi, không bắt buộc đúng từng lỗ.</b>
+ Cái phải đúng tuyệt đối là <b>hai đầu của mỗi dây</b> — tra bảng netlist ở bước 15.</div>`,
+ bom:[['Perfboard PY-10*10CM','2.54 mm, 35×36 lỗ','1'],['Dây đồng trần','0.6–0.8 mm','~1 m'],
+      ['Dây bọc 24AWG','nhiều màu','~3 m'],['Mỏ hàn','330–350°C, đầu 1.6C','1'],
+      ['Thiếc','0.8 mm có nhựa thông','—'],['Gen co nhiệt','2/3/5 mm','1 bộ']]},
+
+{n:2,g:'Khung',t:'Hàn 2 socket cái cho ESP32-S3',
+ d:`<p>Không hàn thẳng ESP32 xuống board — hàn <b>socket cái 2.54 mm</b> để còn tháo ra nạp/thay khi brick.</p>
+ <ul>
+   <li>Socket trái: <b>cột 12, hàng 11→32</b> (22 chân).</li>
+   <li>Socket phải: <b>cột 21, hàng 11→32</b> (22 chân).</li>
+   <li>Hai hàng cách nhau <b>9 ô = 22.86 mm</b> — đúng khoảng cách chân của DevKitC-1.</li>
+ </ul>
+ <p><b>Mẹo:</b> cắm ESP32 vào 2 socket rồi mới đặt xuống board — hàn 1 chân mỗi đầu, kiểm tra thẳng, xong mới hàn hết.
+ Làm ngược lại là socket bị lệch, không cắm được.</p>
+ <div class="note dan"><b>Kiểm tra silkscreen.</b> Thứ tự chân trong sơ đồ theo bản DevKitC-1 v1.1.
+ Trước khi hàn dây, đối chiếu chữ in trên chính con ESP32 của bạn — cái phải khớp là <b>tên chân (IO17, IO8…)</b>, không phải vị trí trong hình.</div>`,
+ bom:[['Socket cái 2.54 mm','2 × 22 chân (cắt từ thanh 40)','2']]},
+
+{n:3,g:'Khung',t:'Hàn 3 rail nguồn: 5V · GND · 3V3',
+ d:`<p>Dùng <b>dây đồng trần 0.8 mm</b> căng thẳng, hàn dọc theo hàng (mỗi 3–4 lỗ chấm 1 mối, 2 đầu bắt buộc).</p>
+ <ul>
+   <li><b>Hàng 7 — rail 5V</b> (cột 1→35)</li>
+   <li><b>Hàng 8 — rail GND chính</b> (cột 1→35)</li>
+   <li><b>Hàng 9 — rail 3V3</b> (cột 1→35)</li>
+ </ul>
+ <div class="note ok">Đặt 5V ngay trên GND là có chủ ý: dòng đi và dòng về song song sát nhau → diện tích vòng dòng nhỏ nhất. Đây là cách chống nhiễu rẻ nhất trên perfboard.</div>
+ <div class="note"><b>Đo ngay sau khi hàn:</b> thang thông mạch, đo 3 cặp rail với nhau — cả 3 phải <b>không kêu</b>. Kêu = có cầu thiếc, gỡ ngay.</div>`,
+ bom:[['Dây đồng trần 0.8 mm','3 đoạn ~90 mm','—']]},
+
+{n:4,g:'Khung',t:'Hàn lưới GND (4 đường dọc + rail đáy)',
+ d:`<p>Đây là bước làm nên chữ "không nhiễu". Vẫn dùng dây đồng trần.</p>
+ <ul>
+   <li><b>Rail GND cảm biến — hàng 34</b>, cột 1→35.</li>
+   <li><b>4 đường GND dọc</b> tại <b>cột 2, 10, 22, 33</b>, chạy từ hàng 10 xuống hàng 34.</li>
+   <li>Mỗi đường dọc nối ngược lên rail GND (hàng 8) bằng <b>1 đoạn dây bọc ngắn</b>, bắc qua rail 3V3 ở hàng 9.</li>
+ </ul>
+ <div class="note">Đường dọc bắt đầu từ <b>hàng 10</b> chứ không phải hàng 8, để dây trần không cắt ngang rail 3V3 ở hàng 9.
+ Đoạn nối lên dùng dây <b>có bọc</b> nên nhảy qua rail 3V3 vô tư.</div>
+ <div class="note ok">Sau bước này, bất kỳ điểm nào trên board cũng có mass cách ≤ 6 lỗ. Đường về ngắn = ít nhiễu, ít lỗi I2C, ít frame UART hỏng.</div>`,
+ bom:[['Dây đồng trần 0.8 mm','1 ngang + 4 dọc','—'],['Dây bọc','4 đoạn ~10 mm','—']]},
+
+{n:5,g:'Nguồn',t:'Khối nguồn vào: jack DC 5V + cầu chì',
+ d:`<p>Nguồn duy nhất là <b>adapter 5V qua jack DC 5.5×2.5</b>. Không có LM2596, không lấy điện từ pack —
+ nghĩa là <b>không có đường 24V nào chạy trên board này</b> ngoài dây cảm biến VBS ở bước 11.</p>
+ <ul>
+   <li><b>J-DC</b> (cột 2–6, hàng 2–6): chân <b>+</b> ở (6,3), chân <b>−</b> ở (6,5).</li>
+   <li><b>F1</b> (9,3)↔(12,3): cầu chì hoặc polyfuse <b>2A</b> nối tiếp trên đường +5V.</li>
+   <li>(12,3) → <b>rail 5V</b> (12,7) · (6,5) → <b>rail GND</b> (6,8). Dùng dây to (22AWG trở lên).</li>
+ </ul>
+ <div class="note dan"><b>Kiểm cực tính adapter TRƯỚC khi hàn.</b> Chuẩn phổ biến là center-positive (lõi giữa = +),
+ nhưng có adapter ngược. Cắm adapter vào jack rời, đo đồng hồ giữa lõi và vỏ, rồi mới hàn — đấu ngược là chết ESP32 tức thì.</div>
+ <div class="note"><b>Adapter ≥ 2A.</b> ESP32-S3 đỉnh ~500 mA khi WiFi/TLS phát, cộng MQ-2 ~150 mA và thẻ SD ~100 mA.
+ Adapter 1A sẽ sụt áp và gây reset vặt.</div>
+ <div class="note ok">Khu cột 13–22 hàng 2–6 để trống — sau này muốn thêm LM2596 hoặc UPS TP4056+18650 thì lắp vừa vào đó,
+ chỉ cần đấu ngõ ra của nó vào cùng điểm (12,7) trên rail 5V.</div>`,
+ bom:[['Jack DC cái','5.5×2.5 mm','1'],['Adapter 5V','≥2A, center-positive','1'],
+      ['Cầu chì 2A + đế (hoặc polyfuse)','—','1'],['Dây bọc đỏ/đen','22AWG','—']]},
+
+{n:6,g:'Nguồn',t:'Tụ lọc và cấp nguồn cho ESP32',
+ d:`<p>ESP32-S3 đỉnh dòng ~500 mA lúc WiFi/TLS phát. Không có tụ là reset vặt, không debug nổi.</p>
+ <ul>
+   <li><b>C1 1000µF/16V</b>: chân + vào rail 5V (16,7), chân − vào rail GND (17,8). Bẻ chân cho khớp lỗ.</li>
+   <li><b>C2 100nF</b>: song song C1, (20,7) ↔ (21,8).</li>
+   <li><b>Dây 5V</b>: rail 5V (21,7) → chân <b>5V</b> của ESP32 (21,13).</li>
+   <li><b>4 dây GND ngắn</b>: (21,11) (21,12) (21,31) (21,32) → đường GND dọc cột 22.</li>
+   <li><b>Dây 3V3</b>: chân 3V3 của ESP32 (12,11) → rail 3V3 (12,9). <b>Đây là nguồn 3V3 duy nhất của board.</b></li>
+   <li><b>C8 100nF</b> sát chân 5V của ESP32.</li>
+ </ul>
+ <div class="note dan"><b>Chiều của rail 3V3:</b> ESP32 <b>cấp ra</b> 3V3, không nhận vào. Đừng bao giờ đưa 5V vào rail 3V3.</div>
+ <div class="note">Tổng tải 3V3 (INA226 + SHT3X + DS18B20 + LM393 + module SD) ≈ 120 mA đỉnh — LDO trên DevKit gánh được.
+ Bỏ MAX485 nên rail 3V3 còn thoáng hơn trước.</div>`,
+ bom:[['Tụ hoá 1000µF/16V','—','1'],['Tụ gốm 100nF','—','2'],['Dây bọc đỏ/đen/cam','—','—']]},
+
+{n:7,g:'UART → BMS',t:'Cổng UART thẳng tới BMS + điện trở bảo vệ',
+ d:`<p>Không dùng MAX485. ESP32 nói TTL thẳng vào cổng data của JK-BMS. Đơn giản hơn nhiều — nhưng đổi lại có 3 ràng buộc thật, đọc hết trước khi hàn.</p>
+ <ul>
+   <li><b>X2</b> terminal <b>4 chân</b> ở cột 1, hàng 18–21:
+     GND (18) · BMS-RX (19) · BMS-TX (20) · <b>VBAT ✗</b> (21).</li>
+   <li><b>R6 1kΩ</b> (5,20)↔(8,20): nối tiếp trên đường <b>ESP32 TX → BMS RX</b>.</li>
+   <li><b>R7 1kΩ</b> (5,21)↔(8,21): nối tiếp trên đường <b>BMS TX → ESP32 RX</b>.</li>
+   <li><b>GND</b> (1,18) → đường GND dọc cột 2.</li>
+   <li>Khu cột 3–9 hàng 16–19 <b>để trống</b> — sau này muốn quay lại MAX485 thì lắp vừa vào đó.</li>
+ </ul>
+ <div class="note dan"><b>Chân 4 của cổng BMS là VBAT ≈ 29 V.</b> Hàn terminal 4 chân để giữ đúng thứ tự cáp,
+ nhưng <b>không nối lỗ đó đi đâu cả</b>, và <b>cắt hẳn lõi VBAT trong cáp</b>. Chạm vào ESP32 là chết board tức thì.</div>
+ <div class="note dan"><b>GND phải nối.</b> UART TTL không có tín hiệu vi sai — không chung mass thì đọc ra rác hoặc không đọc được gì.</div>
+ <div class="note"><b>Hai điện trở 1 kΩ để làm gì:</b> chưa xác minh được cổng BMS xuất TTL 3.3 V hay 5 V.
+ 1 kΩ nối tiếp giới hạn dòng qua diode kẹp của GPIO xuống ~1–2 mA nếu lỡ gặp 5 V, mà 115200 baud thì không suy hao gì.
+ Đây là cách bảo vệ rẻ và đúng cho cả hai trường hợp.<br>
+ <b>Nếu đo được BMS TX = 5 V</b> thì nâng cấp thành chia áp thật: đổi <b>R7 thành 10 kΩ</b> và hàn thêm
+ <b>R8 20 kΩ</b> (9,22)↔(9,25) xuống GND. Đo bằng đồng hồ ở chân TX của BMS lúc nó đang phát, trước khi cắm vào board.</div>
+ <div class="note dan"><b>Ràng buộc chiều dài:</b> TTL trần không chống nhiễu như RS485. Giữ cáp ra BMS
+ <b>dưới 30 cm</b> (tối đa ~1 m nếu dùng đôi xoắn có shield). Dài hơn nữa là bắt đầu mất frame — lúc đó mới cần quay lại MAX485.</div>
+ <div class="note"><b>Lịch sử cần biết:</b> <code>config.h</code> ghi lại là cổng UART của BMS từng bị
+ <i>echo lại đúng frame vừa gửi ở mọi baud</i> — dấu hiệu TX chập vào RX bên trong jack UART của BMS, thay dây mới vẫn vậy.
+ Nếu gặp lại đúng hiện tượng đó thì lỗi nằm ở jack BMS chứ không phải board này.</div>`,
+ bom:[['Terminal vít 4P','—','1'],['Điện trở 1 kΩ 1/4W','—','2'],
+      ['Điện trở 10 kΩ + 20 kΩ','chỉ khi BMS TX = 5V','1+1'],
+      ['Cáp 3 lõi / đôi xoắn có shield','≤30 cm','1']]},
+
+{n:8,g:'UART → BMS',t:'2 dây UART sang ESP32 (IO17 / IO18)',
+ d:`<ul>
+   <li><b>R6</b> (8,20) → <b>IO17</b> (12,20) — ESP32 <b>phát</b>, về chân RX của BMS.</li>
+   <li><b>R7</b> (8,21) → <b>IO18</b> (12,21) — ESP32 <b>nhận</b>, từ chân TX của BMS.</li>
+ </ul>
+ <div class="note dan"><b>TX nối vào RX, RX nối vào TX — bắt chéo.</b> Đây là lỗi số 1 khi đấu UART trực tiếp.
+ Đấu thẳng TX–TX thì không cháy gì, chỉ là im lặng tuyệt đối — nếu Serial không ra gì thì đảo 2 dây này thử trước tiên.</div>
+ <div class="note ok"><b>Chống nhiễu:</b> 2 dây này chạy sát đường GND dọc cột 10 — đường về ngay bên cạnh.
+ Trong cáp ra BMS, xoắn <b>mỗi dây data với 1 sợi GND</b>, hoặc dùng đôi xoắn có shield, shield chỉ nối mass ở <b>đầu board</b>.</div>
+ <div class="note"><b>Không dùng IO16.</b> Chân đó chỉ cần khi có MAX485 (điều khiển DE/RE).
+ <code>config.h</code> đang để <code>BMS_RS485_DE_PIN = -1</code> — đúng với cách đấu này, không phải sửa gì.</div>
+ <div class="note"><b>Phần mềm cần kiểm:</b> <code>BMS_MODEL 3</code> + <code>BMS_RS485_BAUD 115200</code>.
+ Trong app JK, cổng bạn đang cắm phải được đặt protocol Modbus (<code>001 - JK BMS RS485 Modbus V1.0</code>) và
+ <code>Device Addr = 1</code>. Nếu timeout, thử <code>013 - (9600)…</code> rồi hạ baud xuống 9600.</div>`,
+ bom:[['Dây bọc xanh lá','2 đoạn ngắn','—']]},
+
+{n:9,g:'Cảm biến',t:'DS18B20 — nhiệt thân pin (1-Wire)',
+ d:`<ul>
+   <li><b>X3</b> terminal 3P cột 1: 3V3 (13) · DATA (14) · GND (15).</li>
+   <li><b>R2 4.7 kΩ</b> dựng đứng ở cột 3, từ (3,11) xuống (3,14). Đầu trên nối rail 3V3, đầu dưới hàn chung lỗ với dây DATA.</li>
+   <li>Dây <b>DATA</b> (1,14) → <b>IO4</b> (12,14) — chạy thẳng một hàng.</li>
+ </ul>
+ <div class="note dan"><b>Thiếu điện trở 4.7 kΩ là không đọc được</b> — bus 1-Wire open-drain, không pull-up thì không có mức cao.</div>
+ <div class="note">Nhiều DS18B20 dùng chung 1 dây DATA được (mỗi con có địa chỉ 64-bit riêng), firmware cho tối đa 8 con.
+ Đầu dò dán lên vỏ cell, sát ngay đầu dò NTC của BMS để so chéo hai nguồn nhiệt.</div>`,
+ bom:[['DS18B20 chống nước','—','1–2'],['Điện trở 4.7 kΩ 1/4W','—','1'],['Terminal vít 3P','—','1']]},
+
+{n:10,g:'Cảm biến',t:'Bus I2C: INA226 + SHT3X',
+ d:`<p>Hai module chung một bus, khác địa chỉ (<code>0x40</code> và <code>0x44</code>) nên không đụng nhau.</p>
+ <ul>
+   <li><b>J-INA226</b> header 6 chân, cột 25, hàng 17–22: VCC · GND · SCL · SDA · ALE · VBS.</li>
+   <li><b>J-SHT3X</b> header 4 chân, cột 29, hàng 17–20: VCC · GND · SCL · SDA.</li>
+   <li><b>SDA</b>: IO8 (12,22) → (25,20) → (29,20).</li>
+   <li><b>SCL</b>: IO9 (12,27) → (25,19) → (29,19).</li>
+   <li>VCC hai module → rail 3V3; GND nối chuỗi rồi về đường GND dọc cột 33.</li>
+ </ul>
+ <div class="note ok"><b>Chống nhiễu:</b> cho SDA và SCL đi <b>song song sát nhau</b>, kéo thêm <b>một dây GND đi kèm</b> nếu tổng chiều dài &gt; 15 cm.
+ Đừng để bus này chạy song song sát dây 5V của MQ-2.</div>
+ <div class="note">Không cần tụ 100 nF cho hai module này — cả hai đã có tụ lọc onboard.
+ Pull-up I2C cũng có sẵn trên module; nếu đo SDA/SCL lên 3V3 thấy hở thì mới thêm 2 con 4.7 kΩ.</div>`,
+ bom:[['Header cái 6 chân','cho INA226 HW-899','1'],['Header cái 4 chân','cho SHT3X','1'],['Dây bọc xanh','SDA/SCL','—']]},
+
+{n:11,g:'Cảm biến',t:'Đường đo điện áp pack cho INA226 (VBS)',
+ d:`<p>Phương án đang dùng là <b>chỉ đo điện áp</b> (giữ R100 trên module, IN+/IN−/ALE để trống → dòng đọc luôn 0 A, ổn định).</p>
+ <ul>
+   <li><b>R3 120Ω</b> (27,22)↔(30,22) nối tiếp trên dây cảm biến.</li>
+   <li><b>X4</b> terminal 2P cột 35: PACK+ (22) · PACK− (23).</li>
+   <li>PACK− về đường GND dọc cột 33 — mass pack và mass board phải chung.</li>
+ </ul>
+ <div class="note dan"><b>Dây này mang ≈29 V.</b> Bọc gen co nhiệt toàn bộ đoạn hở, đi men mép board, cách xa dây I2C.
+ 8S sạc đầy ≈29.2 V, dưới 36 V max của INA226 nên an toàn — nhưng chạm vào chân ESP32 là chết board.</div>
+ <div class="note">Muốn đo cả <b>dòng</b> thì tháo R100 trên module và lắp shunt ngoài 50A/75mV vào IN+/IN−
+ (khớp <code>INA226_SHUNT_OHM 0.0015</code>). Không cần thì bỏ qua — cross-source điện áp là đủ.</div>`,
+ bom:[['Điện trở 120Ω 1/4W','—','1'],['Terminal vít 2P','—','1'],['Gen co nhiệt 3 mm','—','—']]},
+
+{n:12,g:'Cảm biến',t:'MQ-2 khói + bộ chia áp bảo vệ ADC',
+ d:`<p>MQ-2 phải chạy <b>5 V</b> (sợi đốt), nhưng chân AO xuất mức 5 V — đưa thẳng vào GPIO là <b>hỏng chân ADC</b>.</p>
+ <ul>
+   <li><b>X5</b> terminal 3P cột 35: 5V (26) · GND (27) · AO (28).</li>
+   <li><b>R4 10 kΩ</b> (28,28)↔(31,28) nối tiếp từ AO.</li>
+   <li><b>R5 20 kΩ</b> (28,29)↔(28,32) từ điểm chia xuống rail GND đáy.</li>
+   <li>Điểm chia (28,28) → <b>IO1</b> (21,16). Tỉ số 20/(10+20) → 5 V còn <b>3.33 V</b>.</li>
+   <li><b>C3 100nF</b> từ IO1 xuống mass, đặt <b>sát chân ESP32</b>.</li>
+ </ul>
+ <div class="note ok"><b>Vì sao chia áp đặt ở đầu cảm biến:</b> đoạn dây mang mức 5 V càng ngắn thì càng ít phát nhiễu sang bus I2C bên cạnh.
+ Sau bộ chia, dây mang 3.3 V với trở nguồn 6.7 kΩ — C3 100nF ở cuối đường bù lại đúng chỗ đó.</div>
+ <div class="note">MQ-2 cần <b>warm-up ~30 s</b> (firmware có <code>MQ2_WARMUP_MS</code>). Sợi đốt ăn ~150 mA — nên nó nằm trên rail 5V chứ không phải 3V3.</div>`,
+ bom:[['Cảm biến MQ-2','—','1'],['Điện trở 10 kΩ + 20 kΩ','1/4W','1+1'],['Tụ gốm 100nF','—','1'],['Terminal vít 3P','—','1']]},
+
+{n:13,g:'Cảm biến',t:'Cảm biến rò nước (LM393)',
+ d:`<ul>
+   <li><b>X6</b> terminal 3P cột 35: 3V3 (31) · GND (32) · DO (33).</li>
+   <li><b>DO</b> → <b>IO2</b> (21,17).</li>
+ </ul>
+ <div class="note dan"><b>Cấp 3V3, không phải 5V.</b> LM393 là so sánh open-collector, xuất mức bằng đúng điện áp nuôi nó —
+ nuôi 5 V thì DO ra 5 V và đốt chân IO2. Nuôi 3V3 thì khỏi cần chia áp.</div>
+ <div class="note">Firmware đọc <code>INPUT_PULLUP</code>, quy ước <b>ướt = LOW</b> (<code>WATER_LEAK_ACTIVE_HIGH 0</code>).
+ Nếu tấm cảm biến của bạn ngược logic thì đổi define đó, đừng sửa mạch.</div>`,
+ bom:[['Cảm biến mưa LM393','—','1'],['Terminal vít 3P','—','1']]},
+
+{n:14,g:'Lưu trữ',t:'Module thẻ nhớ microSD (SPI)',
+ d:`<ul>
+   <li><b>U3</b> cột 3–8, hàng 25–32. Hàng chân phải: CS (26) · SCK (27) · MOSI (28) · MISO (29) · VCC (30) · GND (31).</li>
+   <li><b>CS</b> → IO14 · <b>SCK</b> → IO21 · <b>MOSI</b> → IO5 · <b>MISO</b> → IO7.</li>
+   <li>VCC → rail 3V3, GND → đường GND dọc cột 10.</li>
+   <li><b>C7 100µF</b> sát chân VCC của module.</li>
+ </ul>
+ <div class="note dan"><b>Không dùng GPIO 10–13</b> trên bản N16R8 — trùng bus Octal của Flash/PSRAM, cắm vào là không boot.
+ Bộ chân trên đã tránh sẵn, khớp <code>config.h</code>.</div>
+ <div class="note"><b>Chống nhiễu SPI:</b> SCK là dây bẩn nhất board (4 MHz). Kéo nó theo hàng 33 sát rail GND đáy,
+ đừng bó chung với dây analog. Thẻ chập chờn thì hạ <code>SD_SPI_FREQUENCY_HZ</code> xuống 1 MHz trước khi nghi phần cứng.</div>
+ <div class="note ok">Module SD là <b>tuỳ chọn</b> — queue LittleFS trên flash đã đủ cho mất mạng vài giờ. Không cần thì bỏ khối này và đặt <code>SD_CARD_ENABLED 0</code>.</div>`,
+ bom:[['Module microSD SPI','HS0724, 3.3V','1'],['Thẻ microSD','≤32 GB, FAT32','1'],['Tụ hoá 100µF','—','1']]},
+
+{n:15,g:'Nghiệm thu',t:'Kiểm tra nguội — đo trước khi cấp điện',
+ d:`<p>Rút hết module ra khỏi socket/header, <b>chỉ còn board trần</b>. Đồng hồ để thang thông mạch.</p>
+ <ul>
+   <li><b>Không được kêu:</b> 5V↔GND · 3V3↔GND · 5V↔3V3.</li>
+   <li><b>Phải kêu:</b> rail GND hàng 8 ↔ rail GND hàng 34 ↔ cả 4 đường GND dọc.</li>
+   <li><b>Phải kêu:</b> mỗi chân socket ESP32 ↔ đầu kia của dây tương ứng (dò theo netlist bên dưới).</li>
+   <li><b>X2 chân 4 (VBAT) phải HỞ hoàn toàn</b> với mọi thứ còn lại — đo lại 2 lần.</li>
+   <li>Đo IO17 ↔ X2.BMS-RX → ~1 kΩ. Đo IO18 ↔ X2.BMS-TX → ~1 kΩ.</li>
+   <li>Đo R2 giữa IO4 và 3V3 → ~4.7 kΩ.</li>
+   <li>Chia áp MQ-2: chân AO của X5 xuống GND → ~30 kΩ; IO1 xuống GND → ~20 kΩ.</li>
+ </ul>
+ <div class="note dan"><b>Trước khi cắm ESP32:</b> cắm adapter, đo tại chân 5V của socket — phải là <b>5.0 V ±0.25</b> và đúng cực. Đo cả chiều ngược (que đỏ vào GND) để chắc không đấu ngược.</div>
+ <p><b>Bảng netlist đầy đủ:</b></p>`,
+ net:true,bom:[]},
+
+{n:16,g:'Nghiệm thu',t:'Cấp nguồn và chạy thử',
+ d:`<p>Bật theo thứ tự, dừng ngay khi có gì bất thường.</p>
+ <ol>
+   <li>Chưa cắm module nào. Cắm adapter → đo rail 5V = 5.0 V, kiểm cực đúng chiều.</li>
+   <li>Cắm <b>ESP32</b>. Nạp firmware, xem Serial 115200. Đo rail 3V3 = 3.3 V.</li>
+   <li><b>Đo chân TX của BMS bằng đồng hồ</b> (BMS đã bật, đang phát) — xác nhận 3.3 V hay 5 V. 5 V thì quay lại bước 7 nâng cấp thành chia áp.</li>
+   <li>Cắm cáp X2 (GND + 2 dây data, <b>không có VBAT</b>). Log phải ra V/I/SOC khớp app JK trong ±0.05 V.
+       Im lặng tuyệt đối → đảo 2 dây data. Nhận lại đúng frame vừa gửi → lỗi nằm trong jack BMS, không phải board.</li>
+   <li>Cắm <b>INA226 + SHT3X</b>. Quét I2C — phải thấy <code>0x40</code> và <code>0x44</code>.</li>
+   <li>Cắm <b>DS18B20</b> → có nhiệt độ. Cắm <b>MQ-2</b> → chờ 30 s warm-up rồi mới tin số đọc.</li>
+   <li>Cắm <b>cảm biến nước</b> → chạm nước, log phải ra sự cố. Cuối cùng cắm <b>thẻ SD</b>.</li>
+ </ol>
+ <div class="note">Cắm từng module một và cấp nguồn lại sau mỗi lần. Cắm hết rồi mới bật thì lúc có lỗi sẽ không biết tại con nào.</div>
+ <div class="note dan"><b>ESP32 reset ngẫu nhiên khi WiFi bật</b> = nguồn yếu hoặc thiếu tụ. Kiểm C1 đúng cực chưa, adapter có đủ ≥2 A không, dây từ jack có đủ to không.</div>
+ <div class="note ok"><b>Xong.</b> Bọc mối hở bằng gen co nhiệt, cố định dây bằng dây rút, gắn board vào hộp IP65 qua 4 lỗ ốc ở góc.
+ Cáp UART ra BMS và dây đo pack đi <b>riêng một bên</b>, dây cảm biến đi bên còn lại.</div>`,
+ bom:[['Gen co nhiệt','2/3/5 mm','1 bộ'],['Dây rút','—','1 bộ'],['Hộp IP65 + ốc M3','—','1']]}
+];
+
+/* ============================================================ RENDER (giao diện sáng) ============================================================ */
+const svg=document.getElementById('pcb');
+const NS='http://www.w3.org/2000/svg';
+const PADR=230;                       // dải bên phải để đặt nhãn linh kiện mép board
+let cur=1, showLabel=false, showGrid=true, showAll=false;
+
+/* bảng màu cho nền sáng */
+const SK={board:'#e7d9b6',boardEdge:'#c3ac79',hole:'#fffdf6',holeRing:'#b08d57',
+  guide:'#9c8757',axis:'#6d5c39',axis2:'#7c4dbd',solder:'#8d99a6',
+  mcuF:'#dbeafe',mcuS:'#1570ef',mcuT:'#0b4a9c',
+  modF:'#dcfce7',modS:'#15803d',modT:'#14532d',
+  termF:'#e0ecff',termS:'#1d4ed8',hdrF:'#e0f2fe',hdrS:'#0369a1',
+  ecapF:'#e0e7ff',ecapS:'#4338ca',capF:'#fef3c7',capS:'#b45309',
+  resF:'#e6d4aa',resS:'#8a6d3b',resB:'#4a3a20',fuseF:'#ffe4d6',fuseS:'#c2410c',
+  lead:'#6b7785',pin:'#ffffff',halo:'#fffdf6'};
+
+function el(n,a,txt){const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);if(txt!=null)e.textContent=txt;return e;}
+function state(s){ if(showAll) return s<=cur?(s===cur?'cur':'done'):'next'; return s>cur?'hide':(s===cur?'cur':'done'); }
+function op(st){ return st==='cur'?1:st==='done'?.34:st==='next'?.1:0; }
+/* nhãn chỉ vẽ cho bước hiện tại — trừ khi bật "Nhãn mọi bước". Đây là thứ khử chồng chữ. */
+function lab(st){ return st==='cur' || (showLabel && st==='done'); }
+/* text có viền trắng để đọc được khi nằm trên dây */
+function txt(g,a,s){const o=Object.assign({},a);o.stroke=SK.halo;o['stroke-width']=3.4;o['stroke-linejoin']='round';o['paint-order']='stroke';g.appendChild(el('text',o,s));}
+
+function draw(){
+  svg.setAttribute('viewBox',`0 0 ${W+PADR} ${H}`);
+  svg.innerHTML='';
+  svg.appendChild(el('rect',{x:0,y:0,width:W+PADR,height:H,fill:'#f4f7fa'}));
+
+  /* thân board */
+  svg.appendChild(el('rect',{x:M-30,y:M-30,width:W-2*M+60,height:H-2*M+60,rx:12,
+    fill:SK.board,stroke:SK.boardEdge,'stroke-width':2.5}));
+  [[M-16,M-16],[W-M+16,M-16],[M-16,H-M+16],[W-M+16,H-M+16]].forEach(([x,y])=>
+    svg.appendChild(el('circle',{cx:x,cy:y,r:7,fill:'#f4f7fa',stroke:SK.boardEdge,'stroke-width':2})));
+
+  /* nét đứt chia khối 5×5 giống silk thật */
+  const gd=el('g',{stroke:SK.guide,opacity:.45,'stroke-width':1.2,'stroke-dasharray':'5 5'});
+  for(let c=5;c<COLS;c+=5) gd.appendChild(el('line',{x1:X(c)+P/2,y1:M-16,x2:X(c)+P/2,y2:H-M+16}));
+  for(let r=5;r<ROWS;r+=5) gd.appendChild(el('line',{x1:M-16,y1:Y(r)+P/2,x2:W-M+16,y2:Y(r)+P/2}));
+  svg.appendChild(gd);
+
+  const gh=el('g',{});
+  for(let c=1;c<=COLS;c++)for(let r=1;r<=ROWS;r++)
+    gh.appendChild(el('circle',{cx:X(c),cy:Y(r),r:4.3,fill:SK.hole,stroke:SK.holeRing,'stroke-width':1.5}));
+  svg.appendChild(gh);
+
+  if(showGrid){
+    const gg=el('g',{'font-family':'monospace'});
+    for(let c=1;c<=COLS;c++){const s=String(c).padStart(2,'0');
+      [M-24,H-M+30].forEach(y=>gg.appendChild(el('text',{x:X(c),y,fill:SK.axis,'font-size':12.5,'text-anchor':'middle'},s)));}
+    for(let r=1;r<=ROWS;r++){
+      const col=r>26?SK.axis2:SK.axis;
+      gg.appendChild(el('text',{x:M-26,y:Y(r)+4,fill:col,'font-size':12.5,'text-anchor':'end'},ROWL(r)+' '+r));
+      gg.appendChild(el('text',{x:W-M+26,y:Y(r)+4,fill:col,'font-size':12.5,'text-anchor':'start'},r));}
+    svg.appendChild(gg);
+  }
+
+  /* vùng */
+  ZONES.forEach(z=>{const st=state(z.step); if(st==='hide')return;
+    const g=el('g',{opacity:op(st)*(st==='cur'?1:.5)});
+    g.appendChild(el('rect',{x:X(z.c)-10,y:Y(z.r)-10,width:(z.w-1)*P+20,height:(z.h-1)*P+20,rx:8,
+      fill:z.col+'1a',stroke:z.col,'stroke-width':1.8,'stroke-dasharray':'7 6'}));
+    if(lab(st))txt(g,{x:X(z.c)+2,y:Y(z.r)+6+(z.lb===1?(z.h-1)*P+18:z.lb===2?20:0),fill:z.col,'font-size':16,'font-weight':800},z.t);
+    svg.appendChild(g);});
+
+  // chú thích nhanh ngay trên hình — chỉ hiện khi đúng bước đang xem, khỏi phải đọc panel mới hiểu mạch đang làm gì
+  ANNOT.forEach(a=>{const st=state(a.step); if(!lab(st))return;
+    const g=el('g',{}), lh=16.5, x0=X(a.c), y0=Y(a.r), col=C[a.col];
+    const wbox=Math.max(...a.lines.map(l=>l.length))*6.6+18, hbox=a.lines.length*lh+14;
+    g.appendChild(el('rect',{x:x0-9,y:y0-lh,width:wbox,height:hbox,rx:7,fill:'#ffffff',opacity:.94,stroke:col,'stroke-width':1.6}));
+    a.lines.forEach((ln,i)=>g.appendChild(el('text',{x:x0,y:y0+i*lh,fill:col,'font-size':11.5,'font-weight':700},ln)));
+    svg.appendChild(g);});
+
+  /* dây đồng trần */
+  BUS.forEach(b=>{const st=state(b.step); if(st==='hide')return;
+    const g=el('g',{opacity:op(st)});
+    const x1=X(b.a[0]),y1=Y(b.a[1]),x2=X(b.b[0]),y2=Y(b.b[1]);
+    g.appendChild(el('line',{x1,y1,x2,y2,stroke:SK.halo,'stroke-width':(st==='cur'?10.5:9.5),'stroke-linecap':'round'}));
+    g.appendChild(el('line',{x1,y1,x2,y2,stroke:C[b.col],'stroke-width':st==='cur'?7.6:6.4,'stroke-linecap':'round'}));
+    const horiz=b.a[1]===b.b[1], n0=horiz?b.a[0]:b.a[1], n1=horiz?b.b[0]:b.b[1];
+    for(let i=n0;i<=n1;i++)
+      g.appendChild(el('circle',{cx:horiz?X(i):x1,cy:horiz?y1:Y(i),r:4.9,fill:SK.solder,opacity:.95}));
+    if(lab(st)){
+      if(horiz) txt(g,{x:W-M+56,y:y1+4,fill:C[b.col],'font-size':14,'font-weight':800,'text-anchor':'start'},b.t);
+      else      txt(g,{x:x1+(b.a[0]<18?16:-16),y:Y(b.a[1])-13,fill:C[b.col],'font-size':13,'font-weight':800,'text-anchor':b.a[0]<18?'start':'end'},b.t);
+    }
+    svg.appendChild(g);});
+
+  /* dây bọc */
+  WIRES.forEach(w=>{const st=state(w.step); if(st==='hide')return;
+    const g=el('g',{opacity:op(st)});
+    const pts=w.p.map(q=>`${X(q[0])},${Y(q[1])}`).join(' ');
+    const base=w.th?w.th+1:(st==='cur'?5.4:4.0);
+    g.appendChild(el('polyline',{points:pts,fill:'none',stroke:SK.halo,'stroke-width':base+3.2,
+      'stroke-linejoin':'round','stroke-linecap':'round'}));
+    const a={points:pts,fill:'none',stroke:C[w.col],'stroke-width':base,'stroke-linejoin':'round','stroke-linecap':'round'};
+    if(w.dash)a['stroke-dasharray']='9 6';
+    g.appendChild(el('polyline',a));
+    [w.p[0],w.p[w.p.length-1]].forEach(q=>
+      g.appendChild(el('circle',{cx:X(q[0]),cy:Y(q[1]),r:5.8,fill:SK.pin,stroke:C[w.col],'stroke-width':2.4})));
+    svg.appendChild(g);});
+
+  /* linh kiện */
+  PARTS.forEach(p=>{const st=state(p.step); if(st==='hide')return;
+    const g=el('g',{opacity:op(st)*(p.opt?.8:1)}), L=lab(st);
+    const edge = p.c!=null && p.c>=30;                 // linh kiện mép phải → nhãn ra ngoài board
+    const outX = W-M+56;
+
+    if(p.kind==='res'){
+      const x1=X(p.a[0]),y1=Y(p.a[1]),x2=X(p.b[0]),y2=Y(p.b[1]);
+      g.appendChild(el('line',{x1,y1,x2,y2,stroke:SK.halo,'stroke-width':6}));
+      g.appendChild(el('line',{x1,y1,x2,y2,stroke:SK.lead,'stroke-width':2.6,'stroke-dasharray':p.opt?'6 4':''}));
+      const mx=(x1+x2)/2,my=(y1+y2)/2, v=x1===x2;
+      g.appendChild(el('rect',{x:mx-(v?9:20),y:my-(v?20:9),width:v?18:40,height:v?40:18,rx:5,
+        fill:SK.resF,stroke:SK.resS,'stroke-width':1.8}));
+      [-6,0,6].forEach(o=>g.appendChild(el('rect',{x:v?mx-9:mx+o-2,y:v?my+o-2:my-9,width:v?18:4,height:v?4:18,fill:SK.resB})));
+      // chấm hàn ở 2 đầu chân — để biết đầu này CÓ nối vào lỗ đó (câu vào dây khác đi qua), không phải chỉ nằm cạnh
+      [[x1,y1],[x2,y2]].forEach(([cx,cy])=>{
+        g.appendChild(el('circle',{cx,cy,r:6.4,fill:SK.halo}));
+        g.appendChild(el('circle',{cx,cy,r:5,fill:SK.pin,stroke:SK.resS,'stroke-width':2.2}));});
+      if(L)txt(g,{x:mx+(v?16:0),y:my+(v?4:-15),fill:'#7c3a06','font-size':14,'font-weight':800,
+        'text-anchor':v?'start':'middle'},p.t+(p.opt?' (tuỳ chọn)':''));
+    }
+    else if(p.kind==='fuse'){
+      const x1=X(p.a[0]),y1=Y(p.a[1]),x2=X(p.b[0]);
+      g.appendChild(el('line',{x1,y1,x2,y2:y1,stroke:SK.lead,'stroke-width':2.6}));
+      g.appendChild(el('rect',{x:x1+8,y:y1-13,width:x2-x1-16,height:26,rx:13,fill:SK.fuseF,stroke:SK.fuseS,'stroke-width':2}));
+      if(L){txt(g,{x:(x1+x2)/2,y:y1-20,fill:'#9a3412','font-size':12.5,'font-weight':800,'text-anchor':'middle'},p.t);
+            txt(g,{x:(x1+x2)/2,y:y1+30,fill:'#7c3a06','font-size':10.5,'text-anchor':'middle'},p.sub);}
+    }
+    else if(p.kind==='term'||p.kind==='hdr'||p.kind==='jmp'){
+      const w=p.kind==='term'?1.9:1.3, x=X(p.c)-(w*P)/2, y=Y(p.r)-14, h=(p.n-1)*P+28;
+      const fill=p.kind==='hdr'?SK.hdrF:SK.termF, bd=p.kind==='hdr'?SK.hdrS:SK.termS;
+      g.appendChild(el('rect',{x,y,width:w*P,height:h,rx:5,fill,stroke:bd,'stroke-width':2.2}));
+      p.pins.forEach((nm,i)=>{
+        const bad=/✗/.test(nm), unu=!bad && p.unused && p.unused.includes(nm);
+        g.appendChild(el('circle',{cx:X(p.c),cy:Y(p.r+i),r:unu?4.6:5.4,
+          fill:bad?'#fee4e2':unu?'#eef1f5':SK.pin,
+          stroke:bad?(SK.dan||'#d92d20'):unu?'#aab4c0':bd,
+          'stroke-width':unu?1.8:2.2,'stroke-dasharray':unu?'2.5 2.5':''}));
+        if(L)txt(g,{x:X(p.c)+(p.c>24?-15:15),y:Y(p.r+i)+4,
+          fill:bad?'#b42318':unu?'#8a97a6':'#0b3a78','font-size':unu?11.5:13,
+          'font-weight':bad?800:unu?600:700,'font-style':unu?'italic':'normal',
+          'text-anchor':p.c>24?'end':'start'},nm+(unu?' (không dùng)':''));});
+      if(L){
+        if(edge){ // nhãn ra dải ngoài mép phải, không đè lên mạch
+          g.appendChild(el('line',{x1:X(p.c)+16,y1:Y(p.r),x2:outX-6,y2:Y(p.r),stroke:bd,'stroke-width':1.2,'stroke-dasharray':'3 3'}));
+          txt(g,{x:outX,y:Y(p.r),fill:bd,'font-size':14,'font-weight':800,'text-anchor':'start'},p.t);
+          txt(g,{x:outX,y:Y(p.r)+22,fill:'#4a5a6b','font-size':11.5,'text-anchor':'start'},p.sub);
+        }else{
+          const anc=p.c>24?'end':'start', tx=p.c>24?X(p.c)+10:X(p.c)-10;
+          txt(g,{x:tx,y:y-14,fill:bd,'font-size':14,'font-weight':800,'text-anchor':anc},p.t);
+          txt(g,{x:tx,y:y+h+20,fill:'#4a5a6b','font-size':11.5,'text-anchor':anc},p.sub);
+        }}
+    }
+    else if(p.kind==='cap'||p.kind==='ecap'){
+      const x=X(p.c),y=Y(p.r),w=p.w*P,h=p.h*P, ec=p.kind==='ecap';
+      g.appendChild(el('rect',{x,y,width:w,height:h,rx:ec?Math.min(w,h)/2:6,
+        fill:ec?SK.ecapF:SK.capF,stroke:ec?SK.ecapS:SK.capS,'stroke-width':2.2}));
+      if(ec)g.appendChild(el('rect',{x,y,width:w*.32,height:h,rx:6,fill:SK.ecapS,opacity:.3}));
+      const leadCol=ec?SK.ecapS:SK.capS;               // dây chì lấy màu viền của chính con tụ — dây của tụ nào ra tụ nấy, không lẫn với rail
+      (p.pinsR||[]).forEach(([nm,pc,pr])=>{
+        g.appendChild(el('line',{x1:x+w/2,y1:y+h/2,x2:X(pc),y2:Y(pr),stroke:SK.halo,'stroke-width':5.4}));
+        g.appendChild(el('line',{x1:x+w/2,y1:y+h/2,x2:X(pc),y2:Y(pr),stroke:leadCol,'stroke-width':2.8}));
+        g.appendChild(el('circle',{cx:X(pc),cy:Y(pr),r:5.6,fill:SK.pin,stroke:leadCol,'stroke-width':2.4}));
+        if(L&&ec)txt(g,{x:X(pc)+8,y:Y(pr)-8,fill:leadCol,'font-size':11,'font-weight':800,'text-anchor':'start'},nm);});
+      // tụ gốm không phân cực — khỏi ghi tên chân, tụ hoá (ec) mới cần vì cắm sai chiều là hỏng
+      if(L)txt(g,{x:x+w/2,y:p.lt==='below'?y+h+16:y-8,fill:ec?'#3730a3':'#92400e','font-size':12.5,'font-weight':800,'text-anchor':'middle'},p.t);
+    }
+    else if(p.kind==='mod'){
+      const x=X(p.c)-16,y=Y(p.r)-14,w=(p.w-1)*P+32,h=(p.h-1)*P+28;
+      g.appendChild(el('rect',{x,y,width:w,height:h,rx:7,fill:SK.modF,stroke:SK.modS,'stroke-width':2.4}));
+      if(L){txt(g,{x:x+11,y:y+20,fill:SK.modT,'font-size':13,'font-weight':800},p.t);
+            txt(g,{x:x+11,y:y+h-9,fill:'#3f6b52','font-size':10.5},p.sub);}
+      [['pinsL','end',-14],['pinsR','start',14]].forEach(([k,anc,dx])=>{
+        (p[k]||[]).forEach(([nm,pc,pr])=>{
+          g.appendChild(el('circle',{cx:X(pc),cy:Y(pr),r:5.4,fill:SK.pin,stroke:SK.modS,'stroke-width':2.2}));
+          if(L)txt(g,{x:X(pc)+dx,y:Y(pr)+4,fill:SK.modT,'font-size':11.5,'font-weight':700,'text-anchor':anc},nm);});});
+    }
+    else if(p.kind==='mcu'){
+      const x=X(p.c),y=Y(p.r),w=p.w*P,h=p.h*P;
+      g.appendChild(el('rect',{x,y,width:w,height:h,rx:9,fill:SK.mcuF,stroke:SK.mcuS,'stroke-width':2.6}));
+      g.appendChild(el('rect',{x:x+w*.26,y:y+10,width:w*.48,height:h*.11,rx:4,fill:SK.mcuS,opacity:.22}));
+      txt(g,{x:x+w/2,y:Y(24)+4,fill:SK.mcuT,'font-size':17,'font-weight':800,'text-anchor':'middle'},'ESP32-S3');
+      txt(g,{x:x+w/2,y:Y(25)+4,fill:'#3f6183','font-size':13,'text-anchor':'middle'},'DevKitC-1 · N16R8');
+      txt(g,{x:x+w/2,y:Y(29)+4,fill:'#7d8fa3','font-size':11,'text-anchor':'middle'},'USB ở cạnh dưới ▼');
+      /* CHỈ ghi tên các chân có dùng — chân trống chỉ là chấm xám, hết chồng chữ */
+      [[ESP_L,12,11,'start'],[ESP_R,21,-11,'end']].forEach(([arr,col,dx,anc])=>{
+        arr.forEach((nm,i)=>{const r=ESP_TOP+i,u=ESP_USE[nm];
+          g.appendChild(el('circle',{cx:X(col),cy:Y(r),r:u?5.6:4,fill:u?SK.mcuS:'#c7d3df',stroke:u?'#fff':'#aebccb','stroke-width':1.6}));
+          if(u)txt(g,{x:X(col)+dx,y:Y(r)+4,fill:SK.mcuT,'font-size':12,'font-weight':800,'text-anchor':anc},nm+' · '+u);});});
+    }
+    svg.appendChild(g);});
+}
+
+function panel(){
+  const s=STEPS[cur-1];
+  const wires=WIRES.filter(w=>w.step===cur), parts=PARTS.filter(p=>p.step===cur), bus=BUS.filter(b=>b.step===cur);
+  let h=`<div class="stepno">Bước ${s.n} / ${STEPS.length} · ${s.g}</div><h2>${s.t}</h2><div class="desc">${s.d}</div>`;
+  if(s.net)h+=`<h3 class="sec">Netlist đầy đủ</h3><table><tr><th>Chân ESP32</th><th>Nối tới</th><th>Ghi chú</th></tr>`+
+    NET.map(n=>`<tr><td class="k">${n[0]}</td><td>${n[1]}</td><td class="d">${n[2]}</td></tr>`).join('')+`</table>`;
+  if(s.bom&&s.bom.length)h+=`<h3 class="sec">Linh kiện dùng ở bước này</h3><table><tr><th>Món</th><th>Thông số</th><th>SL</th></tr>`+
+    s.bom.map(b=>`<tr><td>${b[0]}</td><td class="d">${b[1]}</td><td class="k">${b[2]}</td></tr>`).join('')+`</table>`;
+  if(parts.length)h+=`<h3 class="sec">Đặt lên board</h3><table>`+
+    parts.map(p=>{const pos=p.a?`(${p.a[0]},${p.a[1]})→(${p.b[0]},${p.b[1]})`:`cột ${Math.round(p.c)}, hàng ${Math.round(p.r)}`;
+      return `<tr><td class="k">${p.t}</td><td class="d">${pos}<br>${p.sub||''}</td></tr>`;}).join('')+`</table>`;
+  if(bus.length)h+=`<h3 class="sec">Dây đồng trần</h3><table>`+
+    bus.map(b=>`<tr><td class="k">${b.t}</td><td class="d">(${b.a[0]},${b.a[1]}) → (${b.b[0]},${b.b[1]})</td></tr>`).join('')+`</table>`;
+  if(wires.length)h+=`<h3 class="sec">Dây nối (${wires.length})</h3><table>`+
+    wires.map(w=>`<tr><td><span class="chip" style="color:${C[w.col]};border-color:${C[w.col]}">${w.id}</span></td>
+      <td class="d">${w.t}<br><span style="color:#8496a8;font-family:monospace;font-size:10.5px">(${w.p[0][0]},${w.p[0][1]}) → (${w.p[w.p.length-1][0]},${w.p[w.p.length-1][1]})</span></td></tr>`).join('')+`</table>`;
+  const e=document.getElementById('panel'); e.innerHTML=h; e.scrollTop=0;
+}
+
+function sidebar(){
+  let h='',lastg=null;
+  STEPS.forEach(s=>{
+    if(s.g!==lastg){h+=`<div class="grp">${s.g}</div>`;lastg=s.g;}
+    h+=`<div class="sitem ${s.n===cur?'cur':(s.n<cur?'done':'')}" data-n="${s.n}"><span class="n">${s.n}</span><span>${s.t}</span></div>`;});
+  const nav=document.getElementById('steplist');nav.innerHTML=h;
+  nav.querySelectorAll('.sitem').forEach(e=>e.onclick=()=>go(+e.dataset.n));
+  const c=nav.querySelector('.sitem.cur'); if(c)c.scrollIntoView({block:'nearest'});
+}
+
+function go(n){cur=Math.max(1,Math.min(STEPS.length,n));render();}
+function render(){
+  draw();panel();sidebar();
+  document.getElementById('prev').disabled=cur===1;
+  document.getElementById('next').disabled=cur===STEPS.length;
+  document.getElementById('barin').style.width=(cur/STEPS.length*100)+'%';
+  document.getElementById('pos').textContent=`${cur} / ${STEPS.length}`;
+}
+
+document.getElementById('legend').innerHTML=LEGEND.map(([k,t])=>`<span><i style="background:${C[k]}"></i>${t}</span>`).join('');
+document.getElementById('prev').onclick=()=>go(cur-1);
+document.getElementById('next').onclick=()=>go(cur+1);
+document.getElementById('btnLabel').onclick=e=>{showLabel=!showLabel;e.target.classList.toggle('on',showLabel);draw();};
+document.getElementById('btnGrid').onclick =e=>{showGrid=!showGrid; e.target.classList.toggle('on',showGrid); draw();};
+document.getElementById('btnAll').onclick  =e=>{showAll=!showAll;  e.target.classList.toggle('on',showAll);  draw();};
+addEventListener('keydown',e=>{if(e.key==='ArrowRight')go(cur+1);if(e.key==='ArrowLeft')go(cur-1);});
+render();
+</script>
+</body>
+</html>

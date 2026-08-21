@@ -12,15 +12,15 @@
 //     → ingest (pollingInterval):
 //          mock multi-source → split per battery
 //          MQTT primary: publish solar/{dev}/{serial}/telemetry per battery
-//          fallback HTTPS nếu MQTT disconnect / consecutive fail ≥ threshold (S4-FW-06)
-//          fail → enqueue + backoff (luôn HTTPS cho flush queue)
-//     → flushQueue: HTTPS-only (idempotency dedup ở backend)
+//          MQTT unavailable/fail → persist remaining readings before any HTTPS attempt
+//     → flushQueue: MQTT primary, HTTPS fallback, delete after transport accepts
 //     → heartbeat (heartbeatInterval) — HTTPS POST
 //     → updateStatusLed
 //
 // Tham chiếu: tasksprint S1-FW-* + S2-FW-* + S3-FW-* + S4-FW-*
 // ==================================================================
 #include <Arduino.h>
+#include <ArduinoJson.h>
 
 #if __has_include("config.h")
   #include "config.h"
@@ -86,8 +86,8 @@ bool deviceIdentityReady() {
   return identity::deviceCode()[0] != '\0' && identity::apiKey()[0] != '\0';
 }
 
-// Chỉ xanh sau khi backend đã ACK provision/heartbeat trong chính lần boot này.
-// Wi-Fi connected không đồng nghĩa API Gateway reachable.
+// Chỉ xanh sau khi backend đã ACK provision/heartbeat hoặc MQTT đã nhận telemetry
+// trong chính lần boot này. Wi-Fi connected không đồng nghĩa backend reachable.
 bool s_backendAcknowledged = false;
 
 // Payload buffer — Sprint 3 multi-source = 2 readings/battery, max 8 batteries
@@ -148,11 +148,13 @@ void ensureProvisioned() {
   }
 }
 
-// IOT3-44 — broker từ chối đăng nhập liên tục ⇒ xin lại credential.
+// IOT3-44 — broker từ chối đăng nhập liên tục ⇒ refresh credential tại chỗ.
 //
 // Khác hẳn lỗi mạng: chờ không giải quyết được gì, vì mật khẩu trong NVS đã không còn khớp
 // `mqtt_password_plaintext` bên backend (admin xoay key, hoặc thiết bị được tạo lại). Đường tự
-// lành duy nhất là chạy lại `/provision` để nhận credential mới.
+// lành duy nhất là gọi lại `/provision` để nhận credential mới. Không được xóa
+// cờ provision trước: nếu API cũng đang lỗi thì gateway sẽ mắc kẹt màu tím và
+// ngừng cả sampling/queue dù cấu hình cũ vẫn còn nguyên.
 void checkMqttCredentialHealth() {
   static uint32_t s_lastReprovMs   = 0;
   static bool     s_everReprov     = false;
@@ -165,14 +167,24 @@ void checkMqttCredentialHealth() {
     return;
   }
 
-  Serial.printf("[main] MQTT bị từ chối xác thực %lu lần liên tiếp — xin lại credential "
+  Serial.printf("[main] MQTT bị từ chối xác thực %lu lần liên tiếp — refresh credential "
                 "qua /provision (hạ nhiệt %lu phút)\n",
                 static_cast<unsigned long>(net::mqttAuthFailureCount()),
                 static_cast<unsigned long>(core::kReprovisionCooldownMs / 60000UL));
 
-  provision::clearProvisionFlag();
-  s_provCfg.provisioned = false;
-  s_provisionDone       = false;
+  provision::ProvisionedConfig refreshed = s_provCfg;
+  if (net::wifiIsConnected() && net::timeIsSynced() &&
+      provision::runProvisionFlow(FW_VERSION, HARDWARE_REVISION, refreshed)) {
+    s_provCfg = refreshed;
+    s_provisionDone = true;
+    s_backendAcknowledged = true;
+    telemetry::heartbeatSetInterval(s_provCfg.heartbeatIntervalMs);
+    sensor::sht31SetSiteId(s_provCfg.siteId);
+    sensor::envIncidentSetSiteId(s_provCfg.siteId);
+    Serial.println("[main] MQTT credential refresh OK — giữ trạng thái provisioned");
+  } else {
+    Serial.println("[main] MQTT credential refresh FAIL — giữ cấu hình cũ, tiếp tục queue/HTTPS fallback");
+  }
   net::mqttResetAuthFailures();
   s_lastReprovMs = millis();
   s_everReprov   = true;
@@ -322,6 +334,83 @@ bool ingestViaMqtt(const char* isoTs, size_t batteryCount,
   return okCount == nUnique;
 }
 
+enum class QueuedMqttResult : uint8_t {
+  NotTried,
+  Published,
+  Failed,
+};
+
+// Queue files contain the HTTPS batch shape. When MQTT recovers, split the
+// exact saved items by battery serial and publish them on the per-battery
+// telemetry topics. This keeps HTTPS as fallback instead of making an old
+// queue depend on HTTPS forever after MQTT is healthy again.
+QueuedMqttResult publishQueuedViaMqtt(const char* body, size_t bodyLen) {
+  if (!net::mqttIsConnected() ||
+      net::mqttConsecutiveFailCount() >= MQTT_PUBLISH_FAIL_THRESHOLD) {
+    return QueuedMqttResult::NotTried;
+  }
+  if (!body || bodyLen == 0) return QueuedMqttResult::NotTried;
+
+  JsonDocument source;
+  const DeserializationError parseError = deserializeJson(source, body, bodyLen);
+  if (parseError) {
+    Serial.printf("[flush-mqtt] queued JSON parse failed: %s — use HTTPS fallback\n",
+                  parseError.c_str());
+    return QueuedMqttResult::NotTried;
+  }
+
+  const JsonArrayConst items = source["items"].as<JsonArrayConst>();
+  if (items.isNull() || items.size() == 0) return QueuedMqttResult::NotTried;
+
+  const char* serials[bms::kMockMaxBatteries] = {nullptr};
+  size_t serialCount = 0;
+  for (JsonObjectConst item : items) {
+    const char* serial = item["batteryAssetSerial"] | "";
+    if (serial[0] == '\0') {
+      Serial.println("[flush-mqtt] item has no batteryAssetSerial — use HTTPS fallback");
+      return QueuedMqttResult::NotTried;
+    }
+
+    bool seen = false;
+    for (size_t i = 0; i < serialCount; ++i) {
+      if (strcmp(serials[i], serial) == 0) { seen = true; break; }
+    }
+    if (!seen) {
+      if (serialCount >= bms::kMockMaxBatteries) {
+        Serial.println("[flush-mqtt] too many battery groups — use HTTPS fallback");
+        return QueuedMqttResult::NotTried;
+      }
+      serials[serialCount++] = serial;
+    }
+  }
+
+  static char perBatteryBuf[core::payloadBufferSize(kMaxReadings) + 128];
+  for (size_t i = 0; i < serialCount; ++i) {
+    JsonDocument groupDoc;
+    JsonArray groupItems = groupDoc["items"].to<JsonArray>();
+    for (JsonObjectConst item : items) {
+      const char* itemSerial = item["batteryAssetSerial"] | "";
+      if (strcmp(itemSerial, serials[i]) == 0) groupItems.add(item);
+    }
+
+    const size_t groupLen = serializeJson(groupDoc, perBatteryBuf, sizeof(perBatteryBuf));
+    if (groupLen == 0 || groupLen >= sizeof(perBatteryBuf)) {
+      Serial.printf("[flush-mqtt] payload build failed for %s — use HTTPS fallback\n",
+                    serials[i]);
+      return QueuedMqttResult::NotTried;
+    }
+    if (!net::mqttPublishTelemetry(serials[i], perBatteryBuf, groupLen)) {
+      Serial.printf("[flush-mqtt] publish %s failed — use HTTPS fallback\n", serials[i]);
+      return QueuedMqttResult::Failed;
+    }
+  }
+
+  Serial.printf("[flush-mqtt] published %u battery group(s), %u item(s)\n",
+                static_cast<unsigned>(serialCount),
+                static_cast<unsigned>(items.size()));
+  return QueuedMqttResult::Published;
+}
+
 // GH-737 — LẤY MẪU + XẾP HÀNG KHI KHÔNG CÓ MẠNG.
 //
 // Trước đây main loop mất Wi-Fi thì chỉ `s_failCount++`: không đọc BMS, không ghi gì vào
@@ -358,8 +447,8 @@ bool sampleAndQueueOffline() {
   const uint32_t epoch = net::timeEpoch();
   if (epoch == 0) return false;
 
-  // queueEnqueue dùng epoch GIÂY làm tên file ⇒ hai lần đẩy trong cùng một giây sẽ đè nhau.
-  // Hàm này chỉ được gọi theo nhịp poll (mặc định 5s) nên khoá luôn duy nhất.
+  // queueEnqueue dùng epoch giây làm tên file và tự tăng epoch khi trùng, nên
+  // nhịp 1 giây hoặc một tick chạm đúng ranh giới vẫn không ghi đè batch cũ.
   return queue::queueEnqueue(epoch, s_payloadBuf, bodyLen, s_idempBuf);
 }
 
@@ -392,7 +481,6 @@ bool ingestOnce() {
   if (tryMqtt) {
     if (ingestViaMqtt(ts, nBat, readings, n,
                       mqttPublished, bms::kMockMaxBatteries, &mqttPublishedCount)) {
-      s_backoff.reset();
       Serial.printf("[ingest] MQTT posted %u readings across %u pin\n",
                     static_cast<unsigned>(n), static_cast<unsigned>(nBat));
       return true;
@@ -434,30 +522,29 @@ bool ingestOnce() {
     return false;
   }
 
-  PostOutcome outcome = postBatch(s_payloadBuf, bodyLen, s_idempBuf);
-  if (outcome == PostOutcome::Success) {
-    s_backoff.reset();
-    Serial.printf("[ingest] HTTPS posted %u readings (multi-source)\n",
-                  static_cast<unsigned>(nRemaining));
-    return true;
-  }
-
-  // Permanent (4xx) → drop, KHÔNG enqueue, reset backoff (vì transient logic không apply).
-  if (outcome == PostOutcome::PermanentFailure) {
-    Serial.println("[ingest] DROPPED — permanent 4xx (data invalid)");
-    s_backoff.reset();
+  // Store-and-forward fallback: make the payload durable BEFORE the HTTP call.
+  // tryFlushQueue() runs immediately after this ingest tick and removes the pair
+  // only after a backend 2xx. During an outage, HTTP backoff no longer prevents
+  // the one-second sampling path from continuing to append new measurements.
+  const uint32_t epoch = net::timeEpoch();
+  if (epoch != 0 && queue::queueEnqueue(epoch, s_payloadBuf, bodyLen, s_idempBuf)) {
+    s_queuedCount++;
+    Serial.printf("[ingest] MQTT unavailable → queued HTTPS fallback %u readings (depth=%u)\n",
+                  static_cast<unsigned>(nRemaining),
+                  static_cast<unsigned>(queue::queueSize()));
     return false;
   }
 
-  // Transient → enqueue + backoff để retry sau (queue luôn flush qua HTTPS)
-  uint32_t epoch = net::timeEpoch();
-  if (epoch != 0 && queue::queueEnqueue(epoch, s_payloadBuf, bodyLen, s_idempBuf)) {
-    s_queuedCount++;
-    uint32_t waitMs = s_backoff.recordFailure();
-    Serial.printf("[ingest] queued (depth=%u) backoff=%lums\n",
-                  static_cast<unsigned>(queue::queueSize()),
-                  static_cast<unsigned long>(waitMs));
+  // Emergency path when both SD and LittleFS are unavailable. Direct HTTP is
+  // still safer than dropping a sample, but the log makes the loss of durable
+  // retry semantics explicit.
+  Serial.println("[ingest] queue unavailable — emergency direct HTTPS fallback");
+  const PostOutcome outcome = postBatch(s_payloadBuf, bodyLen, s_idempBuf);
+  if (outcome == PostOutcome::Success) {
+    s_backoff.reset();
+    return true;
   }
+  if (outcome == PostOutcome::TransientFailure) s_backoff.recordFailure();
   return false;
 }
 
@@ -479,9 +566,34 @@ void tryFlushQueue() {
                 static_cast<unsigned long>(epoch),
                 static_cast<unsigned>(bodyLen),
                 qIdem);
+
+  const QueuedMqttResult mqttOutcome = publishQueuedViaMqtt(qBody, bodyLen);
+  if (mqttOutcome == QueuedMqttResult::Published) {
+    if (!queue::queueDelete(epoch)) {
+      const uint32_t waitMs = s_backoff.recordFailure();
+      Serial.printf("[flush-mqtt] publish accepted but local delete failed — retry after %lums\n",
+                    static_cast<unsigned long>(waitMs));
+      return;
+    }
+    s_flushedCount++;
+    s_backendAcknowledged = true;
+    s_backoff.reset();
+    Serial.printf("[flush-mqtt] OK — queue depth=%u\n",
+                  static_cast<unsigned>(queue::queueSize()));
+    return;
+  }
+  if (mqttOutcome == QueuedMqttResult::Failed) {
+    Serial.println("[flush] MQTT publish failed — falling back to HTTPS");
+  }
+
   PostOutcome outcome = postBatch(qBody, bodyLen, qIdem[0] ? qIdem : nullptr);
   if (outcome == PostOutcome::Success) {
-    queue::queueDelete(epoch);
+    if (!queue::queueDelete(epoch)) {
+      const uint32_t waitMs = s_backoff.recordFailure();
+      Serial.printf("[flush] backend ACKed but local delete failed — retry idem after %lums\n",
+                    static_cast<unsigned long>(waitMs));
+      return;
+    }
     s_flushedCount++;
     s_backoff.reset();
     Serial.printf("[flush] OK — queue depth=%u\n",
@@ -490,7 +602,12 @@ void tryFlushQueue() {
   }
   if (outcome == PostOutcome::PermanentFailure) {
     // 4xx → data sai, retry vô ích → drop khỏi queue + reset backoff để các batch sau retry bình thường.
-    queue::queueDelete(epoch);
+    if (!queue::queueDelete(epoch)) {
+      const uint32_t waitMs = s_backoff.recordFailure();
+      Serial.printf("[flush] permanent 4xx but local delete failed — retry cleanup after %lums\n",
+                    static_cast<unsigned long>(waitMs));
+      return;
+    }
     s_backoff.reset();
     Serial.printf("[flush] DROPPED epoch=%lu — permanent 4xx (data invalid). Queue depth=%u\n",
                   static_cast<unsigned long>(epoch),
@@ -526,9 +643,11 @@ void updateStatusLed() {
       break;
   }
 
-  if (!s_backendAcknowledged) {
+  if (!s_backendAcknowledged && !net::mqttIsConnected()) {
+    // MQTT là đường telemetry chính. HTTP heartbeat production có thể lỗi tạm thời
+    // trong khi broker vẫn nhận dữ liệu đều; trường hợp đó thiết bị vẫn online.
+    // Chỉ báo offline khi cả MQTT lẫn lần xác nhận backend gần nhất đều không có.
     // Chưa provision: tím để người cài đặt biết thiết bị vẫn đang ghép backend.
-    // Đã provision từ boot trước nhưng heartbeat hiện tại thất bại: đỏ, không xanh giả.
     ui::ledSet(s_provisionDone ? ui::LedState::Offline : ui::LedState::Provisioning);
     return;
   }
@@ -613,6 +732,22 @@ void logStatsPeriodic() {
                 static_cast<unsigned long>(ota::otaUpdateOkCount()));
 }
 
+void logMemoryLayoutOnce() {
+  Serial.printf("[memory] flash=%uKB sketch=%uKB ota-free=%uKB / "
+                "heap-free=%u/%uKB psram-free=%u/%uKB / "
+                "queue=%s used=%llu/%lluKB\n",
+                static_cast<unsigned>(ESP.getFlashChipSize() / 1024U),
+                static_cast<unsigned>(ESP.getSketchSize() / 1024U),
+                static_cast<unsigned>(ESP.getFreeSketchSpace() / 1024U),
+                static_cast<unsigned>(ESP.getFreeHeap() / 1024U),
+                static_cast<unsigned>(ESP.getHeapSize() / 1024U),
+                static_cast<unsigned>(ESP.getFreePsram() / 1024U),
+                static_cast<unsigned>(ESP.getPsramSize() / 1024U),
+                queue::queueStorageName(),
+                queue::queueStorageUsedBytes() / 1024ULL,
+                queue::queueStorageTotalBytes() / 1024ULL);
+}
+
 }  // namespace
 
 void appTask(void* pv);
@@ -688,6 +823,7 @@ void setup() {
 
   // Sprint 3
   queue::queueBegin();
+  logMemoryLayoutOnce();
 
   // Sprint 4 (S4-FW-01/02/03/05): MQTT broker client + downlink handler.
   // mqttBegin() load CA cert từ LittleFS (queue đã mount LittleFS lúc queueBegin
@@ -743,16 +879,26 @@ void appLoopBody() {
   net::wifiTick();
   net::timeSyncTick();
   cli::cliTick();
-  // Sprint 4: MQTT tick (reconnect + poll inbound cmd). Tự skip nếu wifi down.
-  if (deviceIdentityReady()) net::mqttTick();
   ui::ledTick();                 // IOT3-54 — bơm hiệu ứng nháy
-  checkMqttCredentialHealth();   // IOT3-44 — phải chạy TRƯỚC ensureProvisioned()
-
   ensureProvisioned();
 
+  // QR mới xóa cờ provision để lấy lại credential MQTT. Không thử credential
+  // cũ trong thời gian này: một TLS connect lỗi có thể chặn appTask nhiều giây
+  // và làm chậm chính request /provision cần để tự phục hồi.
+  if (s_provisionDone && deviceIdentityReady()) {
+    net::mqttTick();
+    checkMqttCredentialHealth();
+  }
+
   const uint32_t now = millis();
-  const uint32_t pollInterval = s_provCfg.provisioned ? s_provCfg.pollingIntervalMs
-                                                      : INGEST_INTERVAL_MS;
+  const uint32_t configuredPollInterval = s_provCfg.provisioned
+      ? s_provCfg.pollingIntervalMs
+      : INGEST_INTERVAL_MS;
+  // This production build targets one-second telemetry even when an older
+  // backend device record still contains the historical 5s/10s default.
+  const uint32_t pollInterval = configuredPollInterval > INGEST_INTERVAL_MS
+      ? INGEST_INTERVAL_MS
+      : configuredPollInterval;
 
   if (s_provisionDone && now - s_lastIngestMs >= pollInterval) {
     s_lastIngestMs = now;
@@ -760,7 +906,12 @@ void appLoopBody() {
     // GH-737 — quyết định tách sang core::ingestAction() (hàm thuần, test ở env:native).
     switch (core::ingestAction(net::wifiIsConnected(), net::timeIsSynced())) {
     case core::IngestAction::PostOnline:
-      if (ingestOnce()) s_okCount++; else s_failCount++;
+      if (ingestOnce()) {
+        s_okCount++;
+        s_backendAcknowledged = true;
+      } else {
+        s_failCount++;
+      }
       break;
 
     case core::IngestAction::QueueOffline: {
@@ -797,7 +948,7 @@ void appLoopBody() {
     telemetry::heartbeatTick();
     if (telemetry::heartbeatOkCount() != okBefore) {
       s_backendAcknowledged = true;
-    } else if (telemetry::heartbeatFailCount() != failBefore) {
+    } else if (telemetry::heartbeatFailCount() != failBefore && !net::mqttIsConnected()) {
       s_backendAcknowledged = false;
     }
   }

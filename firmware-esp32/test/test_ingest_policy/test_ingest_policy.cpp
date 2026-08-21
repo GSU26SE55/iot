@@ -58,6 +58,9 @@ void test_no_combination_is_left_unhandled() {
   }
 }
 
+void setUp(void) {}
+void tearDown(void) {}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_online_with_clock_posts);

@@ -25,6 +25,7 @@ public final class QrOverlayView extends View {
         linePaint.setColor(0xFF82A8FF);
         linePaint.setStrokeWidth(dp(2));
         linePaint.setStrokeCap(Paint.Cap.ROUND);
+        setLayerType(LAYER_TYPE_SOFTWARE, null);
     }
 
     @Override
@@ -50,7 +51,6 @@ public final class QrOverlayView extends View {
         float wave = phase < 0.5f ? phase * 2f : (1f - phase) * 2f;
         float y = scanRect.top + dp(28) + wave * (scanRect.height() - dp(56));
         linePaint.setShadowLayer(dp(9), 0, 0, 0xFF82A8FF);
-        setLayerType(LAYER_TYPE_SOFTWARE, linePaint);
         canvas.drawLine(scanRect.left + dp(22), y, scanRect.right - dp(22), y, linePaint);
         postInvalidateOnAnimation();
     }
@@ -71,4 +71,3 @@ public final class QrOverlayView extends View {
         return value * getResources().getDisplayMetrics().density;
     }
 }
-

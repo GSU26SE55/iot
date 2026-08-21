@@ -120,6 +120,9 @@ void test_payload_fields_are_copied_not_just_serial() {
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.61f, out[0].voltage);
 }
 
+void setUp(void) {}
+void tearDown(void) {}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_removes_published_group_keeps_the_rest);

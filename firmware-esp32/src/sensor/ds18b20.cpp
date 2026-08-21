@@ -96,6 +96,7 @@ size_t ds18b20BuildExternalTempReadings(const char* const* serials, size_t n,
       continue;
     }
     s_readOk++;
+    Serial.printf("[ds18b20] read serial=%s temp=%.1fC\n", serials[i], t);
 
     core::SensorReading& r = out[produced];
     memset(&r, 0, sizeof(r));

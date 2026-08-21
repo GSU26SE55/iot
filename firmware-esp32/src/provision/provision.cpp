@@ -203,13 +203,13 @@ bool runProvisionFlow(const char* firmwareVersion,
     return false;
   }
 
-  int pollSec = data["pollingIntervalSeconds"] | 5;
+  int pollSec = data["pollingIntervalSeconds"] | 1;
   int hbSec   = data["heartbeatIntervalSeconds"] | 60;
   const char* siteId    = data["siteId"]    | "";
   const char* ntpServer = data["ntpServer"] | kDefaultNtpServer;
 
   // Sanity bounds
-  if (pollSec < 1)   pollSec = 5;
+  if (pollSec < 1)   pollSec = 1;
   if (pollSec > 600) pollSec = 600;
   if (hbSec < 10)    hbSec = 60;
   if (hbSec > 3600)  hbSec = 3600;
@@ -244,6 +244,10 @@ bool runProvisionFlow(const char* firmwareVersion,
 
 bool clearProvisionFlag() {
   return storage::nvsPutUInt8(kKeyProvd, 0);
+}
+
+bool restoreProvisionFlag() {
+  return storage::nvsPutUInt8(kKeyProvd, 1);
 }
 
 }  // namespace provision

@@ -115,6 +115,65 @@ bool readJkRegisters(uint16_t address, uint16_t count, uint16_t* out) {
 }
 
 bool readJkRealtime(core::SensorReading& out) {
+  // JK's documented addresses are byte offsets while Modbus returns 16-bit
+  // registers. All realtime fields used below therefore fit in one 28-register
+  // window (0x128A..0x12C1). The old
+  // implementation issued nine separate requests; this physical BMS takes
+  // roughly two seconds per transaction, making a configured 1s telemetry
+  // cadence become ~16s in reality. Prefer one block read and permanently fall
+  // back to the sparse path if a firmware revision rejects the larger window.
+  constexpr uint16_t kBlockStart = kJkMosTemperatureAddress;
+  constexpr uint16_t kBytesPerRegister = 2;
+  constexpr uint16_t kBlockCount =
+      (kJkSwitchStatusAddress - kBlockStart) / kBytesPerRegister + 1;
+  static bool s_blockReadSupported = true;
+
+  if (s_blockReadSupported) {
+    uint16_t block[kBlockCount] = {0};
+    if (readJkRegisters(kBlockStart, kBlockCount, block)) {
+      const auto at = [&](uint16_t address) -> const uint16_t* {
+        return &block[(address - kBlockStart) / kBytesPerRegister];
+      };
+
+      const uint16_t* voltage = at(kJkPackVoltageAddress);
+      const uint16_t* current = at(kJkPackCurrentAddress);
+      const uint16_t* batteryTemps = at(kJkBatteryTempsAddress);
+      const uint16_t* alarm = at(kJkAlarmAddress);
+      const uint16_t* cycleCount = at(kJkCycleCountAddress);
+
+      out.temperature = decodeJkTemperature(*at(kJkMosTemperatureAddress));
+      out.voltage = decodeJkPackVoltage(voltage[0], voltage[1]);
+      out.current = decodeJkPackCurrent(current[0], current[1]);
+      out.socPercent = decodeJkSoc(*at(kJkSocAddress));
+      const uint32_t cycles = decodeJkUnsigned32(cycleCount[0], cycleCount[1]);
+      out.cycleCount = cycles > 0xFFFFu ? 0xFFFFu : static_cast<uint16_t>(cycles);
+      out.sohPercent = decodeJkSoh(*at(kJkSohAddress));
+      if (out.sohPercent > 100.0f) out.sohPercent = 100.0f;
+      out.hasSoh = true;
+      out.chargingState = static_cast<core::ChargingState>(
+          decodeJkChargingState(*at(kJkSwitchStatusAddress), out.current));
+      out.hasChargingState = true;
+
+      const uint32_t alarmRaw = decodeJkUnsigned32(alarm[0], alarm[1]);
+      if (alarmRaw != 0) {
+        snprintf(out.bmsErrorCode, sizeof(out.bmsErrorCode),
+                 "JK:0x%08lX", static_cast<unsigned long>(alarmRaw));
+        out.hasBmsError = true;
+      }
+
+      Serial.printf("[modbus-jk] block=%u regs Tmos=%.1f T1=%.1f T2=%.1f SOC=%.0f%%\n",
+                    static_cast<unsigned>(kBlockCount),
+                    out.temperature,
+                    decodeJkTemperature(batteryTemps[0]),
+                    decodeJkTemperature(batteryTemps[1]),
+                    out.socPercent);
+      return true;
+    }
+
+    s_blockReadSupported = false;
+    Serial.println("[modbus-jk] contiguous block unsupported — using sparse compatibility reads");
+  }
+
   uint16_t mosTemp[1] = {0};
   uint16_t voltage[2] = {0};
   uint16_t current[2] = {0};

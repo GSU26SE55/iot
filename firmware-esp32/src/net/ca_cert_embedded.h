@@ -1,44 +1,42 @@
-// ==================================================================
-// CA cert nhúng thẳng vào firmware, không đọc từ LittleFS.
+// Production trust anchor shared by HTTPS and MQTT TLS.
 //
-// Lý do: local_queue.cpp và mqtt_client.cpp đều gọi LittleFS.begin(true)
-// tức format-nếu-mount-lỗi. Ảnh do `mklittlefs` tạo không mount được với
-// thư viện LittleFS trong firmware, nên phân vùng bị xoá sạch mỗi lần boot
-// và cuốn theo ca_cert.pem. Nhúng vào flash chương trình thì hết phụ thuộc.
-//
-// Nguồn: iot/infra/mqtt/mosquitto/certs/ca.crt
-// Sinh lại cert thì phải cập nhật file này, hoặc chạy:
-//   cd iot/infra/mqtt/mosquitto/certs && \
-//     awk 'BEGIN{print "static const char kMqttCaCert[] PROGMEM = R\"CERT("} \
-//          {print} END{print ")CERT\";"}' ca.crt
-//
-// Cert này tự ký, CHỈ dùng cho dev. Production thì thay bằng CA thật.
-// ==================================================================
+// mqtt.solars.io.vn currently serves the Let's Encrypt chain
+// EE -> YR2 -> Root YR -> ISRG Root X1. Embedding the stable ISRG Root X1
+// keeps the firmware independent from LittleFS and avoids pinning a 90-day
+// leaf certificate. Source: https://letsencrypt.org/certs/isrgrootx1.pem
+// SHA-1: CA:BD:2A:79:A1:07:6A:31:F2:1D:25:36:35:CB:03:9D:43:29:A5:E8
 #pragma once
 
-// Không dùng PROGMEM: header này được include trước <Arduino.h> nên macro
-// đó chưa tồn tại. Trên ESP32 hằng const nằm sẵn ở flash, không tốn RAM.
 static const char kMqttCaCert[] = R"CERT(
 -----BEGIN CERTIFICATE-----
-MIIDqDCCApCgAwIBAgIUW9EyIvycObDAYx7nEvgp3XgLPYgwDQYJKoZIhvcNAQEL
-BQAwbDELMAkGA1UEBhMCVk4xDjAMBgNVBAgMBUhhbm9pMQ4wDAYDVQQHDAVIYW5v
-aTEdMBsGA1UECgwUR1NVMjZTRTU1IElvVCBEZXYgQ0ExHjAcBgNVBAMMFUdTVTI2
-U0U1NSBJb1QgUm9vdCBDQTAeFw0yNjA4MDUxNDM1MDZaFw0zNjA4MDIxNDM1MDZa
-MGwxCzAJBgNVBAYTAlZOMQ4wDAYDVQQIDAVIYW5vaTEOMAwGA1UEBwwFSGFub2kx
-HTAbBgNVBAoMFEdTVTI2U0U1NSBJb1QgRGV2IENBMR4wHAYDVQQDDBVHU1UyNlNF
-NTUgSW9UIFJvb3QgQ0EwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDB
-LiQRle2fJ4YNNNzdToTBBcIyrM12dFZTjzOqrImEhtQdz/6PTANn+TJJhJRuTID0
-5NMT58UwDYJYDSkrHAWhCDBqVJF4MBqUhBKE5mbMZSmLagIaH83N5LgGr9QggunQ
-9OJF9g4o5l2o5IhyThx+3mtsrN/+3HDdFmlPB+1eGVFSg69hNfMimqRtizudKrMp
-R+owKnYveRNDPoH1gD7DUoG8TYWTYQc60PYsKDrCX9Vwnx/c+U5q7DU1N/n9iQ/J
-Q9jwJ2TBHmsrKShaWmUbexWwhbaNgPWwwLz8YrDYeixjUbNyaO7qO+V7qbpLwTXB
-1hpifSesy3CTTonRKvNbAgMBAAGjQjBAMA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0P
-AQH/BAQDAgEGMB0GA1UdDgQWBBSF8l385g67v/GVg3+up8Drq7qSCzANBgkqhkiG
-9w0BAQsFAAOCAQEADuBNfNt5P2Z3i+LsLAgUMin5ssO0kJbLfg2a9oosImzki+F0
-SAgYn+vI7gBDxZLVYtrYOiw19Ns8WbeuZRIgRjdA3nAhEhfVQmda/B6pTnEpxby9
-6//G8r/Jxiu4Hobiz/jxoFEov6LXex5obps+U5IS5pKjBw8eZqNlR6/KmtazMdc2
-zJNbhN6vmbSK1dZBJsh8VbFABCjukGx2Xj9uz3WAMJUwfrKsAwlfw9ZNqDuK1svu
-0DUuF0JGyeZZtkzLLLrugK0QLq/j/zmJXUJ2cW3nqhHM/EBLTJ8t1UrySarp6zRO
-OUDjSr8oWDYALDyghUnKJ+EqHVnHjFgC+OFKRA==
+MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
+TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
+cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
+WhcNMzUwNjA0MTEwNDM4WjBPMQswCQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJu
+ZXQgU2VjdXJpdHkgUmVzZWFyY2ggR3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBY
+MTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAK3oJHP0FDfzm54rVygc
+h77ct984kIxuPOZXoHj3dcKi/vVqbvYATyjb3miGbESTtrFj/RQSa78f0uoxmyF+
+0TM8ukj13Xnfs7j/EvEhmkvBioZxaUpmZmyPfjxwv60pIgbz5MDmgK7iS4+3mX6U
+A5/TR5d8mUgjU+g4rk8Kb4Mu0UlXjIB0ttov0DiNewNwIRt18jA8+o+u3dpjq+sW
+T8KOEUt+zwvo/7V3LvSye0rgTBIlDHCNAymg4VMk7BPZ7hm/ELNKjD+Jo2FR3qyH
+B5T0Y3HsLuJvW5iB4YlcNHlsdu87kGJ55tukmi8mxdAQ4Q7e2RCOFvu396j3x+UC
+B5iPNgiV5+I3lg02dZ77DnKxHZu8A/lJBdiB3QW0KtZB6awBdpUKD9jf1b0SHzUv
+KBds0pjBqAlkd25HN7rOrFleaJ1/ctaJxQZBKT5ZPt0m9STJEadao0xAH0ahmbWn
+OlFuhjuefXKnEgV4We0+UXgVCwOPjdAvBbI+e0ocS3MFEvzG6uBQE3xDk3SzynTn
+jh8BCNAw1FtxNrQHusEwMFxIt4I7mKZ9YIqioymCzLq9gwQbooMDQaHWBfEbwrbw
+qHyGO0aoSCqI3Haadr8faqU9GY/rOPNk3sgrDQoo//fb4hVC1CLQJ13hef4Y53CI
+rU7m2Ys6xt0nUW7/vGT1M0NPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNV
+HRMBAf8EBTADAQH/MB0GA1UdDgQWBBR5tFnme7bl5AFzgAiIyBpY9umbbjANBgkq
+hkiG9w0BAQsFAAOCAgEAVR9YqbyyqFDQDLHYGmkgJykIrGF1XIpu+ILlaS/V9lZL
+ubhzEFnTIZd+50xx+7LSYK05qAvqFyFWhfFQDlnrzuBZ6brJFe+GnY+EgPbk6ZGQ
+3BebYhtF8GaV0nxvwuo77x/Py9auJ/GpsMiu/X1+mvoiBOv/2X/qkSsisRcOj/KK
+NFtY2PwByVS5uCbMiogziUwthDyC3+6WVwW6LLv3xLfHTjuCvjHIInNzktHCgKQ5
+ORAzI4JMPJ+GslWYHb4phowim57iaztXOoJwTdwJx4nLCgdNbOhdjsnvzqvHu7Ur
+TkXWStAmzOVyyghqpZXjFaH3pO3JLF+l+/+sKAIuvtd7u+Nxe5AW0wdeRlN8NwdC
+jNPElpzVmbUq4JUagEiuTDkHzsxHpFKVK7q4+63SM1N95R1NbdWhscdCb+ZAJzVc
+oyi3B43njTOQ5yOf+1CceWxG1bQVs5ZufpsMljq4Ui0/1lvh+wjChP4kqKOJ2qxq
+4RgqsahDYVvTH9w7jXbyLeiNdd8XM2w9U/t7y0Ff/9yi0GE44Za4rF2LN9d11TPA
+mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
+emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 -----END CERTIFICATE-----
 )CERT";
