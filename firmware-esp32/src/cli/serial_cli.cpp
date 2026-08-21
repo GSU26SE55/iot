@@ -5,6 +5,7 @@
 
 #include "core/identity_change_policy.h"
 #include "net/mqtt_client.h"
+#include "provision/provision.h"
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -72,6 +73,7 @@ void printHelp() {
   Serial.println("  set mqttprefix <T>      — tiền tố topic, vd solar/gw-esp32-001");
   Serial.println("  -- khác --");
   Serial.println("  clear                   — erase NVS, fallback compile-time");
+  Serial.println("  resume                  — phục hồi cờ provision, giữ nguyên mọi cấu hình");
   Serial.println("  reboot                  — ESP.restart()");
   Serial.println("  help                    — in help này");
   Serial.println("------------------------------------------");
@@ -178,6 +180,23 @@ void executeCommand(const char* line) {
     } else {
       Serial.println("[cli] NVS erase FAILED");
     }
+    return;
+  }
+  if (strcmp(line, "resume") == 0) {
+    if (identity::deviceCode()[0] == '\0' || identity::apiKey()[0] == '\0' ||
+        mqttcfg::host()[0] == '\0' ||
+        mqttcfg::username()[0] == '\0' || mqttcfg::password()[0] == '\0') {
+      Serial.println("[cli] KHÔNG resume: thiếu identity hoặc cấu hình MQTT đã lưu");
+      return;
+    }
+    if (!provision::restoreProvisionFlag()) {
+      Serial.println("[cli] resume FAILED: không ghi được cờ provision");
+      return;
+    }
+    Serial.println("[cli] provision flag restored; rebooting in 1s...");
+    Serial.flush();
+    delay(1000);
+    ESP.restart();
     return;
   }
   if (strcmp(line, "reboot") == 0) {

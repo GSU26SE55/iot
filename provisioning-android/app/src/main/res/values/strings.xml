@@ -1,15 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Solar BMS Setup</string>
-    <string name="portal_connecting">Đang tìm ESP32…</string>
-    <string name="portal_connected">Đã mở trang cấu hình ESP32</string>
-    <string name="portal_not_found">Chưa kết nối Solar Gateway</string>
-    <string name="connect_gateway_hint">Hãy kết nối Wi-Fi SolarGW-xxxx rồi bấm Tải lại.</string>
-    <string name="camera_required">Cần quyền camera để quét QR trực tiếp trong app.</string>
-    <string name="open_wifi">Wi-Fi</string>
-    <string name="reload">Tải lại</string>
+    <string name="setup_title">Thiết lập Solar Gateway</string>
+    <string name="setup_subtitle">Kết nối nhanh • Dữ liệu bảo mật</string>
+    <string name="environment_production">PRODUCTION</string>
+    <string name="gateway_icon_description">Biểu tượng Solar Gateway</string>
+
+    <string name="status_connecting">ĐANG TÌM</string>
+    <string name="status_connected">SẴN SÀNG</string>
+    <string name="status_not_connected">CHƯA KẾT NỐI</string>
+    <string name="status_waiting_wifi">CHỜ WI‑FI</string>
+    <string name="portal_connecting_detail">Đang tìm portal tại 192.168.4.1…</string>
+    <string name="portal_connected">Đã kết nối Solar Gateway. Bạn có thể cấu hình và quét QR.</string>
+    <string name="portal_not_found_detail">Chưa thấy gateway. Hãy kết nối Wi‑Fi SolarGW-xxxx.</string>
+    <string name="open_wifi_instruction">Chọn SolarGW-xxxx và giữ kết nối dù Android báo không có Internet.</string>
+
+    <string name="step_gateway">Gateway</string>
+    <string name="step_wifi">Wi‑Fi nhà</string>
+    <string name="step_qr">QR Admin</string>
+    <string name="step_number_1" translatable="false">1</string>
+    <string name="step_number_2" translatable="false">2</string>
+    <string name="step_number_3" translatable="false">3</string>
+
+    <string name="empty_title">Kết nối với Solar Gateway</string>
+    <string name="empty_description">Mở Wi‑Fi, chọn mạng SolarGW-xxxx và nhập mật khẩu 12345678. Sau đó quay lại app; portal sẽ tự tải.</string>
+    <string name="connect_gateway">Mở Wi‑Fi và kết nối</string>
+    <string name="reload_portal">Tôi đã kết nối — thử lại</string>
+    <string name="direct_connection_note">Điện thoại chỉ dùng để thiết lập • ESP32 kết nối trực tiếp tới production</string>
+
+    <string name="portal_external_link_blocked">App chỉ mở trang cấu hình cục bộ của Solar Gateway.</string>
+    <string name="scan_requires_portal">Hãy kết nối Solar Gateway và mở portal trước khi quét QR.</string>
+    <string name="scan_result_portal_lost">Đã đọc QR nhưng kết nối gateway bị mất. Hãy kết nối lại và quét lần nữa.</string>
+    <string name="camera_required">Cần quyền camera để quét QR thiết bị.</string>
+    <string name="open_wifi">Wi‑Fi</string>
+    <string name="reload">Tải lại portal</string>
+    <string name="scan_qr">Quét QR</string>
+
     <string name="scan_device_qr">Quét QR thiết bị</string>
     <string name="scanner_live_hint">Đưa QR trên trang Admin vào giữa khung</string>
     <string name="scanner_privacy_hint">Quét trực tiếp • Không chụp hoặc lưu ảnh</string>
+    <string name="scanner_wrong_qr">Đây không phải QR ghép thiết bị Solar BMS</string>
     <string name="scanner_start_failed">Không mở được camera: %1$s</string>
+    <string name="close_scanner">Đóng trình quét QR</string>
+    <string name="toggle_flash">Bật hoặc tắt đèn flash</string>
 </resources>

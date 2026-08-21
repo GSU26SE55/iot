@@ -129,7 +129,9 @@ bool loadCaCert() {
     Serial.println("[mqtt] CA nhúng sai format — thử đọc từ LittleFS");
   }
 
-  if (!LittleFS.begin(true /*formatOnFail*/)) {
+  // Never auto-format here: the same LittleFS partition may contain offline
+  // telemetry. A missing CA must disable MQTT, not erase unsent readings.
+  if (!LittleFS.begin(false /*formatOnFail*/)) {
     Serial.println("[mqtt] LittleFS mount FAIL — không load được CA cert");
     return false;
   }

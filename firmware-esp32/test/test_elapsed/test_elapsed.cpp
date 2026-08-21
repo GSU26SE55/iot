@@ -77,6 +77,9 @@ void test_long_offline_hours_are_representable() {
   TEST_ASSERT_EQUAL_UINT32(43200, core::elapsedSeconds(0, twelveHoursMs));
 }
 
+void setUp(void) {}
+void tearDown(void) {}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_zero_when_same_instant);

@@ -1,0 +1,1758 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sơ Đồ Hàn Bo Mạch An Toàn & Chống Nhiễu — PY-10x10cm (Lưới 2.54mm)</title>
+<style>
+:root {
+  --bg-primary: #080d16;
+  --bg-secondary: #0f172a;
+  --bg-card: #1e293b;
+  --bg-card-hover: #27354f;
+  --accent-cyan: #00f2fe;
+  --accent-blue: #38bdf8;
+  --accent-green: #10b981;
+  --accent-amber: #f59e0b;
+  --accent-red: #ef4444;
+  --accent-purple: #a855f7;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --border-color: rgba(255, 255, 255, 0.1);
+  --border-glow: rgba(0, 242, 254, 0.35);
+  --net-gnd: #10b981;
+  --net-5v: #ef4444;
+  --net-3v3: #f59e0b;
+  --net-rs485: #a855f7;
+  --net-i2c: #06b6d4;
+  --net-1wire: #ec4899;
+  --net-adc: #f97316;
+  --net-water: #3b82f6;
+  --shadow-glow: 0 0 25px rgba(0, 242, 254, 0.18);
+}
+
+@media print {
+  body { background: #fff !important; color: #000 !important; }
+  .no-print { display: none !important; }
+  .perfboard-container { background: #fff !important; border: 1px solid #999 !important; }
+  .card, .guide-box, .side-card { background: #f8f9fa !important; border: 1px solid #ccc !important; color: #000 !important; }
+  .matrix-table th { background: #e2e8f0 !important; color: #000 !important; }
+  .matrix-table td { color: #000 !important; }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-main);
+  line-height: 1.6;
+  overflow-x: hidden;
+  padding-bottom: 60px;
+}
+
+/* Header & Top Bar */
+header {
+  background: linear-gradient(135deg, rgba(8,13,22,0.96), rgba(15,23,42,0.96));
+  border-bottom: 1px solid var(--border-color);
+  backdrop-filter: blur(14px);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  padding: 12px 24px;
+}
+.header-container {
+  max-width: 1480px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.brand-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.brand-icon {
+  width: 42px;
+  height: 42px;
+  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  box-shadow: 0 0 20px rgba(0, 242, 254, 0.45);
+}
+.brand-title h1 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  background: linear-gradient(90deg, #ffffff, var(--accent-cyan));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.brand-title .subtitle {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.top-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 12px rgba(0, 242, 254, 0.25);
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+  color: #041019;
+  border: none;
+  font-weight: 700;
+}
+.btn-primary:hover {
+  opacity: 0.95;
+  box-shadow: 0 0 18px rgba(0, 242, 254, 0.5);
+}
+
+/* App Container */
+.app-layout {
+  max-width: 1480px;
+  margin: 20px auto;
+  padding: 0 20px;
+  display: grid;
+  grid-template-columns: 1fr 400px;
+  gap: 24px;
+}
+@media (max-width: 1150px) {
+  .app-layout { grid-template-columns: 1fr; }
+}
+
+/* Stepper Control Banner */
+.stepper-banner {
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid var(--border-glow);
+  border-radius: 14px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow-glow);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.stepper-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.step-counter {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--accent-cyan);
+  font-weight: 700;
+}
+.stepper-nav {
+  display: flex;
+  gap: 8px;
+}
+.step-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.step-title .badge {
+  font-size: 0.75rem;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(16, 185, 129, 0.2);
+  color: var(--accent-green);
+  border: 1px solid var(--accent-green);
+}
+.stepper-progress {
+  display: flex;
+  gap: 6px;
+}
+.progress-pill {
+  flex: 1;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.progress-pill.active {
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue));
+  box-shadow: 0 0 10px var(--accent-cyan);
+}
+.progress-pill.completed {
+  background: var(--accent-green);
+}
+
+/* Main Workspace Left */
+.workspace-left {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.perfboard-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Mode & Filter Toolbar */
+.toolbar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.view-mode-tabs {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.tab-group {
+  display: flex;
+  background: var(--bg-card);
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+}
+.tab-btn {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.tab-btn.active {
+  background: var(--accent-cyan);
+  color: #041019;
+  font-weight: 700;
+}
+
+/* Net Selector Filter Buttons */
+.net-filter-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  background: rgba(15, 23, 42, 0.8);
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.net-filter-label {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-right: 4px;
+}
+.net-chip {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.net-chip:hover {
+  border-color: rgba(255,255,255,0.3);
+  color: #fff;
+}
+.net-chip.active {
+  color: #fff;
+  border-color: currentColor;
+  box-shadow: 0 0 10px currentColor;
+}
+.net-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* Board Viewer Container with Zoom & Pan */
+.board-viewer-outer {
+  position: relative;
+  background: #050a10;
+  border: 2px solid #1e293b;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 0 40px rgba(0,0,0,0.9);
+}
+.board-controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 6px;
+  z-index: 10;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(8px);
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+.ctrl-btn {
+  width: 32px;
+  height: 32px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: bold;
+}
+.ctrl-btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--accent-cyan);
+}
+
+.board-viewer-wrap {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  max-width: 840px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 10px;
+  cursor: grab;
+}
+.board-viewer-wrap:active {
+  cursor: grabbing;
+}
+#perfboard-svg {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  filter: drop-shadow(0 15px 35px rgba(0,0,0,0.85));
+  user-select: none;
+  transition: transform 0.2s ease-out;
+}
+
+/* Tooltip on board hover */
+.board-tooltip {
+  position: absolute;
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid var(--accent-cyan);
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  pointer-events: none;
+  z-index: 200;
+  display: none;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.7);
+  line-height: 1.45;
+}
+
+/* Step Instructions Details */
+.step-guide-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 24px;
+}
+.guide-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+@media (max-width: 768px) {
+  .guide-grid { grid-template-columns: 1fr; }
+}
+.guide-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 18px;
+}
+.guide-box h4 {
+  font-size: 0.95rem;
+  color: var(--accent-cyan);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.guide-box ul {
+  padding-left: 20px;
+  font-size: 0.88rem;
+  color: #cbd5e1;
+}
+.guide-box li {
+  margin-bottom: 9px;
+}
+.alert-box {
+  border-left: 4px solid var(--accent-amber);
+  background: rgba(245, 158, 11, 0.12);
+  padding: 14px 18px;
+  border-radius: 0 10px 10px 0;
+  margin-top: 16px;
+  font-size: 0.87rem;
+  line-height: 1.5;
+}
+.alert-box.danger {
+  border-left-color: var(--accent-red);
+  background: rgba(239, 68, 68, 0.12);
+}
+.alert-box.success {
+  border-left-color: var(--accent-green);
+  background: rgba(16, 185, 129, 0.12);
+}
+
+/* Right Sidebar: BOM & Checklist */
+.workspace-right {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.side-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 20px;
+}
+.side-card h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 10px;
+}
+.component-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.component-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+.component-item:hover, .component-item.active {
+  border-color: var(--accent-cyan);
+  background: var(--bg-card-hover);
+  transform: translateX(4px);
+  box-shadow: 0 0 12px rgba(0, 242, 254, 0.2);
+}
+.comp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.comp-name {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #fff;
+}
+.comp-tag {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 242, 254, 0.15);
+  color: var(--accent-cyan);
+}
+.comp-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.comp-coord {
+  font-size: 0.72rem;
+  color: var(--accent-amber);
+  margin-top: 4px;
+  font-family: monospace;
+}
+
+/* Interactive Checklist */
+.checklist-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 0.85rem;
+}
+.checklist-item input[type="checkbox"] {
+  margin-top: 4px;
+  accent-color: var(--accent-green);
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+}
+.checklist-item label {
+  cursor: pointer;
+  color: #cbd5e1;
+  line-height: 1.4;
+}
+
+/* Bottom Matrix & References */
+.full-width-section {
+  max-width: 1480px;
+  margin: 30px auto 0;
+  padding: 0 20px;
+}
+.matrix-table-wrap {
+  overflow-x: auto;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+.matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  text-align: left;
+}
+.matrix-table th {
+  background: var(--bg-card);
+  padding: 12px 16px;
+  color: var(--accent-cyan);
+  font-weight: 700;
+  border-bottom: 1px solid var(--border-color);
+}
+.matrix-table td {
+  padding: 11px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.matrix-table tr:hover {
+  background: rgba(255,255,255,0.03);
+}
+.net-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.75rem;
+  font-family: monospace;
+}
+
+/* Principles Grid */
+.principles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+  margin-top: 24px;
+}
+.principle-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+}
+.principle-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple));
+}
+.principle-card h4 {
+  font-size: 1rem;
+  color: #fff;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.principle-card p {
+  font-size: 0.84rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-cyan); }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="no-print">
+  <div class="header-container">
+    <div class="brand-title">
+      <div class="brand-icon">⚡</div>
+      <div>
+        <h1>SƠ ĐỒ HÀN BO MẠCH AN TOÀN & CHỐNG NHIỄU</h1>
+        <div class="subtitle">Bản Thiết Kế Trực Quan Perfboard PY-10x10cm (Lưới 2.54mm, 38x38 Lỗ) • Chuẩn Công Nghiệp</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button class="btn" onclick="window.print()">🖨️ In bản vẽ / PDF</button>
+      <button class="btn btn-primary" onclick="resetSimulator()">🔄 Reset Trạng Thái</button>
+    </div>
+  </div>
+</header>
+
+<!-- Main App Layout -->
+<main class="app-layout">
+  <!-- Left Side: Interactive Board & Step Guide -->
+  <div class="workspace-left">
+    
+    <!-- Stepper Banner -->
+    <div class="stepper-banner">
+      <div class="stepper-header">
+        <div>
+          <span class="step-counter" id="step-counter-text">BƯỚC 1 / 8</span>
+          <div class="step-title" id="step-title-text">
+            <span>Chuẩn Bị Bo Mạch & Cố Định Header Socket</span>
+            <span class="badge" id="step-badge">Khởi Tạo Cơ Khí</span>
+          </div>
+        </div>
+        <div class="stepper-nav">
+          <button class="btn" id="prev-btn" onclick="navigateStep(-1)" disabled>◀ Bước Trước</button>
+          <button class="btn btn-primary" id="next-btn" onclick="navigateStep(1)">Bước Tiếp Theo ▶</button>
+        </div>
+      </div>
+      <div class="stepper-progress" id="progress-pills-container">
+        <!-- 8 pills generated via JS -->
+      </div>
+    </div>
+
+    <!-- Perfboard Interactive Simulator -->
+    <div class="perfboard-card">
+      <div class="toolbar-wrap">
+        <div class="view-mode-tabs">
+          <div class="tab-group">
+            <button class="tab-btn active" id="tab-top" onclick="setViewMode('top')">👁️ Mặt Trên (Linh Kiện)</button>
+            <button class="tab-btn" id="tab-bottom" onclick="setViewMode('bottom')">⚡ Mặt Dưới (Đường Thiếc / Dây Câu)</button>
+            <button class="tab-btn" id="tab-xray" onclick="setViewMode('xray')">🔍 Nhìn Xuyên (X-Ray)</button>
+          </div>
+          <div style="font-size:0.8rem; color:var(--text-muted);">
+            💡 Rê chuột vào lỗ để xem tọa độ & tín hiệu • Cuộn chuột để phóng to
+          </div>
+        </div>
+
+        <!-- Net Selector Filter Buttons -->
+        <div class="net-filter-bar">
+          <span class="net-filter-label">🔍 Lọc Net Sáng:</span>
+          <button class="net-chip active" id="chip-ALL" onclick="setNetFilter('ALL')">Tất Cả Net</button>
+          <button class="net-chip" id="chip-GND" onclick="setNetFilter('GND')"><span class="net-dot" style="background:var(--net-gnd)"></span>GND (Mass Sao)</button>
+          <button class="net-chip" id="chip-5V" onclick="setNetFilter('5V')"><span class="net-dot" style="background:var(--net-5v)"></span>5V Main</button>
+          <button class="net-chip" id="chip-3V3" onclick="setNetFilter('3V3')"><span class="net-dot" style="background:var(--net-3v3)"></span>3.3V Logic</button>
+          <button class="net-chip" id="chip-RS485" onclick="setNetFilter('RS485')"><span class="net-dot" style="background:var(--net-rs485)"></span>RS485 A/B</button>
+          <button class="net-chip" id="chip-I2C" onclick="setNetFilter('I2C')"><span class="net-dot" style="background:var(--net-i2c)"></span>I2C Bus</button>
+          <button class="net-chip" id="chip-1WIRE" onclick="setNetFilter('1WIRE')"><span class="net-dot" style="background:var(--net-1wire)"></span>1-Wire</button>
+          <button class="net-chip" id="chip-ADC" onclick="setNetFilter('ADC')"><span class="net-dot" style="background:var(--net-adc)"></span>MQ2 / Water</button>
+        </div>
+      </div>
+
+      <!-- SVG Board Viewer with Zoom & Pan -->
+      <div class="board-viewer-outer">
+        <div class="board-controls no-print">
+          <button class="ctrl-btn" onclick="zoomBoard(1.2)" title="Phóng to">+</button>
+          <button class="ctrl-btn" onclick="zoomBoard(0.8)" title="Thu nhỏ">-</button>
+          <button class="ctrl-btn" onclick="resetBoardZoom()" title="Reset kích thước">1:1</button>
+        </div>
+        <div class="board-viewer-wrap" id="board-zoom-container">
+          <svg id="perfboard-svg" viewBox="0 0 950 950" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <radialGradient id="boardGrad" cx="50%" cy="50%" r="70%">
+                <stop offset="0%" stop-color="#0f2b1c"/>
+                <stop offset="100%" stop-color="#05140b"/>
+              </radialGradient>
+              <!-- Neon Glow Filters for Selected Tracks -->
+              <filter id="neonGlow" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="4" result="blur"/>
+                <feMerge>
+                  <feMergeNode in="blur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+            </defs>
+
+            <!-- Board Substrate 100x100mm (FR-4 Sợi Thủy Tinh) -->
+            <rect x="25" y="25" width="900" height="900" rx="16" fill="url(#boardGrad)" stroke="#1e5e34" stroke-width="4"/>
+            
+            <!-- 4 Corner Mounting Holes M3 (Cách mép 5mm) -->
+            <circle cx="55" cy="55" r="16" fill="#030805" stroke="#d4af37" stroke-width="3"/>
+            <circle cx="895" cy="55" r="16" fill="#030805" stroke="#d4af37" stroke-width="3"/>
+            <circle cx="55" cy="895" r="16" fill="#030805" stroke="#d4af37" stroke-width="3"/>
+            <circle cx="895" cy="895" r="16" fill="#030805" stroke="#d4af37" stroke-width="3"/>
+
+            <!-- Grid Pads Layer (38x38 Holes) -->
+            <g id="pads-grid-layer" opacity="0.75"></g>
+
+            <!-- Coordinates Rulers (1..38) -->
+            <g id="ruler-layer" font-family="monospace" font-size="10.5" fill="#64748b" text-anchor="middle" font-weight="bold"></g>
+
+            <!-- ANTENNA KEEP-OUT ZONE (Top Center: X:14..25, Y:1..5) -->
+            <g id="antenna-keepout">
+              <rect x="330" y="32" width="290" height="100" fill="rgba(239, 68, 68, 0.15)" stroke="#ef4444" stroke-width="2" stroke-dasharray="6,4" rx="6"/>
+              <text x="475" y="72" fill="#ef4444" font-size="12" font-weight="bold" text-anchor="middle">⚠️ KHU VỰC ANTEN WIFI (CẤM ĐI DÂY / KHÔNG CÓ ĐỒNG)</text>
+              <text x="475" y="92" fill="#94a3b8" font-size="10" text-anchor="middle">Đảm bảo sóng RF truyền phát tối đa không suy hao</text>
+            </g>
+
+            <!-- Bottom Solder Tracks Layer (Orthogonal Manhattan Routing) -->
+            <g id="solder-tracks-layer"></g>
+
+            <!-- Top Components Silk & Outlines Layer -->
+            <g id="components-layer"></g>
+
+            <!-- Dynamic Highlight Layer for Active Step -->
+            <g id="step-highlight-layer"></g>
+          </svg>
+          <div class="board-tooltip" id="board-tooltip"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step Instruction Detailed Box -->
+    <div class="step-guide-card">
+      <div id="step-details-container">
+        <!-- Content dynamically injected by JS based on active step -->
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Right Sidebar: Interactive BOM, Checklist & Net Explorer -->
+  <div class="workspace-right">
+    
+    <!-- Component Selector -->
+    <div class="side-card">
+      <h3>
+        <span>📦 Linh Kiện Trên Bo (10x10cm)</span>
+        <span style="font-size:0.75rem; color:var(--accent-cyan); font-weight:normal;">Lưới PY 2.54mm</span>
+      </h3>
+      <div class="component-list" id="bom-list-container">
+        <!-- Components injected via JS -->
+      </div>
+    </div>
+
+    <!-- Safety & Cold-Checklist -->
+    <div class="side-card">
+      <h3>
+        <span>🛡️ Checklist Đo Nguội An Toàn</span>
+        <span style="font-size:0.75rem; color:var(--accent-green); font-weight:normal;" id="checklist-progress">0/6 Đạt</span>
+      </h3>
+      <div id="checklist-container">
+        <div class="checklist-item">
+          <input type="checkbox" id="chk-1" onchange="updateChecklist()">
+          <label for="chk-1"><strong>1. Đo ngắn mạch VCC-GND:</strong> Thang đo thông mạch (bíp) giữa 5V-GND và 3V3-GND không kêu.</label>
+        </div>
+        <div class="checklist-item">
+          <input type="checkbox" id="chk-2" onchange="updateChecklist()">
+          <label for="chk-2"><strong>2. LM2596 xuất chuẩn 5.00V:</strong> Chỉnh biến trở ngõ ra đúng 5.00V trước khi cắm ESP32 vào socket.</label>
+        </div>
+        <div class="checklist-item">
+          <input type="checkbox" id="chk-3" onchange="updateChecklist()">
+          <label for="chk-3"><strong>3. Tách mass & Mass sao:</strong> Mọi chân GND (BMS, ESP32, Module) thông về gốc tụ 1000µF (&lt; 0.2Ω).</label>
+        </div>
+        <div class="checklist-item">
+          <input type="checkbox" id="chk-4" onchange="updateChecklist()">
+          <label for="chk-4"><strong>4. Cầu phân áp MQ-2:</strong> Đo chân AO sau cầu phân áp 10k/20k luôn ≤ 3.3V (không quá áp ADC GPIO1).</label>
+        </div>
+        <div class="checklist-item">
+          <input type="checkbox" id="chk-5" onchange="updateChecklist()">
+          <label for="chk-5"><strong>5. Trở pull-up 4.7kΩ DS18B20:</strong> Đã kéo từ DATA lên 3V3 (không kéo lên 5V).</label>
+        </div>
+        <div class="checklist-item">
+          <input type="checkbox" id="chk-6" onchange="updateChecklist()">
+          <label for="chk-6"><strong>6. Chân VBAT BMS cách ly:</strong> Cổng UART BMS chân VBAT (~29V) để trống, bọc cách điện kỹ.</label>
+        </div>
+      </div>
+      <div class="alert-box success" id="checklist-congrats" style="display:none; margin-top:12px;">
+        ✅ ĐÃ PASS TẤT CẢ PHÉP ĐO NGUỘI! An toàn 100% để cắm ESP32 và cấp điện thử nghiệm.
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- Full Width Engineering Matrix & Rules -->
+<section class="full-width-section">
+  <!-- Pinout & Netlist Table -->
+  <div class="matrix-table-wrap">
+    <table class="matrix-table">
+      <thead>
+        <tr>
+          <th>Tên Net / Tín Hiệu</th>
+          <th>Chân ESP32-S3</th>
+          <th>Đích Đến (Module / Connector)</th>
+          <th>Mức Điện Áp</th>
+          <th>Quy Cách Dây & Biện Pháp Chống Chạm / Nhiễu</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="net-badge" style="background:rgba(239,68,68,0.2); color:var(--net-5v); border:1px solid var(--net-5v);">VCC_5V</span></td>
+          <td>Chân 5V / VIN (X:25, Y:27)</td>
+          <td>LM2596 OUT+, Cực (+) Tụ 1000µF, MQ-2 VCC</td>
+          <td>5.00V DC (±0.05V)</td>
+          <td>Dây AWG22 hoặc tráng thiếc dải 2mm, tụ 1000µF sát VIN</td>
+        </tr>
+        <tr>
+          <td><span class="net-badge" style="background:rgba(16,185,129,0.2); color:var(--net-gnd); border:1px solid var(--net-gnd);">GND_STAR</span></td>
+          <td>Chân GND (Mọi chân GND)</td>
+          <td>Gốc Tụ 1000µF (X:16, Y:35), LM2596 OUT-, Mọi Module & BMS GND</td>
+          <td>0V (Reference chung)</td>
+          <td>Đi hình SAO (Star Ground) từ cực âm tụ 1000µF, tuyệt đối không daisy-chain</td>
+        </tr>
+        <tr>
+          <td><span class="net-badge" style="background:rgba(245,158,11,0.2); color:var(--net-3v3); border:1px solid var(--net-3v3);">VCC_3V3</span></td>
+          <td>Chân 3V3 Out (X:13, Y:7)</td>
+          <td>INA226, SHT31, DS18B20, Water Leak, MAX485 VCC</td>
+          <td>3.3V Logic</td>
+          <td>Tụ gốm 100nF (104) tại mỗi module, không cấp dòng &gt;400mA</td>
+        </tr>
+        <tr>
+          <td><span class="net-badge" style="background:rgba(168,85,247,0.2); color:var(--net-rs485); border:1px solid var(--net-rs485);">RS485_UART</span></td>
+          <td>GPIO17 (TX), GPIO18 (RX), GPIO16 (DE)</td>
+          <td>MAX485 DI, RO, DE+RE (XY-017)</td>
+          <td>3.3V TTL</td>
+          <td>Đường ngắn &lt; 5cm, cách ly xa cuộn cảm LM2596 &gt;6cm</td>
+        </tr>
+        <tr>
+          <td><span class="net-badge" style="background:rgba(6,182,212,0.2); color:var(--net-i2c); border:1px solid var(--net-i2c);">I2C_BUS</span></td>
+          <td>GPIO8 (SDA), GPIO9 (SCL)</td>
+          <td>INA226 (0x40) + SHT31 (0x44)</td>
+          <td>3.3V I2C</td>
+          <td>Chạy song song cặp, cách xa đường xung nguồn, tần số 100kHz</td>
+        </tr>
+        <tr>
+          <td><span class="net-badge" style="background:rgba(236,72,153,0.2); color:var(--net-1wire); border:1px solid var(--net-1wire);">1WIRE_DATA</span></td>
+          <td>GPIO4 (X:13, Y:11)</td>
+          <td>DS18B20 Data Pin (Dây Vàng/Trắng)</td>
+          <td>3.3V 1-Wire</td>
+          <td>Trở kéo 4.7kΩ lên 3V3 đặt ngay chân Domino, đầu dò bọc cách điện</td>
+        </tr>
+        <tr>
+          <td><span class="net-badge" style="background:rgba(249,115,22,0.2); color:var(--net-adc); border:1px solid var(--net-adc);">ADC_MQ2</span></td>
+          <td>GPIO1 (ADC1_CH0)</td>
+          <td>Điểm giữa cầu phân áp R1(10k) + R2(20k)</td>
+          <td>0 - 3.33V Max</td>
+          <td>Tụ lọc cao tần 100nF song song R2 dập nhiễu heater cảm biến</td>
+        </tr>
+        <tr>
+          <td><span class="net-badge" style="background:rgba(59,130,246,0.2); color:var(--net-water); border:1px solid var(--net-water);">WATER_LEAK</span></td>
+          <td>GPIO2</td>
+          <td>Module LM393 DO (Cảm biến nước)</td>
+          <td>3.3V Digital</td>
+          <td>Kéo trở nội INPUT_PULLUP (Ướt = LOW), đường dây bọc chống ẩm</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 4 Pillars of Anti-Noise Engineering -->
+  <div class="principles-grid">
+    <div class="principle-card">
+      <h4>🌐 1. Quy Luật Star Ground (Tiếp Địa Sao)</h4>
+      <p>Không bao giờ nối mass kiểu nối tiếp (daisy-chain) qua từng module rồi mới về nguồn. Dòng xung nạp tụ và đóng cắt của LM2596 sẽ tạo sụt áp trên đường mass gây sai số ADC và nhiễu RS485. Tất cả mass phải quy tụ về 1 điểm gốc tại cực âm tụ 1000µF.</p>
+    </div>
+    <div class="principle-card">
+      <h4>⚡ 2. Lọc Nguồn Kép (Bulk + Decoupling)</h4>
+      <p>ESP32-S3 tiêu thụ dòng đỉnh lên tới ~500mA khi phát WiFi/TLS, gây sụt áp làm MCU reset vặt. Cần tụ hóa <strong>1000µF / 25V</strong> gánh tải tức thời kết hợp song song tụ gốm <strong>100nF (104)</strong> để dập xung gai tần số cao (&gt;10MHz).</p>
+    </div>
+    <div class="principle-card">
+      <h4>🛡️ 3. An Toàn Điện Áp & Level Shift</h4>
+      <p>ESP32-S3 là vi điều khiển 3.3V logic thuần túy. Tuyệt đối không đưa 5V vào GPIO. Với cảm biến chạy 5V như MQ-2, bắt buộc dùng cầu phân áp R1=10kΩ, R2=20kΩ (giảm 5V về 3.33V an toàn). Chân VBAT của BMS (~29V) phải bọc kín cách điện.</p>
+    </div>
+    <div class="principle-card">
+      <h4>📡 4. Cách Ly Không Gian Anten & Nhiễu Xung</h4>
+      <p>Cuộn cảm và diode xung của LM2596 phát xạ từ trường nhiễu cao. Đặt khối LM2596 ở góc dưới bên trái. Đặt phần anten PCB của ESP32 quay thẳng ra mép trên cùng của bo mạch, khu vực dưới anten không hàn bất kỳ dây dẫn nào.</p>
+    </div>
+  </div>
+</section>
+
+<script>
+// ==========================================
+// 1. DATA DEFINITIONS & SCHEMATIC DATABASE
+// ==========================================
+
+const BOARD_COLS = 38;
+const BOARD_ROWS = 38;
+const GRID_SIZE = 23.68; // px per hole (900px / 38 holes)
+const OFFSET_X = 25;
+const OFFSET_Y = 25;
+
+// Coordinate helper: 1-indexed to SVG pixels
+function getHolePos(col, row) {
+  return {
+    x: OFFSET_X + (col - 1 + 0.5) * GRID_SIZE,
+    y: OFFSET_Y + (row - 1 + 0.5) * GRID_SIZE
+  };
+}
+
+// Components list & coordinates on the 10x10cm Board
+const COMPONENTS_DB = [
+  {
+    id: "esp32",
+    name: "ESP32-S3 DevKitC-1",
+    tag: "MCU N16R8",
+    desc: "2 hàng Socket Header cái 2x22 pin (Cắm rút an toàn, anten hướng mép trên)",
+    col: 13, row: 6, width: 13, height: 23,
+    step: 1,
+    color: "#00f2fe",
+    pins: [
+      { name: "3V3", col: 13, row: 7, net: "3V3" },
+      { name: "GND", col: 13, row: 8, net: "GND" },
+      { name: "GPIO4 (1-Wire)", col: 13, row: 11, net: "1WIRE" },
+      { name: "GPIO17 (TX2)", col: 13, row: 20, net: "RS485_TX" },
+      { name: "GPIO18 (RX2)", col: 13, row: 21, net: "RS485_RX" },
+      { name: "GPIO8 (SDA)", col: 13, row: 22, net: "I2C_SDA" },
+      { name: "GPIO1 (MQ2)", col: 25, row: 8, net: "ADC_MQ2" },
+      { name: "GPIO2 (Water)", col: 25, row: 9, net: "WATER" },
+      { name: "GPIO9 (SCL)", col: 25, row: 13, net: "I2C_SCL" },
+      { name: "GPIO16 (DE)", col: 25, row: 20, net: "RS485_DE" },
+      { name: "5V / VIN", col: 25, row: 27, net: "5V" },
+      { name: "GND_PWR", col: 25, row: 28, net: "GND" }
+    ]
+  },
+  {
+    id: "pwr_in",
+    name: "Domino Nguồn 24V In + Jack DC",
+    tag: "Nguồn Vào",
+    desc: "Cấp nguồn 24V từ Pack (hoặc Adapter 5V). Domino 2P bắt vít chắc chắn",
+    col: 2, row: 33, width: 4, height: 4,
+    step: 2,
+    color: "#ef4444",
+    pins: [
+      { name: "VIN_24V (+)", col: 2, row: 34, net: "RAW_VIN" },
+      { name: "GND_IN (-)", col: 2, row: 36, net: "GND" }
+    ]
+  },
+  {
+    id: "fuse_diode",
+    name: "Cầu Chì 2A + Diode SS34",
+    tag: "Bảo Vệ",
+    desc: "Cầu chì tự phục hồi + Diode Schottky chống cắm ngược cực nguồn pin",
+    col: 6, row: 33, width: 4, height: 4,
+    step: 2,
+    color: "#f59e0b",
+    pins: [
+      { name: "FUSE_IN", col: 6, row: 34, net: "RAW_VIN" },
+      { name: "DIODE_OUT", col: 9, row: 34, net: "PROT_VIN" }
+    ]
+  },
+  {
+    id: "lm2596",
+    name: "Module Hạ Áp LM2596 (24V→5V)",
+    tag: "Hạ Áp DC-DC",
+    desc: "Hạ 24V pin xuống 5.00V nuôi ESP32 & MQ-2. Đặt góc dưới xa anten >6cm",
+    col: 2, row: 21, width: 10, height: 10,
+    step: 2,
+    color: "#ff3d71",
+    pins: [
+      { name: "IN+", col: 2, row: 22, net: "PROT_VIN" },
+      { name: "IN-", col: 2, row: 30, net: "GND" },
+      { name: "OUT+", col: 11, row: 22, net: "5V" },
+      { name: "OUT-", col: 11, row: 30, net: "GND" }
+    ]
+  },
+  {
+    id: "caps_filter",
+    name: "Tụ Lọc 1000µF + 100nF (Star Hub)",
+    tag: "Lọc Nhiễu & Mass Sao",
+    desc: "Gốc Mass Sao (Star Ground). Chống sụt áp khi WiFi phát xung 500mA",
+    col: 13, row: 32, width: 6, height: 5,
+    step: 3,
+    color: "#10b981",
+    pins: [
+      { name: "CAP_5V (+)", col: 14, row: 33, net: "5V" },
+      { name: "CAP_GND_STAR (-)", col: 16, row: 35, net: "GND" },
+      { name: "CERAMIC_5V", col: 17, row: 33, net: "5V" },
+      { name: "CERAMIC_GND", col: 17, row: 35, net: "GND" }
+    ]
+  },
+  {
+    id: "max485",
+    name: "Module MAX485 (XY-017)",
+    tag: "RS485 Modbus",
+    desc: "Giao tiếp JK-BMS qua Modbus RTU 115200. Có Socket cắm rút + Trở 120Ω",
+    col: 28, row: 21, width: 8, height: 8,
+    step: 4,
+    color: "#a855f7",
+    pins: [
+      { name: "VCC (3.3V)", col: 28, row: 22, net: "3V3" },
+      { name: "GND", col: 28, row: 23, net: "GND" },
+      { name: "RO (RX)", col: 28, row: 24, net: "RS485_RX" },
+      { name: "DI (TX)", col: 28, row: 25, net: "RS485_TX" },
+      { name: "DE/RE", col: 28, row: 26, net: "RS485_DE" },
+      { name: "A (+)", col: 35, row: 22, net: "RS485_A" },
+      { name: "B (-)", col: 35, row: 24, net: "RS485_B" }
+    ]
+  },
+  {
+    id: "domino_rs485",
+    name: "Domino 3P RS485 Ra BMS",
+    tag: "Đầu Nối Ngoài",
+    desc: "Domino xanh 3 chân bắt vít: A, B, GND nối cáp pigtail cổng CAN&RS485 BMS",
+    col: 34, row: 32, width: 4, height: 5,
+    step: 4,
+    color: "#c084fc",
+    pins: [
+      { name: "DOM_A", col: 35, row: 33, net: "RS485_A" },
+      { name: "DOM_B", col: 35, row: 35, net: "RS485_B" },
+      { name: "DOM_GND", col: 37, row: 35, net: "GND" }
+    ]
+  },
+  {
+    id: "ina226",
+    name: "Module INA226 (I2C 0x40)",
+    tag: "Đo V/I Redundant",
+    desc: "Đo điện áp và dòng pin độc lập để so chéo BMS. Chung bus I2C GPIO8/9",
+    col: 28, row: 11, width: 8, height: 8,
+    step: 5,
+    color: "#06b6d4",
+    pins: [
+      { name: "VCC", col: 28, row: 12, net: "3V3" },
+      { name: "GND", col: 28, row: 13, net: "GND" },
+      { name: "SCL", col: 28, row: 14, net: "I2C_SCL" },
+      { name: "SDA", col: 28, row: 15, net: "I2C_SDA" },
+      { name: "VBUS (+Pack)", col: 35, row: 12, net: "PROT_VIN" }
+    ]
+  },
+  {
+    id: "sht31",
+    name: "Module SHT31 (I2C 0x44)",
+    tag: "Nhiệt - Ẩm",
+    desc: "Cảm biến nhiệt độ - độ ẩm môi trường trạm pin. Chung bus I2C GPIO8/9",
+    col: 28, row: 3, width: 8, height: 7,
+    step: 5,
+    color: "#38bdf8",
+    pins: [
+      { name: "VCC", col: 28, row: 4, net: "3V3" },
+      { name: "GND", col: 28, row: 5, net: "GND" },
+      { name: "SCL", col: 28, row: 6, net: "I2C_SCL" },
+      { name: "SDA", col: 28, row: 7, net: "I2C_SDA" }
+    ]
+  },
+  {
+    id: "ds18b20",
+    name: "Domino 3P + Trở 4.7kΩ DS18B20",
+    tag: "1-Wire Thân Pin",
+    desc: "Cảm biến nhiệt độ vỏ pin DS18B20 chống nước. Trở pull-up 4.7kΩ kéo lên 3V3",
+    col: 2, row: 13, width: 6, height: 6,
+    step: 6,
+    color: "#ec4899",
+    pins: [
+      { name: "VCC_3V3", col: 3, row: 14, net: "3V3" },
+      { name: "DATA_GPIO4", col: 3, row: 16, net: "1WIRE" },
+      { name: "GND", col: 3, row: 18, net: "GND" }
+    ]
+  },
+  {
+    id: "mq2_divider",
+    name: "Cầu Phân Áp MQ-2 (10k/20k) + Lọc",
+    tag: "Khói Gas + Phân Áp",
+    desc: "Hạ AO 5V về 3.33V trước khi vào GPIO1 (ADC1). Kèm tụ gốm 100nF lọc nhiễu",
+    col: 2, row: 5, width: 7, height: 6,
+    step: 7,
+    color: "#f97316",
+    pins: [
+      { name: "MQ2_5V", col: 2, row: 6, net: "5V" },
+      { name: "MQ2_AO_IN", col: 2, row: 8, net: "AO_RAW" },
+      { name: "ADC_OUT", col: 6, row: 8, net: "ADC_MQ2" },
+      { name: "GND", col: 2, row: 10, net: "GND" }
+    ]
+  },
+  {
+    id: "water_leak",
+    name: "Header Water Leak (LM393)",
+    tag: "Rò Nước",
+    desc: "Cảm biến rò rỉ nước khay pin. Nối vào GPIO2 (INPUT_PULLUP, ướt = LOW)",
+    col: 9, row: 3, width: 4, height: 4,
+    step: 7,
+    color: "#3b82f6",
+    pins: [
+      { name: "VCC", col: 9, row: 4, net: "3V3" },
+      { name: "DO_GPIO2", col: 11, row: 4, net: "WATER" },
+      { name: "GND", col: 9, row: 6, net: "GND" }
+    ]
+  }
+];
+
+// Clean Manhattan Orthogonal Tracks (No diagonals, strictly channeled)
+const SOLDER_TRACKS = [
+  // 1. Raw Vin & Protection (Step 2)
+  { id: "t_raw_vin", net: "RAW_VIN", step: 2, color: "#ef4444", width: 4.5, path: [[2,34], [6,34]] },
+  { id: "t_prot_vin", net: "PROT_VIN", step: 2, color: "#f59e0b", width: 4.5, path: [[9,34], [9,22], [2,22]] },
+  { id: "t_prot_vbus", net: "PROT_VIN", step: 5, color: "#f59e0b", width: 2.2, path: [[9,22], [9,19], [26,19], [26,12], [35,12]], isJumper: true }, // Jumper to INA226 VBUS
+
+  // 2. 5V Main Rail (Step 2, 3, 7)
+  { id: "t_5v_out", net: "5V", step: 2, color: "#ef4444", width: 5.5, path: [[11,22], [14,22], [14,33]] }, // LM2596 OUT+ to Cap 1000uF
+  { id: "t_5v_vin", net: "5V", step: 3, color: "#ef4444", width: 4.5, path: [[14,33], [25,33], [25,27]] }, // Cap to ESP32 VIN
+  { id: "t_5v_mq2", net: "5V", step: 7, color: "#ef4444", width: 3.2, path: [[14,22], [12,22], [12,6], [2,6]], isJumper: true }, // 5V to MQ2
+
+  // 3. Ground Star Distribution (Step 2, 3, 4, 5, 6, 7)
+  // Input GND to LM2596 IN-
+  { id: "t_gnd_in", net: "GND", step: 2, color: "#10b981", width: 5.5, path: [[2,36], [2,30]] },
+  // LM2596 OUT- to Main Star Center (Cap 1000uF GND at X=16, Y=35)
+  { id: "t_gnd_star_hub", net: "GND", step: 2, color: "#10b981", width: 6.5, path: [[11,30], [16,30], [16,35]] },
+  // Star Center to ESP32 GND (X:25, Y:28)
+  { id: "t_gnd_esp32", net: "GND", step: 3, color: "#10b981", width: 5.5, path: [[16,35], [26,35], [26,28], [25,28]] },
+  // Star Center to RS485 & Domino GND
+  { id: "t_gnd_rs485", net: "GND", step: 4, color: "#10b981", width: 4.5, path: [[16,35], [37,35], [37,23], [28,23]] },
+  // ESP32 GND (X:13, Y:8) to Left Sensor Bus (DS18B20, MQ-2, Water)
+  { id: "t_gnd_left_bus", net: "GND", step: 6, color: "#10b981", width: 3.5, path: [[13,8], [3,8], [3,18]] },
+  { id: "t_gnd_mq2", net: "GND", step: 7, color: "#10b981", width: 3.5, path: [[3,8], [3,10], [2,10]] },
+  { id: "t_gnd_water", net: "GND", step: 7, color: "#10b981", width: 3.0, path: [[13,8], [13,6], [9,6]] },
+  // ESP32 GND (X:25, Y:8) to Right Sensor Bus (INA226, SHT31)
+  { id: "t_gnd_right_bus", net: "GND", step: 5, color: "#10b981", width: 3.5, path: [[25,8], [27,8], [27,5], [28,5]] },
+  { id: "t_gnd_ina226", net: "GND", step: 5, color: "#10b981", width: 3.5, path: [[27,8], [27,13], [28,13]] },
+
+  // 4. 3.3V Logic Bus (Step 3, 4, 5, 6, 7)
+  // ESP32 3V3 (13,7) to Right Rail -> MAX485, INA226, SHT31
+  { id: "t_3v3_right", net: "3V3", step: 3, color: "#f59e0b", width: 3.5, path: [[13,7], [13,2], [28,2], [28,4]], isJumper: true }, // To SHT31
+  { id: "t_3v3_ina226", net: "3V3", step: 5, color: "#f59e0b", width: 3.5, path: [[28,4], [28,12]] }, // To INA226
+  { id: "t_3v3_max485", net: "3V3", step: 4, color: "#f59e0b", width: 3.5, path: [[28,12], [28,22]] }, // To MAX485
+  // ESP32 3V3 (13,7) to Left Rail -> DS18B20, Water
+  { id: "t_3v3_left", net: "3V3", step: 6, color: "#f59e0b", width: 3.5, path: [[13,7], [4,7], [4,14], [3,14]] }, // To DS18B20
+  { id: "t_3v3_water", net: "3V3", step: 7, color: "#f59e0b", width: 3.0, path: [[13,7], [13,2], [9,2], [9,4]], isJumper: true }, // To Water
+
+  // 5. RS485 Signals (Step 4)
+  { id: "t_rs485_tx", net: "RS485_TX", step: 4, color: "#a855f7", width: 2.8, path: [[13,20], [18,20], [18,25], [28,25]] }, // GPIO17 to DI
+  { id: "t_rs485_rx", net: "RS485_RX", step: 4, color: "#c084fc", width: 2.8, path: [[13,21], [19,21], [19,24], [28,24]] }, // GPIO18 to RO
+  { id: "t_rs485_de", net: "RS485_DE", step: 4, color: "#e9d5ff", width: 2.8, path: [[25,20], [27,20], [27,26], [28,26]] }, // GPIO16 to DE+RE
+  { id: "t_rs485_a", net: "RS485_A", step: 4, color: "#8b5cf6", width: 3.2, path: [[35,22], [35,33]] }, // MAX485 A to Domino A
+  { id: "t_rs485_b", net: "RS485_B", step: 4, color: "#7c3aed", width: 3.2, path: [[35,24], [35,35]] }, // MAX485 B to Domino B
+
+  // 6. I2C Bus Signals (Step 5)
+  { id: "t_i2c_sda", net: "I2C_SDA", step: 5, color: "#06b6d4", width: 2.8, path: [[13,22], [22,22], [22,7], [28,7]], isJumper: true }, // GPIO8 to SHT31 SDA
+  { id: "t_i2c_sda_ina", net: "I2C_SDA", step: 5, color: "#06b6d4", width: 2.8, path: [[22,7], [22,15], [28,15]] }, // to INA226 SDA
+  { id: "t_i2c_scl", net: "I2C_SCL", step: 5, color: "#0284c7", width: 2.8, path: [[25,13], [29,13], [29,6], [28,6]] }, // GPIO9 to SHT31 SCL
+  { id: "t_i2c_scl_ina", net: "I2C_SCL", step: 5, color: "#0284c7", width: 2.8, path: [[29,13], [29,14], [28,14]] }, // to INA226 SCL
+
+  // 7. 1-Wire Signal (Step 6)
+  { id: "t_1wire", net: "1WIRE", step: 6, color: "#ec4899", width: 2.8, path: [[13,11], [5,11], [5,16], [3,16]] }, // GPIO4 to DS18B20 DATA
+
+  // 8. MQ-2 & Water Signals (Step 7)
+  { id: "t_mq2_raw", net: "AO_RAW", step: 7, color: "#fb923c", width: 2.2, path: [[2,8], [6,8]] }, // R1 10k resistor
+  { id: "t_mq2_adc", net: "ADC_MQ2", step: 7, color: "#f97316", width: 2.8, path: [[6,8], [15,8], [15,10], [24,10], [24,8], [25,8]], isJumper: true }, // Divider to GPIO1
+  { id: "t_water", net: "WATER", step: 7, color: "#3b82f6", width: 2.8, path: [[11,4], [18,4], [18,9], [25,9]], isJumper: true } // DO to GPIO2
+];
+
+// 8 Step-by-step Guides Data
+const STEPS_DATA = [
+  {
+    step: 1,
+    counter: "BƯỚC 1 / 8",
+    title: "Chuẩn Bị Bo Mạch & Cố Định Header Socket",
+    badge: "Cơ Khí & Định Vị",
+    action: "Cố định 2 hàng Header cái 2x22 pin cho ESP32-S3 và Socket cắm module",
+    instructions: [
+      "Đặt bo mạch đa năng <strong>PY-10x10cm (FR4 sợi thủy tinh)</strong> lên giá kẹp mỏ hàn.",
+      "Xác định <strong>vùng Anten WiFi</strong> ở mép trên cùng (X: 14..25, Y: 1..5) — Đảm bảo để trống hoàn toàn, không có đồng hoặc dây câu đi qua.",
+      "Hàn 2 thanh <strong>Header pin cái 2.54mm (22 pin/thanh)</strong> tại cột X=13 và X=25 (khoảng cách 11 lỗ) để cắm ESP32-S3 DevKitC-1.",
+      "Hàn các socket header cái cho Module MAX485 (8-pin) và INA226/SHT31 để sau này dễ tháo lắp thay thế khi bảo trì."
+    ],
+    antiNoiseTips: [
+      "Dùng socket cắm rút thay vì hàn chết MCU giúp tránh quá nhiệt làm hỏng chip flash/PSRAM khi hàn kéo dài.",
+      "Vệ sinh sạch nhựa thông thừa bằng cồn 99% (IPA) ngay sau khi hàn cố định các chân header."
+    ],
+    alert: "⚠️ Tuyệt đối không hàn ngược chiều socket. Kiểm tra độ thẳng hàng bằng cách ướm thử board ESP32 trước khi chấm thiếc toàn bộ.",
+    alertType: "warning"
+  },
+  {
+    step: 2,
+    counter: "BƯỚC 2 / 8",
+    title: "Lắp Đặt & Hàn Khối Nguồn Bảo Vệ 24V / LM2596",
+    badge: "Khối Nguồn Công Suất",
+    action: "Hàn Jack DC, Cầu chì 2A, Diode SS34 và Module LM2596 DC-DC",
+    instructions: [
+      "Hàn <strong>Domino 2P / Jack DC 5.5x2.5mm</strong> tại góc dưới bên trái (X: 2..5, Y: 33..36).",
+      "Nối cực Dương In (+) qua <strong>Cầu chì ống/PolySwitch 2A-3A</strong> và <strong>Diode Schottky SS34 / 1N5822</strong> (chống cắm ngược cực nguồn pin).",
+      "Hàn Module <strong>LM2596 Buck Converter</strong> tại góc (X: 2..11, Y: 21..30).",
+      "Cấp nguồn 24V từ bộ nguồn bàn hoặc pin vào Domino In. Dùng đồng hồ đo que đỏ vào OUT+, que đen vào OUT- của LM2596. <strong>Vặn biến trở vi chỉnh để ngõ ra ĐÚNG 5.00V DC</strong>."
+    ],
+    antiNoiseTips: [
+      "LM2596 là nguồn xung (Switching) tần số 150kHz. Đặt ở góc dưới xa ESP32 (>6cm) để từ trường cuộn cảm không gây nhiễu vào RF WiFi và ADC.",
+      "Đường dây 24V và 5V công suất dùng dây <strong>AWG22</strong> hoặc kéo vệt thiếc dải rộng 2-3mm trên mặt dưới perfboard."
+    ],
+    alert: "🛑 QUAN TRỌNG: Phải đo và chốt điện áp LM2596 ra 5.0V TRƯỚC KHI nối vào bất kỳ linh kiện nào khác! Biến trở xuất xưởng có thể đang ở mức 20V+ làm cháy tức thì ESP32.",
+    alertType: "danger"
+  },
+  {
+    step: 3,
+    counter: "BƯỚC 3 / 8",
+    title: "Thiết Lập Star Ground (Gốc Mass Sao) & Tụ Lọc Nhiễu Kép",
+    badge: "Lõi Chống Nhiễu",
+    action: "Hàn Tụ Hóa 1000µF + Tụ Gốm 100nF và tạo Gốc Tiếp Địa Sao",
+    instructions: [
+      "Hàn <strong>Tụ hóa 1000µF / 25V-35V (Electrolytic)</strong> tại vị trí (X: 14..16, Y: 33..35) ngay sau ngõ ra 5V của LM2596.",
+      "Hàn song song 1 <strong>Tụ gốm 100nF (mã 104)</strong> sát chân tụ hóa để triệt tiêu xung gai tần số cao.",
+      "Chân Cực Âm (-) của Tụ 1000µF (X:16, Y:35) được chọn làm <strong>GỐC TIẾP ĐỊA SAO TRUNG TÂM (MAIN STAR GROUND)</strong>.",
+      "Kéo đường 5V (Dây Đỏ AWG22) từ cực (+) tụ 1000µF tới chân <strong>5V/VIN</strong> của ESP32 (X: 25, Y: 27).",
+      "Kéo đường GND (Dây Xanh/Đồng tráng thiếc to) từ Gốc Mass Sao tới chân <strong>GND</strong> của ESP32 (X: 25, Y: 28)."
+    ],
+    antiNoiseTips: [
+      "ESP32-S3 khi kết nối WiFi và bắt tay TLS ngốn dòng xung đột ngột ~500mA trong vài mili-giây. Tụ 1000µF hoạt động như một hồ chứa năng lượng tức thời, chống sụt áp gây reset vặt (Brownout Detector).",
+      "Mọi đường Mass (GND) của các module sau này đều kéo riêng biệt về Gốc Mass Sao này, không nối tiếp dây chuyền (daisy-chain)."
+    ],
+    alert: "ℹ️ Chú ý cực tính tụ hóa: Vạch xám trên thân tụ là Cực Âm (-). Cắm ngược cực tụ hóa khi cấp điện sẽ bị nổ tụ.",
+    alertType: "warning"
+  },
+  {
+    step: 4,
+    counter: "BƯỚC 4 / 8",
+    title: "Hàn Khối Giao Tiếp RS485 Modbus & Domino Ra BMS",
+    badge: "Giao Tiếp BMS",
+    action: "Nối MAX485 (XY-017) với UART ESP32 và Domino 3P kết nối BMS JK",
+    instructions: [
+      "Đặt Module <strong>MAX485</strong> tại khu vực bên phải (X: 28..35, Y: 21..28).",
+      "Hàn <strong>Domino 3P màu xanh</strong> tại mép dưới (X: 34..37, Y: 32..36) gồm 3 chân: <strong>A</strong>, <strong>B</strong>, và <strong>GND</strong>.",
+      "Đấu dây tín hiệu TTL về ESP32:",
+      "• <strong>DI (TX)</strong> -> GPIO17 (X: 13, Y: 20)",
+      "• <strong>RO (RX)</strong> -> GPIO18 (X: 13, Y: 21)",
+      "• <strong>DE + RE</strong> (nối chung) -> GPIO16 (X: 25, Y: 20) — (Nếu dùng XY-017 auto-direction thì bỏ chân này).",
+      "• Cấp nguồn VCC cho MAX485 từ <strong>3.3V</strong> của ESP32, GND kéo về Mass Sao.",
+      "Hàn sẵn 1 cặp chân chờ (jumper) cho <strong>Điện trở 120Ω 1/4W</strong> giữa 2 đường A và B."
+    ],
+    antiNoiseTips: [
+      "Đường dây RS485 A/B từ Domino tới BMS phải dùng cáp đôi xoắn (Twisted Pair) có bọc kim chống nhiễu (Shielded).",
+      "Vỏ bọc kim (Shield) của cáp RS485 chỉ nối Mass GND tại 1 đầu duy nhất trên board mạch để tránh tạo vòng lặp Mass (Ground Loop)."
+    ],
+    alert: "⚠️ CẢNH BÁO AN TOÀN BMS: Cổng CAN&RS485 của JK-BMS cắm pigtail chỉ lấy 3 dây A, B, GND. Chân VBAT (~29V) trên cổng UART phải BỎ TRỐNG, bọc co nhiệt tuyệt đối không nối vào board.",
+    alertType: "danger"
+  },
+  {
+    step: 5,
+    counter: "BƯỚC 5 / 8",
+    title: "Hàn Bus I2C Cảm Biến Redundant (INA226 + SHT31)",
+    badge: "I2C Telemetry",
+    action: "Nối chung Bus I2C GPIO8 (SDA) và GPIO9 (SCL) cho INA226 & SHT31",
+    instructions: [
+      "Đặt Module <strong>INA226 (I2C 0x40)</strong> tại (X: 28..35, Y: 11..18) và <strong>SHT31 (I2C 0x44)</strong> tại (X: 28..35, Y: 3..9).",
+      "Đấu song song đường bus I2C từ 2 module về ESP32-S3:",
+      "• <strong>SDA</strong> của INA226 & SHT31 nối chung về <strong>GPIO8</strong> (X: 13, Y: 22).",
+      "• <strong>SCL</strong> của INA226 & SHT31 nối chung về <strong>GPIO9</strong> (X: 25, Y: 13).",
+      "• Cấp <strong>VCC 3.3V</strong> và <strong>GND</strong> từ nhánh logic của ESP32.",
+      "Hàn 1 đường đo điện áp Pack từ sau cầu chì (PROT_VIN) qua điện trở bảo vệ 10kΩ vào chân <strong>VBUS</strong> của INA226."
+    ],
+    antiNoiseTips: [
+      "Bus I2C chạy tần số chuẩn 100kHz (I2C_FREQUENCY_HZ = 100000UL trong config.h). Đi dây SDA và SCL đi kèm nhau, không đi vắt ngang qua đường nguồn AC hoặc cuộn cảm.",
+      "Hàn 1 tụ gốm 100nF nhỏ sát chân VCC-GND của mỗi module để dập nhiễu chuyển mạch I2C."
+    ],
+    alert: "ℹ️ Lưu ý: Hai module có địa chỉ I2C khác nhau (INA226 là 0x40, SHT31 là 0x44) nên hoàn toàn không xung đột địa chỉ trên cùng 1 bus.",
+    alertType: "success"
+  },
+  {
+    step: 6,
+    counter: "BƯỚC 6 / 8",
+    title: "Hàn Khối 1-Wire Cảm Biến Nhiệt Thân Pin DS18B20",
+    badge: "1-Wire Temp",
+    action: "Hàn Domino 3P cắm đầu dò DS18B20 + Điện trở Kéo lên 4.7kΩ",
+    instructions: [
+      "Hàn <strong>Domino 3P</strong> tại mép trái (X: 2..5, Y: 13..18) cho đầu dò nhiệt độ vỏ pin DS18B20.",
+      "Thứ tự chân Domino: Chân 1 (Đỏ = 3.3V), Chân 2 (Vàng/Trắng = DATA), Chân 3 (Đen = GND).",
+      "Hàn 1 <strong>Điện trở 4.7kΩ (1/4W)</strong> kéo từ chân <strong>DATA</strong> lên chân <strong>3.3V</strong> (hàn trực tiếp ngay phía dưới Domino).",
+      "Kéo đường tín hiệu DATA từ chân 2 của Domino về <strong>GPIO4</strong> của ESP32 (X: 13, Y: 11)."
+    ],
+    antiNoiseTips: [
+      "Điện trở kéo lên (Pull-up) 4.7kΩ là BẮT BUỘC cho chuẩn 1-Wire. Nếu đường dây đầu dò DS18B20 dài >2m, có thể giảm trở pull-up xuống 2.2kΩ-3.3kΩ để sườn xung vuông sắc nét hơn.",
+      "Đầu dò DS18B20 bằng kim loại dán lên cell pin phải được bọc băng keo cách điện Kapton/nhiệt để vỏ kim loại không chạm cực pin."
+    ],
+    alert: "⚠️ Chú ý: Trở kéo 4.7kΩ PHẢI nối lên 3.3V. Tuyệt đối không kéo lên 5V sẽ làm hỏng GPIO4 của ESP32.",
+    alertType: "warning"
+  },
+  {
+    step: 7,
+    counter: "BƯỚC 7 / 8",
+    title: "Hàn Khối Môi Trường: Cầu Phân Áp MQ-2 & Water Leak",
+    badge: "Cảm Biến Khói & Nước",
+    action: "Hàn Cầu Phân Áp R1(10k)/R2(20k) bảo vệ ADC GPIO1 và Header GPIO2",
+    instructions: [
+      "<strong>Cảm Biến Khói MQ-2:</strong> Chạy nguồn 5V. Chân tín hiệu ra Analog (AO) có mức 0-5V. Phải qua cầu phân áp để bảo vệ chân ADC ESP32 (chỉ chịu tối đa 3.3V):",
+      "• Chân AO của MQ-2 -> nối vào đầu trở <strong>R1 = 10kΩ</strong>.",
+      "• Đầu kia của R1 nối với đầu trở <strong>R2 = 20kΩ</strong> và nối thẳng vào <strong>GPIO1 (ADC1_CH0)</strong> (X: 25, Y: 8).",
+      "• Đầu còn lại của R2 nối về <strong>GND</strong>.",
+      "• Công thức: V_out = V_in × (20k / (10k + 20k)) = 5V × (2/3) = <strong>3.33V MAX</strong> (Chuẩn an toàn tuyệt đối).",
+      "• Hàn 1 tụ gốm <strong>100nF (104)</strong> song song với R2 (giữa GPIO1 và GND) để lọc nhiễu tần số cao cho ADC.",
+      "<strong>Cảm Biến Nước Water Leak (LM393):</strong> Hàn Header 3-pin (VCC 3.3V, GND, DO). Nối chân DO về <strong>GPIO2</strong> của ESP32 (X: 25, Y: 9)."
+    ],
+    antiNoiseTips: [
+      "Tụ 100nF tại chân ADC GPIO1 dập sạch nhiễu gợn sóng từ bộ gia nhiệt (heater) của cảm biến MQ-2, giúp số đọc nồng độ khói ổn định không bị báo động giả (False Alarm).",
+      "Cảm biến nước dùng cơ chế INPUT_PULLUP nội của ESP32: Khi khô = HIGH (3.3V), khi ngập nước = LOW (0V)."
+    ],
+    alert: "🛑 NGUY HIỂM: Không bao giờ nối thẳng chân AO của MQ-2 vào GPIO1 mà không qua cầu phân áp! 5V từ MQ-2 sẽ phá hủy bộ biến đổi ADC bên trong vi điều khiển ESP32.",
+    alertType: "danger"
+  },
+  {
+    step: 8,
+    counter: "BƯỚC 8 / 8",
+    title: "Kiểm Tra Đo Nguội Toàn Diện & Đóng Điện Thử Nghiệm",
+    badge: "Smoke Test & Vận Hành",
+    action: "Thực hiện Checklist đo nguội 6 bước trước khi cắm chip ESP32 và đóng điện",
+    instructions: [
+      "<strong>BƯỚC 8.1 — KIỂM TRA BẰNG MẮT:</strong> Soi kính lúp/đèn toàn bộ mặt dưới bo mạch. Kiểm tra không có râu thiếc thừa làm chập các lỗ lân cận. Vệ sinh sạch xỉ hàn bằng cồn IPA.",
+      "<strong>BƯỚC 8.2 — ĐO THÔNG MẠCH VCC-GND:</strong> Vặn đồng hồ vạn năng về thang đo thông mạch (bíp):",
+      "• Đo giữa 5V và GND trên socket ESP32: Đồng hồ KHÔNG ĐƯỢC KÊU.",
+      "• Đo giữa 3.3V và GND trên socket ESP32: Đồng hồ KHÔNG ĐƯỢC KÊU.",
+      "<strong>BƯỚC 8.3 — ĐO KIỂM TRA ĐIỆN ÁP KHÔNG TẢI (CHƯA CẮM ESP32):</strong>",
+      "• Cắm nguồn 24V (hoặc Adapter 5V) vào Domino nguồn.",
+      "• Dùng đồng hồ que đen chấm Mass Sao, que đỏ chấm chân VIN trên socket ESP32: Phải hiển thị <strong>5.00V ± 0.05V</strong>.",
+      "• Nếu đo thấy áp sai -> ngắt điện kiểm tra lại module LM2596 ngay lập tức.",
+      "<strong>BƯỚC 8.4 — CẮM ESP32 & BOOT FIRMWARE:</strong> Ngắt nguồn -> Cắm ESP32-S3 DevKitC vào socket đúng chiều (anten hướng lên trên) -> Cắm các module -> Cấp nguồn trở lại -> Quan sát đèn LED trên ESP32 nhấp nháy khởi động."
+    ],
+    antiNoiseTips: [
+      "Khi mạch chạy, mở Serial Monitor ở baud 115200 để quan sát log khởi động Modbus, I2C scan và kết nối MQTT/WiFi.",
+      "Độ gợn sóng (Ripple) của đường nguồn 3.3V trên ESP32 đo bằng Oscillo nên < 30mVp-p là đạt tiêu chuẩn phòng lab công nghiệp."
+    ],
+    alert: "🎉 CHÚC MỪNG: Sau khi PASS tất cả bước kiểm tra, bo mạch IoT Node của bạn đã đạt chuẩn công nghiệp, chống nhiễu tuyệt đối và sẵn sàng vận hành bền bỉ 24/7!",
+    alertType: "success"
+  }
+];
+
+// ==========================================
+// 2. RENDERING ENGINE & LOGIC
+// ==========================================
+
+let currentStep = 1;
+let currentViewMode = "top"; // 'top', 'bottom', 'xray'
+let activeComponentId = null;
+let currentNetFilter = "ALL";
+let boardScale = 1.0;
+
+// Initialize SVG Grid Pads
+function initPerfboardGrid() {
+  const layer = document.getElementById("pads-grid-layer");
+  const ruler = document.getElementById("ruler-layer");
+  let padsHtml = "";
+  let rulerHtml = "";
+
+  // Draw 38x38 Holes
+  for (let r = 1; r <= BOARD_ROWS; r++) {
+    for (let c = 1; c <= BOARD_COLS; c++) {
+      const pos = getHolePos(c, r);
+      padsHtml += `<circle cx="${pos.x.toFixed(1)}" cy="${pos.y.toFixed(1)}" r="5.4" fill="#d4af37" stroke="#996515" stroke-width="0.8" class="board-pad" data-col="${c}" data-row="${r}" />`;
+      padsHtml += `<circle cx="${pos.x.toFixed(1)}" cy="${pos.y.toFixed(1)}" r="2.2" fill="#030805" pointer-events="none"/>`;
+    }
+  }
+
+  // Draw X Rulers (1..38)
+  for (let c = 1; c <= BOARD_COLS; c += 2) {
+    const pos = getHolePos(c, 1);
+    rulerHtml += `<text x="${pos.x.toFixed(1)}" y="18">${c}</text>`;
+    const posB = getHolePos(c, 38);
+    rulerHtml += `<text x="${pos.x.toFixed(1)}" y="942">${c}</text>`;
+  }
+
+  // Draw Y Rulers (1..38)
+  for (let r = 1; r <= BOARD_ROWS; r += 2) {
+    const pos = getHolePos(1, r);
+    rulerHtml += `<text x="14" y="${(pos.y + 3).toFixed(1)}">${r}</text>`;
+    const posR = getHolePos(38, r);
+    rulerHtml += `<text x="938" y="${(posR.y + 3).toFixed(1)}">${r}</text>`;
+  }
+
+  layer.innerHTML = padsHtml;
+  ruler.innerHTML = rulerHtml;
+
+  // Add Hover listener to pads
+  document.querySelectorAll(".board-pad").forEach(pad => {
+    pad.addEventListener("mouseenter", onPadHover);
+    pad.addEventListener("mouseleave", onPadLeave);
+  });
+}
+
+// Render Top Components Layer with crisp realistic silhouettes
+function renderComponentsLayer() {
+  const layer = document.getElementById("components-layer");
+  let html = "";
+
+  COMPONENTS_DB.forEach(comp => {
+    const topLeft = getHolePos(comp.col, comp.row);
+    const w = comp.width * GRID_SIZE;
+    const h = comp.height * GRID_SIZE;
+    const isActive = comp.id === activeComponentId;
+    const isCurrentStep = comp.step === currentStep;
+
+    const fillOpacity = currentViewMode === 'bottom' ? '0.06' : (currentViewMode === 'xray' ? '0.35' : '0.90');
+    const strokeWidth = isActive || isCurrentStep ? '3.5' : '1.8';
+    const strokeColor = isCurrentStep ? '#00f2fe' : comp.color;
+
+    html += `<g class="comp-group" id="comp-svg-${comp.id}" onclick="selectComponent('${comp.id}')" style="cursor:pointer;">`;
+    // Background body box
+    html += `<rect x="${(topLeft.x - 8).toFixed(1)}" y="${(topLeft.y - 8).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="8" fill="#111c2e" fill-opacity="${fillOpacity}" stroke="${strokeColor}" stroke-width="${strokeWidth}" />`;
+    
+    // Header Label & Tag
+    html += `<rect x="${(topLeft.x - 7).toFixed(1)}" y="${(topLeft.y - 7).toFixed(1)}" width="${(w - 2).toFixed(1)}" height="22" rx="6" fill="${comp.color}" fill-opacity="0.25"/>`;
+    html += `<text x="${(topLeft.x + w/2 - 8).toFixed(1)}" y="${(topLeft.y + 9).toFixed(1)}" fill="#ffffff" font-size="11.5" font-weight="bold" text-anchor="middle" pointer-events="none">${comp.name}</text>`;
+    html += `<text x="${(topLeft.x + w/2 - 8).toFixed(1)}" y="${(topLeft.y + 26).toFixed(1)}" fill="${comp.color}" font-size="9" font-family="monospace" text-anchor="middle" pointer-events="none">${comp.tag}</text>`;
+
+    // Pins
+    comp.pins.forEach(pin => {
+      const pinPos = getHolePos(pin.col, pin.row);
+      const isNetMatch = (currentNetFilter === 'ALL') || isPinInNetFilter(pin.net, currentNetFilter);
+      const pinColor = getNetColor(pin.net);
+      const pinOpacity = isNetMatch ? '1' : '0.2';
+
+      html += `<circle cx="${pinPos.x.toFixed(1)}" cy="${pinPos.y.toFixed(1)}" r="6" fill="${pinColor}" stroke="#fff" stroke-width="1.2" opacity="${pinOpacity}"/>`;
+      html += `<text x="${pinPos.x.toFixed(1)}" y="${(pinPos.y - 8).toFixed(1)}" fill="#e2e8f0" font-size="8" font-family="monospace" font-weight="600" text-anchor="middle" pointer-events="none" opacity="${pinOpacity}">${pin.name}</text>`;
+    });
+
+    html += `</g>`;
+  });
+
+  layer.innerHTML = html;
+}
+
+// Render Solder Tracks / Wiring with Orthogonal High-Contrast Routing
+function renderSolderTracksLayer() {
+  const layer = document.getElementById("solder-tracks-layer");
+  let html = "";
+
+  const isBottomOrXray = currentViewMode === 'bottom' || currentViewMode === 'xray';
+  const layerOpacity = currentViewMode === 'top' ? '0.25' : '0.98';
+
+  SOLDER_TRACKS.forEach(track => {
+    const isStepTrack = track.step <= currentStep;
+    const isExactStep = track.step === currentStep;
+    const isNetMatch = (currentNetFilter === 'ALL') || isTrackInNetFilter(track.net, currentNetFilter);
+
+    let trackOpacity = '0.08';
+    if (isNetMatch) {
+      if (isExactStep) trackOpacity = '1.0';
+      else if (isStepTrack) trackOpacity = (currentViewMode === 'top' ? '0.35' : '0.85');
+    }
+
+    let pathD = "";
+    track.path.forEach((pt, idx) => {
+      const pos = getHolePos(pt[0], pt[1]);
+      pathD += (idx === 0 ? "M " : "L ") + pos.x.toFixed(1) + " " + pos.y.toFixed(1) + " ";
+    });
+
+    const isGlow = isExactStep || (currentNetFilter !== 'ALL' && isNetMatch);
+    const filterAttr = isGlow ? 'filter="url(#neonGlow)"' : '';
+    const strokeDash = track.isJumper ? 'stroke-dasharray="7,4"' : '';
+
+    // Track line
+    html += `<path d="${pathD}" fill="none" stroke="${track.color}" stroke-width="${track.width * 1.5}" stroke-linecap="round" stroke-linejoin="round" opacity="${trackOpacity}" ${filterAttr} ${strokeDash}/>`;
+    
+    // Highlight pulse on exact step
+    if (isExactStep && isBottomOrXray) {
+      html += `<path d="${pathD}" fill="none" stroke="#fff" stroke-width="${track.width * 0.8}" stroke-linecap="round" stroke-linejoin="round" opacity="0.5" stroke-dasharray="8,6"/>`;
+    }
+
+    // Pads on track vertices
+    track.path.forEach(pt => {
+      const pos = getHolePos(pt[0], pt[1]);
+      html += `<circle cx="${pos.x.toFixed(1)}" cy="${pos.y.toFixed(1)}" r="${track.width * 1.05}" fill="${track.color}" opacity="${trackOpacity}"/>`;
+    });
+  });
+
+  layer.innerHTML = html;
+  layer.style.opacity = layerOpacity;
+}
+
+// Net Filter Matching Helpers
+function isPinInNetFilter(pinNet, filter) {
+  if (filter === 'GND') return pinNet === 'GND';
+  if (filter === '5V') return pinNet === '5V' || pinNet === 'RAW_VIN' || pinNet === 'PROT_VIN';
+  if (filter === '3V3') return pinNet === '3V3';
+  if (filter === 'RS485') return pinNet.startsWith('RS485');
+  if (filter === 'I2C') return pinNet.startsWith('I2C');
+  if (filter === '1WIRE') return pinNet === '1WIRE';
+  if (filter === 'ADC') return pinNet === 'ADC_MQ2' || pinNet === 'AO_RAW' || pinNet === 'WATER';
+  return true;
+}
+
+function isTrackInNetFilter(trackNet, filter) {
+  if (filter === 'GND') return trackNet === 'GND';
+  if (filter === '5V') return trackNet === '5V' || trackNet === 'RAW_VIN' || trackNet === 'PROT_VIN';
+  if (filter === '3V3') return trackNet === '3V3';
+  if (filter === 'RS485') return trackNet.startsWith('RS485');
+  if (filter === 'I2C') return trackNet.startsWith('I2C');
+  if (filter === '1WIRE') return trackNet === '1WIRE';
+  if (filter === 'ADC') return trackNet === 'ADC_MQ2' || trackNet === 'AO_RAW' || trackNet === 'WATER';
+  return true;
+}
+
+// Net Color Resolver
+function getNetColor(net) {
+  switch(net) {
+    case "5V": return "var(--net-5v)";
+    case "3V3": return "var(--net-3v3)";
+    case "GND": return "var(--net-gnd)";
+    case "RAW_VIN": case "PROT_VIN": return "#ffab00";
+    case "RS485_TX": case "RS485_RX": case "RS485_DE": case "RS485_A": case "RS485_B": return "var(--net-rs485)";
+    case "I2C_SDA": case "I2C_SCL": return "var(--net-i2c)";
+    case "1WIRE": return "var(--net-1wire)";
+    case "ADC_MQ2": case "AO_RAW": return "var(--net-adc)";
+    case "WATER": return "var(--net-water)";
+    default: return "#94a3b8";
+  }
+}
+
+// Render Step Details
+function renderStepDetails() {
+  const data = STEPS_DATA[currentStep - 1];
+  document.getElementById("step-counter-text").innerText = data.counter;
+  document.getElementById("step-title-text").innerHTML = `<span>${data.title}</span><span class="badge">${data.badge}</span>`;
+  
+  // Navigation buttons state
+  document.getElementById("prev-btn").disabled = (currentStep === 1);
+  document.getElementById("next-btn").disabled = (currentStep === STEPS_DATA.length);
+
+  // Update pills
+  const pillsContainer = document.getElementById("progress-pills-container");
+  let pillsHtml = "";
+  for (let i = 1; i <= STEPS_DATA.length; i++) {
+    const cls = i === currentStep ? "progress-pill active" : (i < currentStep ? "progress-pill completed" : "progress-pill");
+    pillsHtml += `<div class="${cls}" onclick="jumpToStep(${i})" title="Bước ${i}: ${STEPS_DATA[i-1].title}"></div>`;
+  }
+  pillsContainer.innerHTML = pillsHtml;
+
+  // Guide Grid Details
+  const container = document.getElementById("step-details-container");
+  container.innerHTML = `
+    <div style="margin-bottom:14px;">
+      <h3 style="font-size:1.1rem; color:#fff; display:flex; align-items:center; gap:8px;">
+        <span>🎯 Nhiệm Vụ:</span>
+        <span style="color:var(--accent-cyan);">${data.action}</span>
+      </h3>
+    </div>
+    <div class="guide-grid">
+      <div class="guide-box">
+        <h4>🔨 Hướng Dẫn Thao Tác Chi Tiết</h4>
+        <ul>
+          ${data.instructions.map(item => `<li>${item}</li>`).join("")}
+        </ul>
+      </div>
+      <div class="guide-box">
+        <h4>🛡️ Quy Tắc Chống Nhiễu & Kỹ Thuật Hàn</h4>
+        <ul>
+          ${data.antiNoiseTips.map(item => `<li>${item}</li>`).join("")}
+        </ul>
+      </div>
+    </div>
+    <div class="alert-box ${data.alertType}">
+      ${data.alert}
+    </div>
+  `;
+
+  renderComponentsLayer();
+  renderSolderTracksLayer();
+}
+
+// Render BOM in Sidebar
+function renderBomList() {
+  const container = document.getElementById("bom-list-container");
+  let html = "";
+  COMPONENTS_DB.forEach(comp => {
+    const isActive = comp.id === activeComponentId ? "active" : "";
+    html += `
+      <div class="component-item ${isActive}" onclick="selectComponent('${comp.id}')">
+        <div class="comp-header">
+          <span class="comp-name">${comp.name}</span>
+          <span class="comp-tag">${comp.tag}</span>
+        </div>
+        <div class="comp-desc">${comp.desc}</div>
+        <div class="comp-coord">📍 Tọa độ lỗ: X(${comp.col}..${comp.col+comp.width-1}), Y(${comp.row}..${comp.row+comp.height-1}) • Bước ${comp.step}</div>
+      </div>
+    `;
+  });
+  container.innerHTML = html;
+}
+
+// Select Component & Focus
+function selectComponent(id) {
+  activeComponentId = (activeComponentId === id) ? null : id;
+  const comp = COMPONENTS_DB.find(c => c.id === id);
+  if (comp && activeComponentId) {
+    jumpToStep(comp.step);
+  }
+  renderBomList();
+  renderComponentsLayer();
+}
+
+// Navigation Stepper
+function navigateStep(delta) {
+  const target = currentStep + delta;
+  if (target >= 1 && target <= STEPS_DATA.length) {
+    currentStep = target;
+    renderStepDetails();
+  }
+}
+
+function jumpToStep(step) {
+  currentStep = step;
+  renderStepDetails();
+}
+
+// View Mode Toggle
+function setViewMode(mode) {
+  currentViewMode = mode;
+  document.getElementById("tab-top").classList.toggle("active", mode === 'top');
+  document.getElementById("tab-bottom").classList.toggle("active", mode === 'bottom');
+  document.getElementById("tab-xray").classList.toggle("active", mode === 'xray');
+  renderComponentsLayer();
+  renderSolderTracksLayer();
+}
+
+// Net Isolation Filter
+function setNetFilter(netKey) {
+  currentNetFilter = netKey;
+  document.querySelectorAll(".net-chip").forEach(chip => chip.classList.remove("active"));
+  const activeBtn = document.getElementById(`chip-${netKey}`);
+  if (activeBtn) activeBtn.classList.add("active");
+  renderComponentsLayer();
+  renderSolderTracksLayer();
+}
+
+// Board Zoom & Pan
+function zoomBoard(factor) {
+  boardScale = Math.max(0.6, Math.min(2.5, boardScale * factor));
+  const svg = document.getElementById("perfboard-svg");
+  svg.style.transform = `scale(${boardScale})`;
+}
+
+function resetBoardZoom() {
+  boardScale = 1.0;
+  const svg = document.getElementById("perfboard-svg");
+  svg.style.transform = "scale(1)";
+}
+
+// Tooltip on Hover
+function onPadHover(e) {
+  const col = parseInt(e.target.getAttribute("data-col"));
+  const row = parseInt(e.target.getAttribute("data-row"));
+  const tooltip = document.getElementById("board-tooltip");
+
+  // Find if any pin or track at this hole
+  let matchPin = null;
+  let matchComp = null;
+  COMPONENTS_DB.forEach(comp => {
+    const p = comp.pins.find(pin => pin.col === col && pin.row === row);
+    if (p) { matchPin = p; matchComp = comp; }
+  });
+
+  let matchTrack = SOLDER_TRACKS.find(t => t.path.some(pt => pt[0] === col && pt[1] === row));
+
+  let info = `<strong>Lỗ tọa độ: X=${col}, Y=${row}</strong>`;
+  if (matchPin) {
+    info += `<br><span style="color:var(--accent-cyan);">🔹 Chân: ${matchPin.name} (${matchComp.name})</span>`;
+    info += `<br><span style="color:${getNetColor(matchPin.net)}; font-family:monospace; font-weight:bold;">Net: ${matchPin.net}</span>`;
+  } else if (matchTrack) {
+    info += `<br><span style="color:${matchTrack.color}; font-family:monospace; font-weight:bold;">⚡ Tuyến: ${matchTrack.net} (Bước ${matchTrack.step})</span>`;
+    if (matchTrack.isJumper) {
+      info += `<br><span style="color:var(--accent-amber); font-size:0.75rem;">(Dây câu bọc cách điện)</span>`;
+    }
+  }
+
+  tooltip.innerHTML = info;
+  tooltip.style.display = "block";
+  tooltip.style.left = (e.pageX + 14) + "px";
+  tooltip.style.top = (e.pageY - 38) + "px";
+}
+
+function onPadLeave() {
+  document.getElementById("board-tooltip").style.display = "none";
+}
+
+// Checklist Updates
+function updateChecklist() {
+  let checked = 0;
+  for (let i = 1; i <= 6; i++) {
+    if (document.getElementById(`chk-${i}`).checked) checked++;
+  }
+  document.getElementById("checklist-progress").innerText = `${checked}/6 Đạt`;
+  document.getElementById("checklist-congrats").style.display = (checked === 6) ? "block" : "none";
+  try {
+    localStorage.setItem("iot_soldering_checklist", JSON.stringify(Array.from({length:6}, (_,i) => document.getElementById(`chk-${i+1}`).checked)));
+  } catch(e) {}
+}
+
+function restoreChecklist() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("iot_soldering_checklist"));
+    if (saved && Array.isArray(saved)) {
+      saved.forEach((val, i) => {
+        const el = document.getElementById(`chk-${i+1}`);
+        if (el) el.checked = val;
+      });
+      updateChecklist();
+    }
+  } catch(e) {}
+}
+
+function resetSimulator() {
+  currentStep = 1;
+  activeComponentId = null;
+  currentNetFilter = "ALL";
+  setNetFilter("ALL");
+  resetBoardZoom();
+  for (let i = 1; i <= 6; i++) {
+    const el = document.getElementById(`chk-${i}`);
+    if (el) el.checked = false;
+  }
+  updateChecklist();
+  renderStepDetails();
+  renderBomList();
+}
+
+// ==========================================
+// 3. BOOTSTRAP ON LOAD
+// ==========================================
+window.addEventListener("DOMContentLoaded", () => {
+  initPerfboardGrid();
+  renderBomList();
+  renderStepDetails();
+  restoreChecklist();
+});
+</script>
+</body>
+</html>

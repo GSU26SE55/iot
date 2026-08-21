@@ -160,6 +160,9 @@ void test_describe_covers_every_error() {
   }
 }
 
+void setUp(void) {}
+void tearDown(void) {}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_normal_values_pass);

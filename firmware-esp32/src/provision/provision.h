@@ -29,7 +29,7 @@ struct ProvisionedConfig {
 };
 
 // Default values khi backend không trả (theo MO §52.4):
-constexpr uint32_t kDefaultPollingMs    = 5000UL;     // S1-FW-07 spec 5s
+constexpr uint32_t kDefaultPollingMs    = 1000UL;     // production telemetry target 1s
 constexpr uint32_t kDefaultHeartbeatMs  = 60000UL;    // S2-FW-03 spec 60s
 constexpr const char* kDefaultNtpServer = "time.google.com";  // backend default
 
@@ -50,5 +50,10 @@ bool runProvisionFlow(const char* firmwareVersion,
 // Force re-provision lần boot sau (dùng khi rotate key hoặc đổi config).
 // Set "provd"=0 trong NVS — KHÔNG xóa other keys (siteId/ntpServer giữ làm fallback).
 bool clearProvisionFlag();
+
+// Physical-recovery path for a gateway that was downgraded by firmware versions
+// which cleared `provd` before confirming that credential refresh succeeded.
+// This only restores the flag; it never invents or changes identity/credentials.
+bool restoreProvisionFlag();
 
 }  // namespace provision

@@ -1,10 +1,12 @@
 package com.solarbms.setup;
 
 import android.Manifest;
-import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.Color;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -23,45 +25,83 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.ComponentActivity;
+import androidx.activity.OnBackPressedCallback;
+
+import org.json.JSONObject;
+
 import java.util.Arrays;
 
-public final class MainActivity extends Activity {
-    private static final String PORTAL_URL = "http://192.168.4.1:8080/";
+public final class MainActivity extends ComponentActivity {
+    private static final String[] PORTAL_URLS = {
+            "http://192.168.4.1:8080/",
+            "http://solar-gateway.local:8080/",
+            "http://solargw.local:8080/"
+    };
     private static final String PORTAL_USER = "admin";
-    private static final String PORTAL_PASSWORD = "solar-setup-2026";
+    private static final String PORTAL_PASSWORD = "12345678";
     private static final int CAMERA_PERMISSION_REQUEST = 41;
- Optimize, Optimize, Rating Optimize, Ratings Op Optimize, Ratings, Floyd.
+    private static final int QR_SCAN_REQUEST = 42;
+
     private WebView webView;
     private TextView connectionStatus;
+    private TextView statusBadge;
+    private View statusDot;
+    private View portalEmptyState;
     private ProgressBar progressBar;
+    private Button scanQrButton;
     private PermissionRequest pendingCameraRequest;
+    private ConnectivityManager connectivityManager;
+    private ConnectivityManager.NetworkCallback wifiNetworkCallback;
+    private Network boundWifiNetwork;
+    private boolean nativeScannerRequested;
+    private boolean portalLoaded;
+    private boolean mainFrameFailed;
+    private boolean wifiPanelOpened;
+    private int portalUrlIndex;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(Color.rgb(241, 246, 255));
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
-        }
         setContentView(R.layout.activity_main);
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                        | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        );
 
         connectionStatus = findViewById(R.id.connectionStatus);
+        statusBadge = findViewById(R.id.statusBadge);
+        statusDot = findViewById(R.id.statusDot);
+        portalEmptyState = findViewById(R.id.portalEmptyState);
         progressBar = findViewById(R.id.progressBar);
         webView = findViewById(R.id.portalWebView);
+        scanQrButton = findViewById(R.id.scanQrButton);
+
         Button wifiButton = findViewById(R.id.wifiButton);
         Button reloadButton = findViewById(R.id.reloadButton);
+        Button emptyWifiButton = findViewById(R.id.emptyWifiButton);
+        Button emptyReloadButton = findViewById(R.id.emptyReloadButton);
 
         configureWebView();
+        configureWifiRouting();
         wifiButton.setOnClickListener(view -> openWifiPanel());
+        emptyWifiButton.setOnClickListener(view -> openWifiPanel());
         reloadButton.setOnClickListener(view -> loadPortal());
+        emptyReloadButton.setOnClickListener(view -> loadPortal());
+        scanQrButton.setOnClickListener(view -> requestNativeQrScan());
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (webView.canGoBack()) {
+                    webView.goBack();
+                    return;
+                }
+                setEnabled(false);
+                getOnBackPressedDispatcher().onBackPressed();
+            }
+        });
 
-        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(
-                    new String[]{Manifest.permission.CAMERA},
-                    CAMERA_PERMISSION_REQUEST
-            );
-        }
-
+        setPortalStateConnecting();
         if (savedInstanceState == null) {
             loadPortal();
         } else {
@@ -71,16 +111,31 @@ public final class MainActivity extends Activity {
 
     private void configureWebView() {
         WebView.setWebContentsDebuggingEnabled(false);
+        webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        webView.setBackgroundColor(getColor(R.color.surface));
+
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(false);
+        settings.setSaveFormData(false);
+        settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setUserAgentString(
-                settings.getUserAgentString() + " SolarBMSSetup/1.0"
+                settings.getUserAgentString() + " SolarBMSSetup/1.1"
         );
+        for (String host : new String[]{
+                "192.168.4.1", "solar-gateway.local", "solargw.local"
+        }) {
+            webView.setHttpAuthUsernamePassword(
+                    host,
+                    "Solar BMS Setup",
+                    PORTAL_USER,
+                    PORTAL_PASSWORD
+            );
+        }
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -89,7 +144,7 @@ public final class MainActivity extends Activity {
                 if (isPortalUri(uri)) return false;
                 Toast.makeText(
                         MainActivity.this,
-                        "App chỉ mở trang cấu hình của Solar Gateway.",
+                        R.string.portal_external_link_blocked,
                         Toast.LENGTH_SHORT
                 ).show();
                 return true;
@@ -102,16 +157,14 @@ public final class MainActivity extends Activity {
                     String host,
                     String realm
             ) {
-                if (isPortalHost(host)) {
-                    handler.proceed(PORTAL_USER, PORTAL_PASSWORD);
-                } else {
-                    handler.cancel();
-                }
+                if (isPortalHost(host)) handler.proceed(PORTAL_USER, PORTAL_PASSWORD);
+                else handler.cancel();
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                connectionStatus.setText(R.string.portal_connected);
+                Uri uri = url == null ? null : Uri.parse(url);
+                if (!mainFrameFailed && isPortalUri(uri)) setPortalStateConnected();
             }
 
             @Override
@@ -120,14 +173,15 @@ public final class MainActivity extends Activity {
                     WebResourceRequest request,
                     WebResourceError error
             ) {
-                if (request.isForMainFrame()) {
-                    connectionStatus.setText(R.string.portal_not_found);
-                    Toast.makeText(
-                            MainActivity.this,
-                            R.string.connect_gateway_hint,
-                            Toast.LENGTH_LONG
-                    ).show();
+                if (!request.isForMainFrame()) return;
+                if (portalUrlIndex + 1 < PORTAL_URLS.length) {
+                    portalUrlIndex++;
+                    mainFrameFailed = false;
+                    view.loadUrl(PORTAL_URLS[portalUrlIndex]);
+                    return;
                 }
+                mainFrameFailed = true;
+                setPortalStateUnavailable();
             }
         });
 
@@ -135,7 +189,7 @@ public final class MainActivity extends Activity {
             @Override
             public void onProgressChanged(WebView view, int newProgress) {
                 progressBar.setProgress(newProgress);
-                progressBar.setVisibility(newProgress < 100 ? View.VISIBLE : View.GONE);
+                progressBar.setVisibility(newProgress < 100 ? View.VISIBLE : View.INVISIBLE);
             }
 
             @Override
@@ -148,6 +202,97 @@ public final class MainActivity extends Activity {
                 if (pendingCameraRequest == request) pendingCameraRequest = null;
             }
         });
+    }
+
+    private void configureWifiRouting() {
+        connectivityManager = getSystemService(ConnectivityManager.class);
+        if (connectivityManager == null) return;
+
+        wifiNetworkCallback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(Network network) {
+                bindToWifiNetwork(network);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || portalLoaded) return;
+                    webView.postDelayed(MainActivity.this::loadPortal, 350L);
+                });
+            }
+
+            @Override
+            public void onLost(Network network) {
+                if (!network.equals(boundWifiNetwork)) return;
+                connectivityManager.bindProcessToNetwork(null);
+                boundWifiNetwork = null;
+            }
+        };
+
+        NetworkRequest wifiRequest = new NetworkRequest.Builder()
+                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build();
+        connectivityManager.registerNetworkCallback(wifiRequest, wifiNetworkCallback);
+        bindToAvailableWifiNetwork();
+    }
+
+    private boolean bindToAvailableWifiNetwork() {
+        if (connectivityManager == null) return false;
+        for (Network network : connectivityManager.getAllNetworks()) {
+            NetworkCapabilities capabilities =
+                    connectivityManager.getNetworkCapabilities(network);
+            if (capabilities != null
+                    && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                return bindToWifiNetwork(network);
+            }
+        }
+        return false;
+    }
+
+    private boolean bindToWifiNetwork(Network network) {
+        if (connectivityManager == null || network == null) return false;
+        if (!connectivityManager.bindProcessToNetwork(network)) return false;
+        boundWifiNetwork = network;
+        return true;
+    }
+
+    private void setPortalStateConnecting() {
+        portalLoaded = false;
+        connectionStatus.setText(R.string.portal_connecting_detail);
+        statusBadge.setText(R.string.status_connecting);
+        statusBadge.setTextColor(getColor(R.color.status_waiting_text));
+        statusBadge.setBackgroundResource(R.drawable.bg_status_waiting);
+        statusDot.setBackgroundResource(R.drawable.dot_waiting);
+        scanQrButton.setEnabled(false);
+        scanQrButton.setAlpha(0.48f);
+        portalEmptyState.setVisibility(View.VISIBLE);
+        webView.setVisibility(View.INVISIBLE);
+    }
+
+    private void setPortalStateConnected() {
+        portalLoaded = true;
+        mainFrameFailed = false;
+        connectionStatus.setText(R.string.portal_connected);
+        statusBadge.setText(R.string.status_connected);
+        statusBadge.setTextColor(getColor(R.color.status_connected_text));
+        statusBadge.setBackgroundResource(R.drawable.bg_status_connected);
+        statusDot.setBackgroundResource(R.drawable.dot_connected);
+        scanQrButton.setEnabled(true);
+        scanQrButton.setAlpha(1f);
+        portalEmptyState.setVisibility(View.GONE);
+        webView.setVisibility(View.VISIBLE);
+    }
+
+    private void setPortalStateUnavailable() {
+        portalLoaded = false;
+        connectionStatus.setText(R.string.portal_not_found_detail);
+        statusBadge.setText(R.string.status_not_connected);
+        statusBadge.setTextColor(getColor(R.color.status_error_text));
+        statusBadge.setBackgroundResource(R.drawable.bg_status_error);
+        statusDot.setBackgroundResource(R.drawable.dot_error);
+        scanQrButton.setEnabled(false);
+        scanQrButton.setAlpha(0.48f);
+        progressBar.setVisibility(View.INVISIBLE);
+        portalEmptyState.setVisibility(View.VISIBLE);
+        webView.setVisibility(View.INVISIBLE);
     }
 
     private void handleWebPermissionRequest(PermissionRequest request) {
@@ -170,6 +315,29 @@ public final class MainActivity extends Activity {
         );
     }
 
+    private void requestNativeQrScan() {
+        if (!portalLoaded) {
+            Toast.makeText(this, R.string.scan_requires_portal, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            launchQrScanner();
+            return;
+        }
+        nativeScannerRequested = true;
+        requestPermissions(
+                new String[]{Manifest.permission.CAMERA},
+                CAMERA_PERMISSION_REQUEST
+        );
+    }
+
+    private void launchQrScanner() {
+        startActivityForResult(
+                new Intent(this, QrScannerActivity.class),
+                QR_SCAN_REQUEST
+        );
+    }
+
     private boolean isPortalUri(Uri uri) {
         if (uri == null || !"http".equalsIgnoreCase(uri.getScheme())) return false;
         int port = uri.getPort();
@@ -178,15 +346,28 @@ public final class MainActivity extends Activity {
 
     private boolean isPortalHost(String host) {
         return "192.168.4.1".equalsIgnoreCase(host)
-                || "solargw.local".equalsIgnoreCase(host);
+                || "solargw.local".equalsIgnoreCase(host)
+                || "solar-gateway.local".equalsIgnoreCase(host);
     }
 
     private void loadPortal() {
-        connectionStatus.setText(R.string.portal_connecting);
-        webView.loadUrl(PORTAL_URL);
+        bindToAvailableWifiNetwork();
+        portalUrlIndex = 0;
+        mainFrameFailed = false;
+        setPortalStateConnecting();
+        progressBar.setProgress(0);
+        progressBar.setVisibility(View.VISIBLE);
+        webView.loadUrl(PORTAL_URLS[portalUrlIndex]);
     }
 
     private void openWifiPanel() {
+        connectionStatus.setText(R.string.open_wifi_instruction);
+        statusBadge.setText(R.string.status_waiting_wifi);
+        statusBadge.setTextColor(getColor(R.color.status_waiting_text));
+        statusBadge.setBackgroundResource(R.drawable.bg_status_waiting);
+        statusDot.setBackgroundResource(R.drawable.dot_waiting);
+        wifiPanelOpened = true;
+
         Intent intent;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             intent = new Intent(Settings.Panel.ACTION_WIFI);
@@ -194,6 +375,15 @@ public final class MainActivity extends Activity {
             intent = new Intent(Settings.ACTION_WIFI_SETTINGS);
         }
         startActivity(intent);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (wifiPanelOpened) {
+            wifiPanelOpened = false;
+            webView.postDelayed(this::loadPortal, 700L);
+        }
     }
 
     @Override
@@ -218,6 +408,28 @@ public final class MainActivity extends Activity {
             }
             pendingCameraRequest = null;
         }
+
+        if (nativeScannerRequested) {
+            nativeScannerRequested = false;
+            if (granted) launchQrScanner();
+            else Toast.makeText(this, R.string.camera_required, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != QR_SCAN_REQUEST || resultCode != RESULT_OK || data == null) return;
+
+        String qrValue = data.getStringExtra(QrScannerActivity.EXTRA_QR_VALUE);
+        if (qrValue == null || qrValue.isEmpty()) return;
+        if (!portalLoaded) {
+            Toast.makeText(this, R.string.scan_result_portal_lost, Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        // Reuse the portal's parser and save flow so credentials are validated in one place.
+        webView.evaluateJavascript("applyQr(" + JSONObject.quote(qrValue) + ")", null);
     }
 
     @Override
@@ -227,17 +439,16 @@ public final class MainActivity extends Activity {
     }
 
     @Override
-    public void onBackPressed() {
-        if (webView.canGoBack()) {
-            webView.goBack();
-        } else {
-            super.onBackPressed();
-        }
-    }
-
-    @Override
     protected void onDestroy() {
         if (pendingCameraRequest != null) pendingCameraRequest.deny();
+        if (connectivityManager != null && wifiNetworkCallback != null) {
+            try {
+                connectivityManager.unregisterNetworkCallback(wifiNetworkCallback);
+            } catch (IllegalArgumentException ignored) {
+                // Callback was already unregistered by the system.
+            }
+            connectivityManager.bindProcessToNetwork(null);
+        }
         webView.stopLoading();
         webView.destroy();
         super.onDestroy();
