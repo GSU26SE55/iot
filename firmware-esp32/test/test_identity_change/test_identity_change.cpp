@@ -89,6 +89,9 @@ void test_null_username_rejects_when_mqtt_used() {
                         decide("gw-esp32-mvp-001", nullptr));
 }
 
+void setUp(void) {}
+void tearDown(void) {}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_matching_lowercase_code_is_accepted);

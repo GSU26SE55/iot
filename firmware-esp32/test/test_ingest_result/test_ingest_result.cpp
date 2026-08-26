@@ -98,6 +98,9 @@ void test_zero_total_received_is_never_partial() {
   TEST_ASSERT_FALSE(r.isPartial());
 }
 
+void setUp(void) {}
+void tearDown(void) {}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_full_success_is_not_partial);

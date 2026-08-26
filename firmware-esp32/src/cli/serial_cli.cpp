@@ -5,6 +5,7 @@
 
 #include "core/identity_change_policy.h"
 #include "net/mqtt_client.h"
+#include "provision/provision.h"
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -22,6 +23,7 @@
 #include "config/device_identity.h"
 #include "config/mqtt_config.h"
 #include "config/nvs_store.h"
+#include "config/runtime_config.h"
 #include "config/wifi_config.h"
 #include "net/wifi_manager.h"
 #include "net/wifi_scan_hints.h"
@@ -65,6 +67,7 @@ void printHelp() {
   Serial.println("  set wifissid <ssid>     — chỉ đổi SSID (dùng khi SSID CÓ dấu cách)");
   Serial.println("  set wifipass <pass>     — chỉ đổi mật khẩu (dùng khi mật khẩu CÓ dấu cách)");
   Serial.println("  wifiscan                — quét mạng quanh đây + cảnh báo sóng yếu/Enterprise");
+  Serial.println("  set backend <url>       — đổi backend (vd http://192.168.1.9:4006) + provision lại");
   Serial.println("  -- broker (IOT3-55) --");
   Serial.println("  set mqttbroker <host> <port>");
   Serial.println("  set mqttuser <U>        — username MQTT");
@@ -72,6 +75,7 @@ void printHelp() {
   Serial.println("  set mqttprefix <T>      — tiền tố topic, vd solar/gw-esp32-001");
   Serial.println("  -- khác --");
   Serial.println("  clear                   — erase NVS, fallback compile-time");
+  Serial.println("  resume                  — phục hồi cờ provision, giữ nguyên mọi cấu hình");
   Serial.println("  reboot                  — ESP.restart()");
   Serial.println("  help                    — in help này");
   Serial.println("------------------------------------------");
@@ -180,6 +184,23 @@ void executeCommand(const char* line) {
     }
     return;
   }
+  if (strcmp(line, "resume") == 0) {
+    if (identity::deviceCode()[0] == '\0' || identity::apiKey()[0] == '\0' ||
+        mqttcfg::host()[0] == '\0' ||
+        mqttcfg::username()[0] == '\0' || mqttcfg::password()[0] == '\0') {
+      Serial.println("[cli] KHÔNG resume: thiếu identity hoặc cấu hình MQTT đã lưu");
+      return;
+    }
+    if (!provision::restoreProvisionFlag()) {
+      Serial.println("[cli] resume FAILED: không ghi được cờ provision");
+      return;
+    }
+    Serial.println("[cli] provision flag restored; rebooting in 1s...");
+    Serial.flush();
+    delay(1000);
+    ESP.restart();
+    return;
+  }
   if (strcmp(line, "reboot") == 0) {
     Serial.println("[cli] rebooting in 1s...");
     Serial.flush();           // ensure log out trước reboot (USB-CDC buffered)
@@ -282,6 +303,20 @@ void executeCommand(const char* line) {
   }
   if (strcmp(line, "wifiscan") == 0) {
     doWifiScan();
+    return;
+  }
+  // Đổi backend giữa production và stack chạy trên máy dev. Không có lệnh này thì lối duy
+  // nhất là setup portal — mà portal bắt nhập lại cả Wi-Fi, device code lẫn API key.
+  if (startsWith(line, "set backend ")) {
+    const char* val = skipSpace(line + strlen("set backend "));
+    if (!runtimecfg::saveBackendUrl(val)) return;   // đã log lý do
+    // Cờ provision còn nguyên ⇒ thiết bị KHÔNG bao giờ gọi /provision trên backend mới, và
+    // credential MQTT trong NVS vẫn trỏ về broker của backend cũ. Xoá cờ để boot sau lấy lại.
+    if (!provision::clearProvisionFlag()) {
+      Serial.println("[cli] ⚠ đã đổi backend nhưng KHÔNG xoá được cờ provision — chạy `clear` rồi nhập lại");
+      return;
+    }
+    Serial.println("[cli] backend saved + cờ provision đã xoá — gõ `reboot` để provision lại");
     return;
   }
   if (startsWith(line, "set mqttbroker ")) {

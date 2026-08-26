@@ -3,12 +3,22 @@ package com.solarbms.setup;
 import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
+import android.os.SystemClock;
 import android.view.HapticFeedbackConstants;
+import android.view.View;
+import android.widget.ImageButton;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.ComponentActivity;
+import androidx.activity.OnBackPressedCallback;
+import androidx.annotation.OptIn;
+import androidx.camera.core.Camera;
 import androidx.camera.core.CameraSelector;
+import androidx.camera.core.ExperimentalGetImage;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
 import androidx.camera.core.Preview;
@@ -28,6 +38,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+@OptIn(markerClass = ExperimentalGetImage.class)
 public final class QrScannerActivity extends ComponentActivity {
     public static final String EXTRA_QR_VALUE = "com.solarbms.setup.QR_VALUE";
 
@@ -36,13 +47,28 @@ public final class QrScannerActivity extends ComponentActivity {
     private ExecutorService cameraExecutor;
     private BarcodeScanner barcodeScanner;
     private PreviewView previewView;
+    private ImageButton flashButton;
+    private TextView scannerStatus;
+    private Camera camera;
+    private boolean torchEnabled;
+    private long lastInvalidNoticeMs;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_qr_scanner);
+        getWindow().getDecorView().setSystemUiVisibility(0);
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                cancelScan();
+            }
+        });
         previewView = findViewById(R.id.cameraPreview);
+        flashButton = findViewById(R.id.flashScannerButton);
+        scannerStatus = findViewById(R.id.scannerStatusText);
         findViewById(R.id.closeScannerButton).setOnClickListener(view -> cancelScan());
+        flashButton.setOnClickListener(view -> toggleTorch());
 
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             Toast.makeText(this, R.string.camera_required, Toast.LENGTH_LONG).show();
@@ -73,12 +99,14 @@ public final class QrScannerActivity extends ComponentActivity {
                 analysis.setAnalyzer(cameraExecutor, this::analyzeFrame);
 
                 provider.unbindAll();
-                provider.bindToLifecycle(
+                camera = provider.bindToLifecycle(
                         this,
                         CameraSelector.DEFAULT_BACK_CAMERA,
                         preview,
                         analysis
                 );
+                boolean hasFlash = camera.getCameraInfo().hasFlashUnit();
+                flashButton.setVisibility(hasFlash ? View.VISIBLE : View.INVISIBLE);
             } catch (Exception error) {
                 Toast.makeText(
                         this,
@@ -119,14 +147,66 @@ public final class QrScannerActivity extends ComponentActivity {
         for (Barcode barcode : barcodes) {
             String rawValue = barcode.getRawValue();
             if (rawValue == null || rawValue.trim().isEmpty()) continue;
+            if (!isProvisioningQr(rawValue)) {
+                showInvalidQrHint();
+                continue;
+            }
             if (!resultDelivered.compareAndSet(false, true)) return;
 
-            previewView.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
+            previewView.performHapticFeedback(
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                            ? HapticFeedbackConstants.CONFIRM
+                            : HapticFeedbackConstants.LONG_PRESS
+            );
             Intent data = new Intent().putExtra(EXTRA_QR_VALUE, rawValue);
             setResult(RESULT_OK, data);
             finish();
             return;
         }
+    }
+
+    private boolean isProvisioningQr(String rawValue) {
+        try {
+            Uri uri = Uri.parse(rawValue.trim());
+            boolean supportedScheme = "iot".equalsIgnoreCase(uri.getScheme())
+                    || "https".equalsIgnoreCase(uri.getScheme())
+                    || "http".equalsIgnoreCase(uri.getScheme());
+            if (!supportedScheme) return false;
+            if ("iot".equalsIgnoreCase(uri.getScheme())
+                    && !"provision".equalsIgnoreCase(uri.getHost())) return false;
+
+            String deviceCode = uri.getQueryParameter("dc");
+            if (deviceCode == null) deviceCode = uri.getQueryParameter("deviceCode");
+            String apiKey = uri.getQueryParameter("key");
+            if (apiKey == null) apiKey = uri.getQueryParameter("apiKey");
+            return deviceCode != null && !deviceCode.trim().isEmpty()
+                    && apiKey != null && !apiKey.trim().isEmpty();
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private void showInvalidQrHint() {
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastInvalidNoticeMs < 1800L) return;
+        lastInvalidNoticeMs = now;
+        runOnUiThread(() -> {
+            scannerStatus.setText(R.string.scanner_wrong_qr);
+            scannerStatus.setTextColor(0xFFFFCDD4);
+            scannerStatus.postDelayed(() -> {
+                if (!resultDelivered.get()) {
+                    scannerStatus.setText(R.string.scanner_privacy_hint);
+                    scannerStatus.setTextColor(0xFFFFFFFF);
+                }
+            }, 1600L);
+        });
+    }
+
+    private void toggleTorch() {
+        if (camera == null || !camera.getCameraInfo().hasFlashUnit()) return;
+        torchEnabled = !torchEnabled;
+        camera.getCameraControl().enableTorch(torchEnabled);
+        flashButton.setAlpha(torchEnabled ? 1f : 0.72f);
     }
 
     private void cancelScan() {
@@ -135,15 +215,10 @@ public final class QrScannerActivity extends ComponentActivity {
     }
 
     @Override
-    public void onBackPressed() {
-        cancelScan();
-    }
-
-    @Override
     protected void onDestroy() {
+        if (camera != null && torchEnabled) camera.getCameraControl().enableTorch(false);
         if (barcodeScanner != null) barcodeScanner.close();
         if (cameraExecutor != null) cameraExecutor.shutdown();
         super.onDestroy();
     }
 }
-

@@ -16,6 +16,7 @@ firmware-esp32/.pioenvs/
 firmware-esp32/.piolibdeps/
 firmware-esp32/.vscode/
 firmware-esp32/include/config.h
+firmware-esp32/include/config.h.*.bak
 
 # Sprint 0 — Infra
 infra/.env

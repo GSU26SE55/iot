@@ -70,6 +70,9 @@ void test_pending_flag_dominates() {
   TEST_ASSERT_FALSE(core::shouldAttemptReport(false, 999'999, 0));
 }
 
+void setUp(void) {}
+void tearDown(void) {}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_not_pending_never_attempts);

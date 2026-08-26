@@ -34,8 +34,8 @@ namespace queue {
 
 // kMaxQueuedBatches đã định nghĩa ở queue_index.h (re-export qua include).
 
-// Khởi tạo LittleFS + tạo dir /queue/ nếu chưa có.
-// Trả false nếu mount fail (sẽ format auto-true để self-heal lần đầu).
+// Khởi tạo SD card (ưu tiên) hoặc LittleFS (fallback) + tạo /queue/.
+// Không tự format khi mount lỗi để tránh xóa telemetry chưa gửi.
 bool queueBegin();
 
 // Đẩy 1 batch vào queue. Nếu >= kMaxQueuedBatches → xóa file cũ nhất rồi push.
@@ -59,6 +59,11 @@ bool queueDelete(uint32_t epochSec);
 
 // Số batch đang queue.
 size_t queueSize();
+
+// Runtime storage diagnostics. Values are zero when queueBegin() failed.
+const char* queueStorageName();
+uint64_t queueStorageTotalBytes();
+uint64_t queueStorageUsedBytes();
 
 // Xóa tất cả — debug/reset.
 bool queueClear();

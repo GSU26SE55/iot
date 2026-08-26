@@ -150,8 +150,8 @@ summary{cursor:pointer;color:var(--muted);margin-bottom:10px;font-size:11.5px;fo
 <label class="full">Mật khẩu Wi‑Fi<input id="wifiPassword" type="password" maxlength="64" placeholder="Để trống nếu mạng mới không có mật khẩu"></label>
 </div><input id="deviceCode" type="hidden"><input id="apiKey" type="hidden">
 <details><summary>Cấu hình nâng cao</summary><div class="grid">
-<label class="full">Backend URL<input id="backendUrl" maxlength="159" placeholder="http://192.168.1.10:4006" required></label>
-<label>Broker host<input id="mqttHost" maxlength="95" required></label><label>Port<input id="mqttPort" type="number" min="1" max="65535" required></label>
+<label class="full">Backend URL<input id="backendUrl" maxlength="159" placeholder="https://api.solaris.io.vn" required></label>
+<label>Broker host<input id="mqttHost" maxlength="95" required></label><label>Port (cố định theo firmware)<input id="mqttPort" type="number" disabled></label>
 <label>Username<input id="mqttUsername" maxlength="64"></label><label>Password<input id="mqttPassword" type="password" maxlength="96" placeholder="Để trống để giữ nguyên"></label>
 <label class="check full"><input id="mqttUseTls" type="checkbox" disabled> Dùng TLS (cố định theo firmware)</label>
 </div></details><button class="full-btn" id="continueButton" type="submit" style="margin-top:14px">Tiếp tục chụp QR →</button><div id="message" class="message"></div></form>
@@ -168,15 +168,15 @@ summary{cursor:pointer;color:var(--muted);margin-bottom:10px;font-size:11.5px;fo
 </div>
 <script src="/jsqr.js"></script><script>
 const $=id=>document.getElementById(id),msg=$('message'),pendingKey='solarSetupPendingV2',pendingMaxAge=15*60*1000;
-const params=new URLSearchParams(location.search);let qrDeviceCode=params.get('dc')||'',qrApiKey=params.get('key')||'',qrBackendUrl=params.get('api')||params.get('backendUrl')||'',qrMqttHost=params.get('mh')||params.get('mqttHost')||'',qrMqttPort=Number(params.get('mp')||params.get('mqttPort')||0),qrMqttTls=params.get('mt')||params.get('mqttUseTls')||'',apActive=false,hasIdentity=false,canReprovision=false,qrBusy=false;
+const params=new URLSearchParams(location.search);let qrDeviceCode=params.get('dc')||'',qrApiKey=params.get('key')||'',qrBackendUrl=params.get('api')||params.get('backendUrl')||'',qrMqttHost=params.get('mh')||params.get('mqttHost')||'',apActive=false,hasIdentity=false,canReprovision=false,qrBusy=false;
 if(qrDeviceCode||qrApiKey||qrBackendUrl||qrMqttHost)history.replaceState({},document.title,'/');
 function showStep(name){$('setupForm').classList.toggle('hidden',name!=='wifi');$('qrStep').classList.toggle('hidden',name!=='qr');$('savingStep').classList.toggle('hidden',name!=='saving');$('syncStep').classList.toggle('hidden',name!=='wifi'||!canReprovision);$('rebindStep').classList.toggle('hidden',name!=='wifi'||!canReprovision);$('stepOne').classList.toggle('active',name==='wifi');$('stepTwo').classList.toggle('active',name!=='wifi');if(apActive&&name==='qr')$('network').textContent='Wi‑Fi đã chọn: '+$('wifiSsid').value;if(apActive&&name==='saving')$('network').textContent='Wi‑Fi: đang lưu và kết nối'}
 function collect(){return{wifiSsid:$('wifiSsid').value.trim(),wifiPassword:$('wifiPassword').value,backendUrl:$('backendUrl').value.trim(),deviceCode:$('deviceCode').value.trim(),apiKey:$('apiKey').value,mqttHost:$('mqttHost').value.trim(),mqttPort:Number($('mqttPort').value),mqttUseTls:$('mqttUseTls').checked,mqttUsername:$('mqttUsername').value.trim(),mqttPassword:$('mqttPassword').value}}
 function storePending(body){try{localStorage.setItem(pendingKey,JSON.stringify({savedAt:Date.now(),config:body}));return true}catch{return false}}
 function readPending(){try{const raw=localStorage.getItem(pendingKey);if(!raw)return null;const value=JSON.parse(raw);if(Date.now()-Number(value.savedAt)<=pendingMaxAge)return value.config;localStorage.removeItem(pendingKey);return null}catch{try{localStorage.removeItem(pendingKey)}catch{}return null}}
 function clearPending(){try{localStorage.removeItem(pendingKey)}catch{}}
-function readProvisioningQr(raw){try{const url=new URL(raw.trim()),dc=url.searchParams.get('dc')||url.searchParams.get('deviceCode')||'',key=url.searchParams.get('key')||url.searchParams.get('apiKey')||'',api=url.searchParams.get('api')||url.searchParams.get('backendUrl')||'',mh=url.searchParams.get('mh')||url.searchParams.get('mqttHost')||'',mp=Number(url.searchParams.get('mp')||url.searchParams.get('mqttPort')||0),mt=url.searchParams.get('mt')||url.searchParams.get('mqttUseTls')||'';if(!dc||!key)throw Error();if(api&&!/^https?:\/\//i.test(api))throw Error();return{dc,key,api,mh,mp,mt}}catch{throw Error('QR này không phải mã ghép thiết bị Solar BMS.')}}
-async function applyQr(raw){if(qrBusy)return;qrBusy=true;try{const code=readProvisioningQr(raw);$('deviceCode').value=code.dc;$('apiKey').value=code.key;const pending=readPending();if(!pending)throw Error('Thông tin Wi‑Fi tạm đã hết hạn. Hãy quay lại bước 1.');pending.deviceCode=code.dc;pending.apiKey=code.key;if(code.api)pending.backendUrl=code.api;if(code.mh)pending.mqttHost=code.mh;if(code.mp>0)pending.mqttPort=code.mp;if(code.mt!=='')pending.mqttUseTls=code.mt==='1'||code.mt==='true';$('qrMessage').className='message ok';$('qrMessage').textContent='Đã nhận QR '+code.dc+'. Đang lưu cấu hình…';if(await saveConfig(pending))clearPending();else qrBusy=false}catch(err){$('qrMessage').className='message err';$('qrMessage').textContent=err.message;qrBusy=false}}
+function readProvisioningQr(raw){try{const url=new URL(raw.trim()),dc=url.searchParams.get('dc')||url.searchParams.get('deviceCode')||'',key=url.searchParams.get('key')||url.searchParams.get('apiKey')||'',api=url.searchParams.get('api')||url.searchParams.get('backendUrl')||'',mh=url.searchParams.get('mh')||url.searchParams.get('mqttHost')||'';if(!dc||!key)throw Error();if(api&&!/^https?:\/\//i.test(api))throw Error();return{dc,key,api,mh}}catch{throw Error('QR này không phải mã ghép thiết bị Solar BMS.')}}
+async function applyQr(raw){if(qrBusy)return;qrBusy=true;try{const code=readProvisioningQr(raw);$('deviceCode').value=code.dc;$('apiKey').value=code.key;const pending=readPending()||(hasIdentity?collect():null);if(!pending)throw Error('Thông tin Wi‑Fi tạm đã hết hạn. Hãy quay lại bước 1.');pending.deviceCode=code.dc;pending.apiKey=code.key;if(code.api)pending.backendUrl=code.api;if(code.mh)pending.mqttHost=code.mh;$('qrMessage').className='message ok';$('qrMessage').textContent='Đã nhận QR '+code.dc+'. Đang lưu cấu hình…';if(await saveConfig(pending))clearPending();else qrBusy=false}catch(err){$('qrMessage').className='message err';$('qrMessage').textContent=err.message;qrBusy=false}}
 function loadPreview(url){return new Promise((resolve,reject)=>{const image=$('qrPreview');image.onload=()=>resolve(image);image.onerror=()=>reject(Error('Không đọc được ảnh đã chọn'));image.src=url})}
 async function findQrInImage(image){const canvas=$('qrCanvas'),ctx=canvas.getContext('2d',{willReadFrequently:true}),maxSides=[2400,1800,1200];for(let pass=0;pass<maxSides.length;pass++){const scale=Math.min(1,maxSides[pass]/Math.max(image.naturalWidth,image.naturalHeight)),width=Math.max(1,Math.round(image.naturalWidth*scale)),height=Math.max(1,Math.round(image.naturalHeight*scale));canvas.width=width;canvas.height=height;ctx.drawImage(image,0,0,width,height);if(pass===0&&window.BarcodeDetector){try{const detector=new window.BarcodeDetector({formats:['qr_code']}),codes=await detector.detect(canvas);if(codes[0]&&codes[0].rawValue)return codes[0].rawValue}catch{}}const pixels=ctx.getImageData(0,0,width,height),normal=window.jsQR(pixels.data,width,height,{inversionAttempts:'attemptBoth'});if(normal)return normal.data;if(pass===1){for(const threshold of [88,120,152,184]){const bw=ctx.getImageData(0,0,width,height),data=bw.data;for(let i=0;i<data.length;i+=4){const light=(data[i]*77+data[i+1]*150+data[i+2]*29)>>8,value=light>=threshold?255:0;data[i]=value;data[i+1]=value;data[i+2]=value}const result=window.jsQR(data,width,height,{inversionAttempts:'attemptBoth'});if(result)return result.data}}}return''}
 async function decodeQrFile(file){if(!file||qrBusy)return;const status=$('qrMessage'),button=$('cameraButton'),url=URL.createObjectURL(file);qrBusy=true;button.disabled=true;status.className='message';status.textContent='Đang tìm mã QR trong ảnh…';try{if(file.size>12*1024*1024)throw Error('Ảnh lớn hơn 12 MB. Hãy chụp lại ở độ phân giải thấp hơn.');const image=await loadPreview(url);$('qrScanner').classList.remove('idle');const result=await findQrInImage(image);if(!result)throw Error('Không tìm thấy QR. Hãy đưa mã gần hơn, lấy trọn 4 góc và tránh phản chiếu màn hình.');status.className='message ok';status.textContent='Đã nhận diện QR. Đang kiểm tra…';qrBusy=false;await applyQr(result)}catch(err){status.className='message err';status.textContent=err.message;qrBusy=false;button.disabled=false}finally{setTimeout(()=>URL.revokeObjectURL(url),1000);$('qrImageInput').value=''}}
@@ -187,10 +187,10 @@ async function reprovision(){if(!confirm('Đồng bộ lại cấu hình pin và
 async function prepareNewPairing(){if(!confirm('Xóa liên kết IoT hiện tại và quét QR của IoT mới? Wi‑Fi sẽ được giữ lại.'))return;const button=$('newPairingButton');button.disabled=true;$('newPairingMessage').className='message';$('newPairingMessage').textContent='Đang xóa dữ liệu IoT cũ…';try{const r=await fetch('/api/new-pairing',{method:'POST'}),out=await r.json();if(!r.ok)throw Error(out.error||('HTTP '+r.status));$('savingTitle').textContent='Đã đưa về chế độ ghép mới';$('savingText').textContent='ESP32 đang khởi động lại. Kết nối lại SolarGW-xxxx, chọn Wi‑Fi rồi chụp QR của IoT mới.';showStep('saving')}catch(err){$('newPairingMessage').className='message err';$('newPairingMessage').textContent='Không thể đưa về ban đầu: '+err.message;button.disabled=false}}
 async function load(){try{const r=await fetch('/api/config',{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const c=await r.json();
 for(const k of ['wifiSsid','backendUrl','deviceCode','mqttHost','mqttPort','mqttUsername'])$(k).value=c[k]??'';$('mqttUseTls').checked=!!c.mqttUseTls;apActive=!!c.apActive;hasIdentity=!!(c.hasApiKey&&c.deviceCode);$('continueButton').textContent=hasIdentity?'Kiểm tra và lưu Wi‑Fi mới':((qrDeviceCode&&qrApiKey)?'Kiểm tra Wi‑Fi và lưu':'Kiểm tra Wi‑Fi rồi quét QR →');
-if(qrBackendUrl)$('backendUrl').value=qrBackendUrl;if(qrMqttHost)$('mqttHost').value=qrMqttHost;if(qrMqttPort>0)$('mqttPort').value=String(qrMqttPort);if(qrMqttTls!=='')$('mqttUseTls').checked=qrMqttTls==='1'||qrMqttTls==='true';
+if(qrBackendUrl)$('backendUrl').value=qrBackendUrl;if(qrMqttHost)$('mqttHost').value=qrMqttHost;
 $('network').textContent=c.stationConnected?'Wi‑Fi: đã kết nối':'Wi‑Fi: chưa kết nối';$('address').textContent=c.stationConnected?c.stationIp:(c.apActive?'AP: '+c.apIp:'');
 canReprovision=hasIdentity;$('syncStep').classList.toggle('hidden',!canReprovision);$('rebindStep').classList.toggle('hidden',!canReprovision);if(hasIdentity){$('flowLead').textContent='Thiết bị đã ghép. Bạn có thể đổi Wi‑Fi mà không cần quét QR lại.';$('stepTwo').querySelector('b').textContent='Giữ mã IoT';$('stepTwo').querySelector('small').textContent='Không cần QR';msg.className='message ok';msg.textContent='Chế độ đổi Wi‑Fi: mã thiết bị và API key sẽ được giữ nguyên.'}
-if(qrDeviceCode&&qrApiKey){$('deviceCode').value=qrDeviceCode;$('apiKey').value=qrApiKey;const pending=readPending();if(pending){pending.deviceCode=qrDeviceCode;pending.apiKey=qrApiKey;if(qrBackendUrl)pending.backendUrl=qrBackendUrl;if(qrMqttHost)pending.mqttHost=qrMqttHost;if(qrMqttPort>0)pending.mqttPort=qrMqttPort;if(qrMqttTls!=='')pending.mqttUseTls=qrMqttTls==='1'||qrMqttTls==='true';if(await saveConfig(pending))clearPending();return}msg.className='message ok';msg.textContent='Đã nhận QR '+qrDeviceCode+'. Chọn Wi‑Fi rồi tiếp tục để lưu.';}
+if(qrDeviceCode&&qrApiKey){$('deviceCode').value=qrDeviceCode;$('apiKey').value=qrApiKey;const pending=readPending();if(pending){pending.deviceCode=qrDeviceCode;pending.apiKey=qrApiKey;if(qrBackendUrl)pending.backendUrl=qrBackendUrl;if(qrMqttHost)pending.mqttHost=qrMqttHost;if(await saveConfig(pending))clearPending();return}msg.className='message ok';msg.textContent='Đã nhận QR '+qrDeviceCode+'. Chọn Wi‑Fi rồi tiếp tục để lưu.';}
 }catch(e){msg.className='message err';msg.textContent='Không đọc được cấu hình: '+e.message}}
 async function loadNetworks(){const button=$('scanButton');button.disabled=true;button.textContent='Đang quét…';try{const r=await fetch('/api/networks',{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const out=await r.json(),seen=new Set(),dataList=$('wifiNetworks'),visibleList=$('wifiList');dataList.replaceChildren();visibleList.replaceChildren();for(const n of out.networks||[]){if(!n.ssid||seen.has(n.ssid))continue;seen.add(n.ssid);const option=document.createElement('option');option.value=n.ssid;option.label=(n.secure?'🔒 ':'')+n.rssi+' dBm';dataList.appendChild(option);const choice=document.createElement('button'),name=document.createElement('span'),signal=document.createElement('span');choice.type='button';choice.className='secondary network-option';name.textContent=(n.secure?'🔒 ':'')+n.ssid;signal.textContent=n.rssi+' dBm';choice.appendChild(name);choice.appendChild(signal);choice.addEventListener('click',()=>{$('wifiSsid').value=n.ssid;for(const item of visibleList.children)item.classList.remove('selected');choice.classList.add('selected')});visibleList.appendChild(choice);}}catch(e){msg.className='message err';msg.textContent='Không quét được Wi‑Fi: '+e.message}finally{button.disabled=false;button.textContent='Quét lại mạng Wi‑Fi'}}
 $('setupForm').addEventListener('submit',async e=>{e.preventDefault();const body=collect(),button=$('continueButton');button.disabled=true;try{await verifyWifi(body);if(hasIdentity||(qrDeviceCode&&qrApiKey)){await saveConfig(body);return}if(!storePending(body))throw Error('Trình duyệt không cho lưu tạm Wi‑Fi. Hãy bật lưu trữ trang web rồi thử lại.');showStep('qr');button.disabled=false;prepareQrCapture()}catch(error){msg.className='message err';msg.textContent='Không thể tiếp tục: '+error.message;button.disabled=false}});
@@ -233,7 +233,7 @@ void handleGetConfig() {
   document["deviceCode"] = identity::deviceCode();
   document["hasApiKey"] = identity::apiKey()[0] != '\0';
   document["mqttHost"] = mqttcfg::host();
-  document["mqttPort"] = mqttcfg::port();
+  document["mqttPort"] = MQTT_BROKER_PORT;
   document["mqttUseTls"] = MQTT_USE_TLS != 0;
   document["mqttUsername"] = mqttcfg::username();
   document["hasMqttPassword"] = mqttcfg::password()[0] != '\0';
@@ -399,7 +399,8 @@ void handleSaveConfig() {
   const char* mqttHost = document["mqttHost"] | "";
   const char* mqttUsername = document["mqttUsername"] | "";
   const char* mqttPassword = document["mqttPassword"] | "";
-  const int mqttPort = document["mqttPort"] | 0;
+  const int mqttPort = MQTT_BROKER_PORT;
+  const bool receivedApiKey = apiKey[0] != '\0';
 
   if (wifiSsid[0] == '\0' || backendUrl[0] == '\0' || deviceCode[0] == '\0' ||
       mqttHost[0] == '\0') {
@@ -422,16 +423,10 @@ void handleSaveConfig() {
     sendError(400, "Backend URL phải bắt đầu bằng http:// hoặc https://");
     return;
   }
-  if (mqttPort < 1 || mqttPort > 65535) {
-    sendError(400, "MQTT port phải nằm trong khoảng 1-65535");
-    return;
-  }
-
-  const bool requestedTls = document["mqttUseTls"] | (MQTT_USE_TLS != 0);
-  if (requestedTls != (MQTT_USE_TLS != 0)) {
-    sendError(400, "MQTT TLS is fixed by the firmware build");
-    return;
-  }
+  // TLS and its public broker port are compile-time properties of this
+  // production transport. Ignore stale values from cached pages/legacy QR;
+  // accepting mp=1883 while MQTT_USE_TLS=1 makes WiFiClientSecure attempt a
+  // TLS handshake against the plain listener and can never succeed.
 
   // Password fields are write-only. Với Wi-Fi, chỉ giữ mật khẩu cũ khi SSID
   // không đổi; SSID mới + password rỗng phải thực sự là mạng mở, không được
@@ -460,7 +455,8 @@ void handleSaveConfig() {
       (apiKey[0] != '\0' && !identity::setApiKey(apiKey)) ||
       !mqttcfg::setBroker(mqttHost, mqttPort) ||
       !mqttcfg::setCredential(nextMqttUsername, nextMqttPassword) ||
-      !mqttcfg::setTopicPrefix(topicPrefix)) {
+      !mqttcfg::setTopicPrefix(topicPrefix) ||
+      (receivedApiKey && !provision::clearProvisionFlag())) {
     sendError(500, "Không ghi được cấu hình vào NVS");
     return;
   }
@@ -472,6 +468,9 @@ void handleSaveConfig() {
   s_restartPending = true;
   s_restartAtMs = millis() + 1500;
   Serial.println("[portal] configuration saved; restart scheduled");
+  if (receivedApiKey) {
+    Serial.println("[portal] QR credential updated; backend provision will refresh MQTT after reboot");
+  }
 }
 
 void handleReprovision() {
