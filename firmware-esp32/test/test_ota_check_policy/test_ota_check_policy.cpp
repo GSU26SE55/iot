@@ -120,6 +120,9 @@ void test_rollover_still_waits_when_interval_not_elapsed() {
   TEST_ASSERT_EQUAL_INT(expected(core::OtaCheckDecision::SkipTooSoon), decide(in));
 }
 
+void setUp(void) {}
+void tearDown(void) {}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_forced_runs_immediately_instead_of_waiting_an_hour);

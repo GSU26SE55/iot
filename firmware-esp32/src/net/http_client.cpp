@@ -39,6 +39,10 @@
   #define TLS_CA_CERT_PATH MQTT_CA_CERT_PATH
 #endif
 
+#ifndef HTTP_INGEST_TIMEOUT_MS
+  #define HTTP_INGEST_TIMEOUT_MS HTTP_TIMEOUT_MS
+#endif
+
 namespace net {
 
 namespace {
@@ -96,6 +100,22 @@ bool beginRequest(HTTPClient& http, const String& url) {
   return false;
 }
 
+// HTTPClient::setConnectTimeout() only limits the TCP connect phase. In the
+// Arduino-ESP32 2.x WiFiClientSecure implementation the TLS handshake has a
+// separate 120-second default, so an unreachable/half-open HTTPS endpoint can
+// otherwise freeze appTask for two minutes. appTask also pumps MQTT, the LED,
+// BMS polling and the offline queue; blocking it long enough drops MQTT and
+// leaves the status LED stale.
+void setRequestTimeouts(HTTPClient& http, const String& url, uint32_t timeoutMs) {
+  http.setTimeout(timeoutMs);
+  http.setConnectTimeout(timeoutMs);
+  if (url.startsWith("https://")) {
+    // API is expressed in whole seconds and treats zero as no useful limit.
+    const uint32_t handshakeSeconds = (timeoutMs + 999U) / 1000U;
+    s_tlsClient.setHandshakeTimeout(handshakeSeconds > 0U ? handshakeSeconds : 1U);
+  }
+}
+
 size_t copyResponseFull(HTTPClient& http,
                         char* snippet, size_t snippetLen,
                         char* fullBuf, size_t fullBufLen) {
@@ -120,7 +140,8 @@ PostResult postJsonInternal(const char* path,
                             const char* body, size_t bodyLen,
                             char* respBuf, size_t respBufLen,
                             size_t* outRespBytes,
-                            const char* idempotencyKey = nullptr) {
+                            const char* idempotencyKey = nullptr,
+                            uint32_t timeoutMs = HTTP_TIMEOUT_MS) {
   PostResult res{};
   res.httpCode      = -1;
   res.requestBytes  = bodyLen;
@@ -139,8 +160,7 @@ PostResult postJsonInternal(const char* path,
 
   HTTPClient http;
   http.setReuse(true);
-  http.setTimeout(HTTP_TIMEOUT_MS);
-  http.setConnectTimeout(HTTP_TIMEOUT_MS);
+  setRequestTimeouts(http, url, timeoutMs);
 
   uint32_t t0 = millis();
   if (!beginRequest(http, url)) {
@@ -211,8 +231,7 @@ PostResult httpGetJsonRecv(const char* path,
 
   HTTPClient http;
   http.setReuse(true);
-  http.setTimeout(HTTP_TIMEOUT_MS);
-  http.setConnectTimeout(HTTP_TIMEOUT_MS);
+  setRequestTimeouts(http, url, HTTP_TIMEOUT_MS);
 
   uint32_t t0 = millis();
   if (!beginRequest(http, url)) {
@@ -269,8 +288,7 @@ PostResult httpPutJson(const char* path, const char* body, size_t bodyLen) {
 
   HTTPClient http;
   http.setReuse(true);
-  http.setTimeout(HTTP_TIMEOUT_MS);
-  http.setConnectTimeout(HTTP_TIMEOUT_MS);
+  setRequestTimeouts(http, url, HTTP_TIMEOUT_MS);
 
   uint32_t t0 = millis();
   if (!beginRequest(http, url)) {
@@ -408,7 +426,8 @@ PostResult httpPostJsonRecv(const char* path,
 PostResult httpPostJsonWithIdempotency(const char* path,
                                        const char* body, size_t bodyLen,
                                        const char* idempotencyKey) {
-  return postJsonInternal(path, body, bodyLen, nullptr, 0, nullptr, idempotencyKey);
+  return postJsonInternal(path, body, bodyLen, nullptr, 0, nullptr,
+                          idempotencyKey, HTTP_INGEST_TIMEOUT_MS);
 }
 
 }  // namespace net

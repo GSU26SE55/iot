@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand">#3559E8</color>
+    <color name="brand_dark">#2744B8</color>
+    <color name="brand_soft">#E9EEFF</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="text_primary">#172137</color>
+    <color name="text_secondary">#66728B</color>
+    <color name="text_tertiary">#8B96AA</color>
+    <color name="border">#DDE4F0</color>
+    <color name="status_connected_text">#087A50</color>
+    <color name="status_waiting_text">#8A5A00</color>
+    <color name="status_error_text">#B4233A</color>
+    <color name="scanner_background">#07111F</color>
+    <color name="white">#FFFFFF</color>
+</resources>

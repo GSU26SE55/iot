@@ -30,7 +30,7 @@ bool bmsSourceBegin() {
   Serial.println("[bms-source] MOCK mode — Sprint 1 mock_bms (no hardware)");
   return true;
 #else
-  Serial.println("[bms-source] REAL mode — Sprint 5 (Modbus + INA226 + DS18B20 + SHT31)");
+  Serial.println("[bms-source] REAL mode — Modbus + INA226 + DS18B20 (SHT31 disabled)");
 
   bool ok = true;
   if (!modbusBegin()) {
@@ -46,10 +46,14 @@ bool bmsSourceBegin() {
     Serial.println("[bms-source] ds18b20 detect 0 sensor — external-temp SKIP");
     // Non-critical
   }
+#if SHT31_ENABLED
   if (!sensor::sht31Begin()) {
     Serial.println("[bms-source] sht31 init FAIL — ambient readings SKIP");
     // Non-critical (ambient endpoint khác — không ảnh hưởng telemetry chính)
   }
+#else
+  Serial.println("[bms-source] sht31 disabled by firmware config");
+#endif
   return ok;
 #endif
 }

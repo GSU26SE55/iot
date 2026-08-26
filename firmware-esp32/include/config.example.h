@@ -29,7 +29,7 @@
 #define CONFIG_PORTAL_USER            "admin"
 #define CONFIG_PORTAL_PASSWORD        "12345678"
 #define CONFIG_PORTAL_HOSTNAME        "solar-gateway"
-#define SETUP_AP_PASSWORD             "solar-setup-2026"
+#define SETUP_AP_PASSWORD             "12345678"
 // Có Wi-Fi cũ nhưng mất kết nối lâu hơn ngưỡng này thì mở AP recovery.
 #define CONFIG_PORTAL_AP_FALLBACK_MS  30000UL
 
@@ -47,10 +47,9 @@
 // --------- Serial ----------
 #define SERIAL_BAUD     115200
 
-// ============== Backend ingest =================
+// ============== Sprint 1 — Backend ingest (S1-FW-01 placeholder) =================
 
-// `BACKEND_URL` — public ApiGateway origin. This non-secret production default is safe
-// to compile into the generic firmware; device identity/API credentials still come from NVS.
+// `BACKEND_URL` — gốc backend BatteryService (placeholder theo tasksprint S1-FW-01).
 // Dev local:   "https://10.0.0.10:7200" (laptop chạy docker compose, ESP32 cùng LAN)
 // Production:  "https://api.solaris.io.vn"
 // LƯU Ý: HTTPS scheme — Sprint 1 dùng setInsecure() trong dev, Sprint 3 thay bằng CA cert.
@@ -84,15 +83,20 @@
 #define API_KEY             "iotk_DEV_PLACEHOLDER_REPLACE_ME"
 
 // --------- Ingest loop --------- (S1-FW-07)
-// Chu kỳ poll mock BMS + POST batch lên backend. Sprint 1 = 5s (tasksprint S1-FW-07).
-// Sprint 2+ sẽ đọc từ field `pollingInterval` của provision response.
-#define INGEST_INTERVAL_MS  5000UL
+// Production target: one telemetry sample per second. Provision/downlink may
+// request a faster interval, but main.cpp caps slower values at this target.
+#define INGEST_INTERVAL_MS  1000UL
 
 // Số pin mock sinh ra mỗi batch (S1-FW-04, S1-FW-07 AC = "posted 4 readings").
 #define MOCK_BATTERY_COUNT  4
 
 // HTTP timeout (ms).
 #define HTTP_TIMEOUT_MS     5000
+
+// Telemetry fallback must not stall the 1-second sampling loop for the generic
+// 5-second timeout. Queue-first delivery keeps the payload safe while this
+// shorter request probes whether the backend is reachable.
+#define HTTP_INGEST_TIMEOUT_MS  1500
 
 // --------- Mock BMS scenario flag --------- (S1-FW-04)
 // Compile flag để switch scenario mà không sửa code. Mặc định = normal.
@@ -109,11 +113,8 @@
 // Chưa có WiFi trong NVS (hoặc mất mạng ≥ 5 phút) thì thiết bị tự phát điểm phát sóng
 // `SolarGW-XXXX` (XXXX = 4 ký tự cuối MAC) để nạp SSID/mật khẩu + mã thiết bị + API key.
 //
-// ⚠️ Mật khẩu dưới đây PHẢI ≥ 8 ký tự (yêu cầu của WPA2) và PHẢI đổi trước khi giao khách.
-//    AP không mật khẩu nghĩa là bất kỳ ai đi ngang cũng đổi được mạng và API key của thiết bị —
-//    mà API key là thứ mở toàn bộ đường HTTPS lên backend.
-//    Đây là giá trị bắt buộc phải cá nhân hóa cho từng thiết bị trước khi giao khách.
-// SETUP_AP_PASSWORD đã được khai báo một lần ở khối portal phía trên.
+// SETUP_AP_PASSWORD và CONFIG_PORTAL_PASSWORD được khai báo một lần ở phần
+// Browser setup portal phía trên. App Android phải dùng đúng cùng giá trị đó.
 
 // ============== Sprint 4 — MQTT broker (S4-FW-01..06) =================
 //
@@ -128,10 +129,10 @@
 // `WiFiClientSecure` và `WiFiClient` là hai KIỂU khác nhau, chọn bằng `#if` lúc biên dịch.
 // Trường `mqttUseTls` backend gửi xuống chỉ được lưu để ĐỐI CHIẾU và cảnh báo khi lệch.
 //
-// Endpoint public đã có default production. Các giá trị riêng từng thiết bị vẫn phải provision:
-// `DEVICE_CODE`, `API_KEY`, MQTT credential và mật khẩu AP setup `SETUP_AP_PASSWORD`.
+// Việc duy nhất phải điền tay trong cả file này: `BACKEND_URL`, `DEVICE_CODE`, `API_KEY`
+// (hoặc nạp qua CLI/trang cấu hình) và mật khẩu AP setup `SETUP_AP_PASSWORD`.
 
-#define MQTT_BROKER_HOST    "mqtt.solaris.io.vn" // DNS ổn định; không dùng IP DHCP của router
+#define MQTT_BROKER_HOST    "mqtt.solaris.io.vn" // Production public broker
 #define MQTT_BROKER_PORT    8883             // 1883 plain | 8883 TLS
 #define MQTT_USE_TLS        1                // 0 = plain (chỉ dev), 1 = TLS (production)
 #define MQTT_USERNAME       "gw-esp32-mvp-001"   // backend lower-case deviceCode
@@ -150,8 +151,9 @@
 #define MQTT_CLIENT_ID      DEVICE_CODE
 
 // Keep-alive (sec) — broker ngắt session sau ~1.5x giá trị này nếu không
-// nhận PING. Đặt 30s cho ESP32 (battery friendly + LWT trigger nhanh).
-#define MQTT_KEEPALIVE_SEC  30
+// nhận PING. 5s giúp broker phát LWT sau tối đa khoảng 7,5s khi gateway mất điện,
+// nhưng vẫn dài hơn một lượt đọc BMS thật để tránh tự ngắt kết nối vì jitter vòng lặp.
+#define MQTT_KEEPALIVE_SEC  5
 
 // CA cert path trên LittleFS (S4-FW-01): upload qua `pio run -t uploadfs`
 // sau khi `infra/mqtt/scripts/gen-certs.sh` xong. File text PEM.
@@ -240,6 +242,16 @@
 #define I2C_SCL_PIN          9
 #define I2C_FREQUENCY_HZ     100000UL   // 100kHz standard (an toàn cable dài)
 
+// --------- HS0724 microSD offline queue (SPI) ---------
+// These pins must match the physical wiring. GPIO10-13 are not used because
+// they can conflict with octal flash/PSRAM on ESP32-S3 N16R8 boards.
+#define SD_CARD_ENABLED      1
+#define SD_CS_PIN            14
+#define SD_MOSI_PIN          5
+#define SD_SCK_PIN           21
+#define SD_MISO_PIN          7
+#define SD_SPI_FREQUENCY_HZ  4000000UL
+
 // INA226 (S5-FW-04) — current + voltage redundant
 #define INA226_I2C_ADDRESS   0x40       // default; AD0=GND, AD1=GND
 // IOT3-04/05 — chọn theo DÒNG ĐỈNH của JK-BD6A24S10P (100A liên tục / 200A đỉnh).
@@ -264,6 +276,7 @@
 #define DS18B20_MAX_SENSORS  8          // max sensors trên bus (≥ BMS_UNIT_ID_COUNT)
 
 // --------- SHT31 ambient (WD §4.2 cùng I2C) ---------
+#define SHT31_ENABLED        0          // 0 = bỏ qua hoàn toàn; DS18B20 theo dõi nhiệt pin
 #define SHT31_I2C_ADDRESS    0x44       // default; ADDR=GND
 #define SHT31_POLL_INTERVAL_MS 60000UL  // 1 phút (ambient không cần realtime)
 // Backend route thật: `[Route("api/ambient")] + [HttpPost("readings/batch")]`

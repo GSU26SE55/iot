@@ -1,28 +1,13 @@
-// ==================================================================
-// CA cert nhúng thẳng vào firmware, không đọc từ LittleFS.
+// Trust anchors shared by HTTPS and MQTT TLS.
 //
-// Lý do: local_queue.cpp và mqtt_client.cpp đều gọi LittleFS.begin(true)
-// tức format-nếu-mount-lỗi. Ảnh do `mklittlefs` tạo không mount được với
-// thư viện LittleFS trong firmware, nên phân vùng bị xoá sạch mỗi lần boot
-// và cuốn theo ca_cert.pem. Nhúng vào flash chương trình thì hết phụ thuộc.
-//
-// Bundle hiện chứa:
-//   1. CA tự ký của môi trường dev hiện tại.
-//   2. ISRG Root X1 của Let's Encrypt cho production HTTPS + MQTT/TLS.
-//
-// Nguồn CA dev: iot/infra/mqtt/mosquitto/certs/ca.crt
-// Sinh lại CA dev thì phải giữ nguyên ISRG Root X1 ở cuối bundle.
-//   cd iot/infra/mqtt/mosquitto/certs && \
-//     awk 'BEGIN{print "static const char kMqttCaCert[] PROGMEM = R\"CERT("} \
-//          {print} END{print ")CERT\";"}' ca.crt
-//
-// ISRG Root X1 hết hạn 2035-06-04; quy trình release phải cảnh báo trước
-// khi root trust này cần được thay qua OTA.
-// ==================================================================
+// The first certificate keeps the current development broker compatible.
+// The second certificate is ISRG Root X1 for the production endpoints
+// api.solaris.io.vn and mqtt.solaris.io.vn. Embedding the stable roots keeps
+// firmware independent from LittleFS and avoids pinning a 90-day leaf cert.
+// ISRG source: https://letsencrypt.org/certs/isrgrootx1.pem
+// SHA-1: CA:BD:2A:79:A1:07:6A:31:F2:1D:25:36:35:CB:03:9D:43:29:A5:E8
 #pragma once
 
-// Không dùng PROGMEM: header này được include trước <Arduino.h> nên macro
-// đó chưa tồn tại. Trên ESP32 hằng const nằm sẵn ở flash, không tốn RAM.
 static const char kMqttCaCert[] = R"CERT(
 -----BEGIN CERTIFICATE-----
 MIIDqDCCApCgAwIBAgIUW9EyIvycObDAYx7nEvgp3XgLPYgwDQYJKoZIhvcNAQEL

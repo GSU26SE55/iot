@@ -91,6 +91,9 @@ void test_reader_helper_actually_reads() {
   TEST_ASSERT_TRUE(readSource("src/net/khong_ton_tai_dau.h").empty());
 }
 
+void setUp(void) {}
+void tearDown(void) {}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_publish_guarantee_is_best_effort_qos0);
