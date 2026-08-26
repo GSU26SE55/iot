@@ -51,9 +51,9 @@
 
 // `BACKEND_URL` — gốc backend BatteryService (placeholder theo tasksprint S1-FW-01).
 // Dev local:   "https://10.0.0.10:7200" (laptop chạy docker compose, ESP32 cùng LAN)
-// Staging:     "https://api-dev.gsu26se55.com"
+// Production:  "https://api.solaris.io.vn"
 // LƯU Ý: HTTPS scheme — Sprint 1 dùng setInsecure() trong dev, Sprint 3 thay bằng CA cert.
-#define BACKEND_URL         "https://api.solars.io.vn"
+#define BACKEND_URL         "https://api.solaris.io.vn"
 
 // Endpoint ingest theo legacy contract (Sprint 1 MVP — backward compat NI §7.4).
 // Sprint 3 (S3-FW-04) giữ URL nhưng đổi schema sang production contract.
@@ -132,7 +132,7 @@
 // Việc duy nhất phải điền tay trong cả file này: `BACKEND_URL`, `DEVICE_CODE`, `API_KEY`
 // (hoặc nạp qua CLI/trang cấu hình) và mật khẩu AP setup `SETUP_AP_PASSWORD`.
 
-#define MQTT_BROKER_HOST    "mqtt.solars.io.vn" // Production public broker
+#define MQTT_BROKER_HOST    "mqtt.solaris.io.vn" // Production public broker
 #define MQTT_BROKER_PORT    8883             // 1883 plain | 8883 TLS
 #define MQTT_USE_TLS        1                // 0 = plain (chỉ dev), 1 = TLS (production)
 #define MQTT_USERNAME       "gw-esp32-mvp-001"   // backend lower-case deviceCode

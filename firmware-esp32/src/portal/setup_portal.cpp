@@ -150,7 +150,7 @@ summary{cursor:pointer;color:var(--muted);margin-bottom:10px;font-size:11.5px;fo
 <label class="full">Mật khẩu Wi‑Fi<input id="wifiPassword" type="password" maxlength="64" placeholder="Để trống nếu mạng mới không có mật khẩu"></label>
 </div><input id="deviceCode" type="hidden"><input id="apiKey" type="hidden">
 <details><summary>Cấu hình nâng cao</summary><div class="grid">
-<label class="full">Backend URL<input id="backendUrl" maxlength="159" placeholder="https://api.solars.io.vn" required></label>
+<label class="full">Backend URL<input id="backendUrl" maxlength="159" placeholder="https://api.solaris.io.vn" required></label>
 <label>Broker host<input id="mqttHost" maxlength="95" required></label><label>Port (cố định theo firmware)<input id="mqttPort" type="number" disabled></label>
 <label>Username<input id="mqttUsername" maxlength="64"></label><label>Password<input id="mqttPassword" type="password" maxlength="96" placeholder="Để trống để giữ nguyên"></label>
 <label class="check full"><input id="mqttUseTls" type="checkbox" disabled> Dùng TLS (cố định theo firmware)</label>

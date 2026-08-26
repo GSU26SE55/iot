@@ -1,13 +1,36 @@
-// Production trust anchor shared by HTTPS and MQTT TLS.
+// Trust anchors shared by HTTPS and MQTT TLS.
 //
-// mqtt.solars.io.vn currently serves the Let's Encrypt chain
-// EE -> YR2 -> Root YR -> ISRG Root X1. Embedding the stable ISRG Root X1
-// keeps the firmware independent from LittleFS and avoids pinning a 90-day
-// leaf certificate. Source: https://letsencrypt.org/certs/isrgrootx1.pem
+// The first certificate keeps the current development broker compatible.
+// The second certificate is ISRG Root X1 for the production endpoints
+// api.solaris.io.vn and mqtt.solaris.io.vn. Embedding the stable roots keeps
+// firmware independent from LittleFS and avoids pinning a 90-day leaf cert.
+// ISRG source: https://letsencrypt.org/certs/isrgrootx1.pem
 // SHA-1: CA:BD:2A:79:A1:07:6A:31:F2:1D:25:36:35:CB:03:9D:43:29:A5:E8
 #pragma once
 
 static const char kMqttCaCert[] = R"CERT(
+-----BEGIN CERTIFICATE-----
+MIIDqDCCApCgAwIBAgIUW9EyIvycObDAYx7nEvgp3XgLPYgwDQYJKoZIhvcNAQEL
+BQAwbDELMAkGA1UEBhMCVk4xDjAMBgNVBAgMBUhhbm9pMQ4wDAYDVQQHDAVIYW5v
+aTEdMBsGA1UECgwUR1NVMjZTRTU1IElvVCBEZXYgQ0ExHjAcBgNVBAMMFUdTVTI2
+U0U1NSBJb1QgUm9vdCBDQTAeFw0yNjA4MDUxNDM1MDZaFw0zNjA4MDIxNDM1MDZa
+MGwxCzAJBgNVBAYTAlZOMQ4wDAYDVQQIDAVIYW5vaTEOMAwGA1UEBwwFSGFub2kx
+HTAbBgNVBAoMFEdTVTI2U0U1NSBJb1QgRGV2IENBMR4wHAYDVQQDDBVHU1UyNlNF
+NTUgSW9UIFJvb3QgQ0EwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDB
+LiQRle2fJ4YNNNzdToTBBcIyrM12dFZTjzOqrImEhtQdz/6PTANn+TJJhJRuTID0
+5NMT58UwDYJYDSkrHAWhCDBqVJF4MBqUhBKE5mbMZSmLagIaH83N5LgGr9QggunQ
+9OJF9g4o5l2o5IhyThx+3mtsrN/+3HDdFmlPB+1eGVFSg69hNfMimqRtizudKrMp
+R+owKnYveRNDPoH1gD7DUoG8TYWTYQc60PYsKDrCX9Vwnx/c+U5q7DU1N/n9iQ/J
+Q9jwJ2TBHmsrKShaWmUbexWwhbaNgPWwwLz8YrDYeixjUbNyaO7qO+V7qbpLwTXB
+1hpifSesy3CTTonRKvNbAgMBAAGjQjBAMA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0P
+AQH/BAQDAgEGMB0GA1UdDgQWBBSF8l385g67v/GVg3+up8Drq7qSCzANBgkqhkiG
+9w0BAQsFAAOCAQEADuBNfNt5P2Z3i+LsLAgUMin5ssO0kJbLfg2a9oosImzki+F0
+SAgYn+vI7gBDxZLVYtrYOiw19Ns8WbeuZRIgRjdA3nAhEhfVQmda/B6pTnEpxby9
+6//G8r/Jxiu4Hobiz/jxoFEov6LXex5obps+U5IS5pKjBw8eZqNlR6/KmtazMdc2
+zJNbhN6vmbSK1dZBJsh8VbFABCjukGx2Xj9uz3WAMJUwfrKsAwlfw9ZNqDuK1svu
+0DUuF0JGyeZZtkzLLLrugK0QLq/j/zmJXUJ2cW3nqhHM/EBLTJ8t1UrySarp6zRO
+OUDjSr8oWDYALDyghUnKJ+EqHVnHjFgC+OFKRA==
+-----END CERTIFICATE-----
 -----BEGIN CERTIFICATE-----
 MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
 TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
