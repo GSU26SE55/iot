@@ -23,6 +23,7 @@
 #include "config/device_identity.h"
 #include "config/mqtt_config.h"
 #include "config/nvs_store.h"
+#include "config/runtime_config.h"
 #include "config/wifi_config.h"
 #include "net/wifi_manager.h"
 #include "net/wifi_scan_hints.h"
@@ -66,6 +67,7 @@ void printHelp() {
   Serial.println("  set wifissid <ssid>     — chỉ đổi SSID (dùng khi SSID CÓ dấu cách)");
   Serial.println("  set wifipass <pass>     — chỉ đổi mật khẩu (dùng khi mật khẩu CÓ dấu cách)");
   Serial.println("  wifiscan                — quét mạng quanh đây + cảnh báo sóng yếu/Enterprise");
+  Serial.println("  set backend <url>       — đổi backend (vd http://192.168.1.9:4006) + provision lại");
   Serial.println("  -- broker (IOT3-55) --");
   Serial.println("  set mqttbroker <host> <port>");
   Serial.println("  set mqttuser <U>        — username MQTT");
@@ -301,6 +303,20 @@ void executeCommand(const char* line) {
   }
   if (strcmp(line, "wifiscan") == 0) {
     doWifiScan();
+    return;
+  }
+  // Đổi backend giữa production và stack chạy trên máy dev. Không có lệnh này thì lối duy
+  // nhất là setup portal — mà portal bắt nhập lại cả Wi-Fi, device code lẫn API key.
+  if (startsWith(line, "set backend ")) {
+    const char* val = skipSpace(line + strlen("set backend "));
+    if (!runtimecfg::saveBackendUrl(val)) return;   // đã log lý do
+    // Cờ provision còn nguyên ⇒ thiết bị KHÔNG bao giờ gọi /provision trên backend mới, và
+    // credential MQTT trong NVS vẫn trỏ về broker của backend cũ. Xoá cờ để boot sau lấy lại.
+    if (!provision::clearProvisionFlag()) {
+      Serial.println("[cli] ⚠ đã đổi backend nhưng KHÔNG xoá được cờ provision — chạy `clear` rồi nhập lại");
+      return;
+    }
+    Serial.println("[cli] backend saved + cờ provision đã xoá — gõ `reboot` để provision lại");
     return;
   }
   if (startsWith(line, "set mqttbroker ")) {

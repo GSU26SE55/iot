@@ -14,10 +14,17 @@
 #include "net/http_client.h"
 #include "net/time_sync.h"
 
-#include <Adafruit_SHT31.h>
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <Wire.h>
+
+#ifndef SHT31_ENABLED
+  #define SHT31_ENABLED 1
+#endif
+
+#if SHT31_ENABLED
+  #include <Adafruit_SHT31.h>
+#endif
 
 #include <cmath>
 #include <cstring>
@@ -26,7 +33,9 @@ namespace sensor {
 
 namespace {
 
+#if SHT31_ENABLED
 Adafruit_SHT31 s_sht31;
+#endif
 bool           s_inited       = false;
 uint32_t       s_lastPostMs   = 0;
 uint32_t       s_postOk       = 0;
@@ -42,6 +51,10 @@ constexpr size_t kAmbientPayloadBuf = 384;
 }  // namespace
 
 bool sht31Begin() {
+#if !SHT31_ENABLED
+  Serial.println("[sht31] disabled — no I2C probe/read");
+  return false;
+#else
   if (s_inited) return true;
 
   // Wire init idempotent — INA226 hoặc SHT31 init trước cũng OK.
@@ -61,9 +74,15 @@ bool sht31Begin() {
                 SHT31_I2C_ADDRESS,
                 static_cast<unsigned long>(SHT31_POLL_INTERVAL_MS));
   return true;
+#endif
 }
 
 bool sht31ReadOnce(float* tempOut, float* humOut) {
+#if !SHT31_ENABLED
+  (void)tempOut;
+  (void)humOut;
+  return false;
+#else
   if (!s_inited) return false;
   float t = s_sht31.readTemperature();
   float h = s_sht31.readHumidity();
@@ -83,16 +102,25 @@ bool sht31ReadOnce(float* tempOut, float* humOut) {
   if (tempOut) *tempOut = t;
   if (humOut)  *humOut  = h;
   return true;
+#endif
 }
 
 void sht31SetSiteId(const char* siteIdGuid) {
+#if !SHT31_ENABLED
+  (void)siteIdGuid;
+  return;
+#else
   if (!siteIdGuid) { s_siteId[0] = '\0'; return; }
   strncpy(s_siteId, siteIdGuid, kSiteIdBufLen - 1);
   s_siteId[kSiteIdBufLen - 1] = '\0';
   Serial.printf("[sht31] siteId set: %s\n", s_siteId);
+#endif
 }
 
 bool sht31PostNow() {
+#if !SHT31_ENABLED
+  return false;
+#else
   if (!s_inited) return false;
 
   // Backend AmbientReadingItem.SiteId REQUIRED (Guid). Nếu chưa provision xong
@@ -154,14 +182,17 @@ bool sht31PostNow() {
   Serial.printf("[sht31] post FAIL code=%d resp=\"%s\"\n",
                 res.httpCode, res.responseSnippet);
   return false;
+#endif
 }
 
 void sht31Tick() {
+#if SHT31_ENABLED
   if (!s_inited) return;
   const uint32_t now = millis();
   if (now - s_lastPostMs < SHT31_POLL_INTERVAL_MS) return;
   s_lastPostMs = now;
   sht31PostNow();
+#endif
 }
 
 uint32_t sht31PostOkCount()   { return s_postOk; }

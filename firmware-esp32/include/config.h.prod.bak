@@ -1,0 +1,227 @@
+// ==================================================================
+// include/config.h — giá trị thật cho phần cứng đang có.
+// File này nằm trong .gitignore, KHÔNG commit.
+//
+// Phần cứng đối chiếu: JK-BMS 8S 24V 30Ah, INA226 HW-899 (shunt ngoài
+// 50A/75mV), SHT3X 0x44, DS18B20 PlugableTerminal, MQ-2, cảm biến mưa
+// LM393, ESP32-S3-DevKitC-1 N16R8 (COM3, USB native CDC).
+//
+// >>> CÒN PHẢI ĐIỀN TAY: WIFI_SSID, WIFI_PASS, BACKEND_URL,
+//     DEVICE_CODE, API_KEY, MQTT_BROKER_HOST, MQTT_PASSWORD.
+// ==================================================================
+#pragma once
+
+// --------- WiFi ----------
+// ⚠ ESP32 KHÔNG bắt được 5GHz. Phải là mạng 2.4GHz.
+//   Hotspot iPhone: bật "Maximize Compatibility" để phát 2.4GHz.
+// Factory/setup build: Wi-Fi must come from the setup wizard, never from firmware.
+// Để rỗng nên wifi_config.cpp không có gì để fallback: thiết bị bắt buộc đi qua
+// setup portal. Mạng từng dùng khi còn nhúng cứng: CAPY_2.4 (nhà), "YARN 1F".
+#define WIFI_SSID       ""
+#define WIFI_PASS       ""
+
+// --------- Browser setup portal ----------
+// LAN: http://<ESP32-IP>:8080 or http://solar-gateway.local:8080
+// Wi-Fi failure fallback: join SolarBMS-xxxxxx, then open http://192.168.4.1:8080
+#define CONFIG_PORTAL_PORT            8080
+#define CONFIG_PORTAL_USER            "admin"
+#define CONFIG_PORTAL_PASSWORD        "12345678"
+#define CONFIG_PORTAL_AP_PREFIX       "SolarBMS"
+#define CONFIG_PORTAL_HOSTNAME        "solar-gateway"
+#define SETUP_AP_PASSWORD             "12345678"
+#define CONFIG_PORTAL_AP_FALLBACK_MS  30000UL
+
+// --------- NTP ----------
+// Dùng hostname — DNS chắc chắn chạy vì HTTPS đang thông. Hai IP đặt cứng
+// trước đó cho ra giờ lệch ~80 phút, backend từ chối vì clock skew > 5 phút.
+#define NTP_SERVER_1    "time.google.com"
+#define NTP_SERVER_2    "time.cloudflare.com"
+#define NTP_SERVER_3    "pool.ntp.org"
+#define NTP_GMT_OFFSET_SEC      0
+#define NTP_DAYLIGHT_OFFSET_SEC 0
+
+// --------- Serial ----------
+#define SERIAL_BAUD     115200
+
+// ============== Backend ==============
+// Đi thẳng HTTP vào cổng 4006 của container (bind 0.0.0.0 nên LAN vào được),
+// không qua Caddy. Đổi lại thành https://<ip>:7200 nếu cần TLS — Caddyfile đã
+// khai sẵn cả 192.168.1.2, 192.168.1.6 và 192.168.3.47.
+//
+// ⚠ Phải là IP của card đang UP. Laptop có hai card cùng dải 192.168.1.x:
+//   Ethernet .2 (đang UP) và Wi-Fi .6 (đang Disconnected). Địa chỉ trên card đã
+//   ngắt vẫn tự trả lời khi curl từ chính laptop, nhưng KHÔNG phát ARP nên
+//   ESP32 gọi vào sẽ treo tới hết timeout. Kiểm bằng trạng thái card, đừng tin curl.
+// 2026-08-18: card đổi lại — Ethernet .2 giờ APIPA (169.254.x, DOWN), chỉ còn
+// Wi-Fi UP ở .10. curl xác nhận .2 timeout, .10 trả lời.
+#define BACKEND_URL         "https://api.solars.io.vn"
+
+#define BACKEND_INGEST_PATH    "/api/sensor-readings/batch"
+#define BACKEND_PROVISION_PATH "/api/iot-devices/provision"
+#define BACKEND_HEARTBEAT_PATH "/api/iot-devices/heartbeat"
+#define HARDWARE_REVISION      "ESP32-S3-DevKitC-1-N16R8"
+
+// ⚠ MÂU THUẪN CHƯA GIẢI QUYẾT — đọc trước khi đổi:
+//   config.example.h nói DEVICE_CODE phải LOWERCASE (MQTT ACL `solar/%u/...`
+//   match username lowercase).
+//   Tài liệu lắp đặt nói backend validate DeviceCode IN HOA và header
+//   X-Device-Code so sánh phân biệt hoa-thường.
+//   → Để lowercase (theo repo). Nếu backend trả 401 dù key đúng, thử IN HOA
+//     rồi thêm dòng ACL riêng cho device trong mosquitto/config/acl.conf.
+#define DEVICE_CODE         ""
+
+// Format "iotk_<base62>". Backend chỉ hiện 1 lần lúc create device.
+// Mất thì gọi POST /api/admin/iot-devices/{id}/rotate-key.
+#define API_KEY             ""
+
+// --------- Ingest loop ---------
+#define INGEST_INTERVAL_MS  1000UL
+#define MOCK_BATTERY_COUNT  4
+#define HTTP_TIMEOUT_MS     5000
+#define HTTP_INGEST_TIMEOUT_MS  1500
+
+// Mock scenario (bỏ comment để test alert):
+// #define MOCK_SCENARIO_OVERHEAT
+// #define MOCK_SCENARIO_LOW_SOC
+
+// ============== MQTT (Giai đoạn 5 — tùy chọn) ==============
+// Chưa dùng ở giai đoạn này. HTTPS đã đủ để nghiệm thu.
+// Cùng lý do như BACKEND_URL: phải là IP card đang UP (Wi-Fi .10, xem ghi chú ở BACKEND_URL).
+#define MQTT_BROKER_HOST    "mqtt.solars.io.vn"
+// Đang chạy 1883 không mã hoá. Đủ cho dev và demo trong mạng LAN.
+//
+// Đã thử TLS 8883 với CA nhúng trong src/net/ca_cert_embedded.h nhưng bắt
+// tay hỏng với lỗi -9984 X509. Không phải sai CA: cert broker verify sạch
+// từ openssl trên laptop, NTP đúng giờ, cert còn hiệu lực. Nguyên nhân là
+// mbedTLS trong arduino-esp32 khớp tên máy chủ theo DNS nên không chấp nhận
+// địa chỉ IP, kể cả khi IP nằm trong SAN hoặc làm CN.
+//
+// Muốn bật TLS thì chọn một trong hai:
+//   1. Thêm setCACert rồi setInsecure() cho client MQTT — vẫn mã hoá đường
+//      truyền, chỉ bỏ xác thực danh tính broker. Ngang mức HTTPS đang dùng.
+//   2. Đặt tên miền cho broker (vd mqtt.local qua mDNS), sinh cert với CN là
+//      tên đó, cho ESP32 kết nối bằng tên thay vì IP. Chuẩn nhất.
+#define MQTT_BROKER_PORT    8883
+#define MQTT_USE_TLS        1
+#define MQTT_USERNAME       "esp-2"
+#define MQTT_PASSWORD       "esp2MqttDev2026"
+#define MQTT_TOPIC_PREFIX   "solar"
+#define MQTT_CLIENT_ID      DEVICE_CODE
+#define MQTT_KEEPALIVE_SEC  10
+#define MQTT_CA_CERT_PATH   "/ca_cert.pem"
+#define MQTT_MAX_PACKET_SIZE 4096
+#define MQTT_RECONNECT_INTERVAL_MS 5000UL
+#define MQTT_PUBLISH_FAIL_THRESHOLD 3
+
+// ============== Hardware ==============
+
+// USE_MOCK_BMS=1 → sinh dữ liệu giả, không cần pin. Dùng cho Giai đoạn 0.
+// USE_MOCK_BMS=0 → đọc BMS thật. Bật bằng `pio run -e esp32-s3-real`.
+#ifndef USE_MOCK_BMS
+  #define USE_MOCK_BMS  0
+#endif
+
+// --------- Đường nối BMS: cổng CAN&RS485, qua module MAX485 ---------
+//   GPIO17 (TX2) → DI
+//   GPIO18 (RX2) → RO, QUA chia áp 10k/20k nếu module chạy 5V
+//   GPIO16       → DE và RE nối chung
+//   VCC MAX485   → rail 5V (đọc chữ in trên board, bản 3.3V thì bỏ chia áp)
+//   A, B         → cầu đấu vít xanh, sang cổng CAN&RS485 của BMS
+//   GND chung    → rail xanh dưới, và bắt buộc nối sang GND của cổng BMS
+//
+// Đã thử cổng UART trước đó: ESP32 luôn nhận lại đúng frame vừa gửi ở mọi
+// baud — dấu hiệu TX nối thẳng RX. Thay dây mới vẫn vậy, nên nghi chập
+// nằm trong jack UART của BMS. Chuyển sang cổng RS485 còn trống.
+//
+// App JK đã đặt UART1 Protocol = "001 - JK BMS RS485 Modbus V1.0" và
+// Device Addr = 1 → khớp BMS_MODEL 3 và BMS_UNIT_ID_START 1 bên dưới.
+// Nếu timeout, thử đổi app sang "013 - (9600)JK BMS RS485 Modbus V1.0"
+// rồi đặt BMS_RS485_BAUD thành 9600UL.
+#define BMS_RS485_TX_PIN     17
+#define BMS_RS485_RX_PIN     18
+#define BMS_RS485_DE_PIN     -1        // cổng UART nối thẳng — không có chân điều khiển hướng
+#define BMS_RS485_BAUD       115200UL  // JK-BMS; JBD/Daly thường 9600
+
+// 1=Daly · 2=JBD · 3=JK-BMS · 4=Generic
+#define BMS_MODEL            3
+
+// 1 pack duy nhất, Device Address = 1 (đặt trong app JK, KHÔNG để 0).
+#define BMS_UNIT_ID_START    1
+#define BMS_UNIT_ID_COUNT    1
+#define BMS_POLL_TIMEOUT_MS  500UL
+#define BMS_POLL_RETRY       1
+
+// --------- I2C dùng chung INA226 + SHT3X ---------
+#define I2C_SDA_PIN          8
+#define I2C_SCL_PIN          9
+#define I2C_FREQUENCY_HZ     100000UL
+
+// --------- HS0724 microSD (SPI, 3.3V only) ---------
+// ⚠️ QUAN TRỌNG: Trên ESP32-S3 (N16R8), GPIO 10-13 bị trùng với bus Octal Flash/PSRAM.
+// GPIO 47 không ra header trên board này → dùng GPIO 6 cho MISO.
+#define SD_CARD_ENABLED      1          // Đặt 1 khi có cắm module thẻ SD thật
+#define SD_CS_PIN            14
+#define SD_MOSI_PIN          5
+#define SD_SCK_PIN           21
+#define SD_MISO_PIN          7
+#define SD_SPI_FREQUENCY_HZ  4000000UL
+
+// --------- INA226 (HW-899) ---------
+// Phương án A đang dùng: CHỈ đo điện áp. IN+/IN−/ALE để trống, trở R100
+// trên module giữ dòng đọc = 0A ổn định. VBS nối cực dương pack qua trở
+// 120Ω hàn trên dây.
+// Hai dòng dưới chỉ có tác dụng khi chuyển sang phương án B (tháo R100,
+// lắp shunt ngoài 50A/75mV = 0.0015Ω).
+#define INA226_I2C_ADDRESS   0x40
+#define INA226_SHUNT_OHM     0.000375f
+#define INA226_MAX_CURRENT_A 200.0f
+
+// --------- DS18B20 ---------
+#define DS18B20_GPIO         4
+#define DS18B20_RESOLUTION   12
+#define DS18B20_MAX_SENSORS  8
+
+// --------- SHT3X ---------
+#define SHT31_I2C_ADDRESS    0x44
+#define SHT31_POLL_INTERVAL_MS 60000UL
+#define BACKEND_AMBIENT_PATH "/api/ambient/readings/batch"
+
+// ============== Sự cố môi trường ==============
+// ⚠ ApiKey phải có scope EnvironmentalIngest (bitmask 4), nếu không
+//   backend trả 403 âm thầm. apiKeyScopes=15 là đủ cả 4 quyền.
+#define BACKEND_ENV_INCIDENT_PATH "/api/environmental-incidents"
+
+// --------- MQ-2 ---------
+// AO qua chia áp 10k/20k về GPIO1 (ADC1_CH0). Module chạy 5V.
+#define MQ2_ENABLED              1
+#define MQ2_ADC_PIN              1
+#define MQ2_THRESHOLD_RAW        2000
+#define MQ2_WARMUP_MS            30000UL
+#define MQ2_POLL_INTERVAL_MS     1000UL
+#define MQ2_REARM_COOLDOWN_MS    300000UL
+
+// --------- Cảm biến mưa (đóng vai rò nước) ---------
+// Cấp 3V3 (KHÔNG phải 5V) để DO xuất mức an toàn cho GPIO2.
+#define WATER_LEAK_ENABLED            1
+#define WATER_LEAK_GPIO               2
+#define WATER_LEAK_ACTIVE_HIGH        0
+#define WATER_LEAK_POLL_INTERVAL_MS   100UL
+#define WATER_LEAK_REARM_COOLDOWN_MS  300000UL
+
+// ============== OTA ==============
+#define OTA_ENABLED            1
+#define BACKEND_FW_CHECK_PATH  "/api/iot-devices/firmware-check"
+#define BACKEND_FW_LOG_PATH    "/api/iot-devices/firmware-update-log/"
+#define OTA_CHECK_INTERVAL_MS  3600000UL
+#define OTA_HEALTH_TIMEOUT_MS  120000UL
+#define OTA_HTTP_TIMEOUT_MS    20000UL
+#define OTA_MAX_BOOT_ATTEMPTS  5
+#define OTA_MAX_VERSION_FAILS  3
+
+// --------- Firmware metadata ---------
+#ifndef FW_VERSION
+  #define FW_VERSION "unknown"
+#endif
+#ifndef FW_BUILD_ENV
+  #define FW_BUILD_ENV "unknown"
+#endif

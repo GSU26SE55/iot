@@ -151,9 +151,9 @@
 #define MQTT_CLIENT_ID      DEVICE_CODE
 
 // Keep-alive (sec) — broker ngắt session sau ~1.5x giá trị này nếu không
-// nhận PING. 10s giúp broker phát LWT sau khoảng 15s khi gateway mất điện,
-// đủ nhanh cho trạng thái realtime nhưng vẫn chịu được jitter mạng ngắn.
-#define MQTT_KEEPALIVE_SEC  10
+// nhận PING. 5s giúp broker phát LWT sau tối đa khoảng 7,5s khi gateway mất điện,
+// nhưng vẫn dài hơn một lượt đọc BMS thật để tránh tự ngắt kết nối vì jitter vòng lặp.
+#define MQTT_KEEPALIVE_SEC  5
 
 // CA cert path trên LittleFS (S4-FW-01): upload qua `pio run -t uploadfs`
 // sau khi `infra/mqtt/scripts/gen-certs.sh` xong. File text PEM.
@@ -276,6 +276,7 @@
 #define DS18B20_MAX_SENSORS  8          // max sensors trên bus (≥ BMS_UNIT_ID_COUNT)
 
 // --------- SHT31 ambient (WD §4.2 cùng I2C) ---------
+#define SHT31_ENABLED        0          // 0 = bỏ qua hoàn toàn; DS18B20 theo dõi nhiệt pin
 #define SHT31_I2C_ADDRESS    0x44       // default; ADDR=GND
 #define SHT31_POLL_INTERVAL_MS 60000UL  // 1 phút (ambient không cần realtime)
 // Backend route thật: `[Route("api/ambient")] + [HttpPost("readings/batch")]`

@@ -25,7 +25,7 @@ namespace bms {
 
 // Init tất cả subsystem (modbus + I2C + 1-Wire) — gọi 1 lần trong setup().
 // Mock mode: chỉ delegate mock_bms init.
-// Real mode: modbusBegin + ina226Begin + ds18b20Begin + sht31Begin.
+// Real mode: modbusBegin + ina226Begin + ds18b20Begin (SHT31 có thể tắt bằng config).
 //
 // Trả false nếu CRITICAL subsystem fail (vd Wire bus down).
 // Cảnh báo non-critical: nếu DS18B20 detect 0 sensor → log warning, vẫn return true.
