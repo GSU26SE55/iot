@@ -148,7 +148,9 @@ jobs:
       - name: Verify secrets NOT committed
         run: |
           # Audit query từ infra/mqtt/SECURITY.md §6
-          if git log --all --diff-filter=A --name-only | grep -E '\.key$|^infra/mqtt/mosquitto/passwd$' | head -1; then
+          if git log --all --diff-filter=A --name-only --format= |
+            grep -Eq '\.key$|^infra/mqtt/mosquitto/passwd$'
+          then
             echo "::error::Private key hoặc passwd file đã từng commit vào git history!"
             exit 1
           fi
