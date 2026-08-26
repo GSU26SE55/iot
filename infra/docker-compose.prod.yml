@@ -1,5 +1,5 @@
 # Production MQTT broker. Backend runs in k3s and connects through
-# mqtt.solars.io.vn:8883; therefore this stack is intentionally independent of
+# mqtt.solaris.io.vn:8883; therefore this stack is intentionally independent of
 # every backend Docker network.
 name: solar-iot
 
