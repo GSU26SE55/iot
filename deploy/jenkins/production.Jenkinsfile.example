@@ -98,10 +98,10 @@ pipeline {
                     cp include/config.example.h include/config.h
 
                     grep -Eq \
-                      '^#define[[:space:]]+BACKEND_URL[[:space:]]+"https://api[.]solars[.]io[.]vn"$' \
+                      '^#define[[:space:]]+BACKEND_URL[[:space:]]+"https://api[.]solaris[.]io[.]vn"$' \
                       include/config.h
                     grep -Eq \
-                      '^#define[[:space:]]+MQTT_BROKER_HOST[[:space:]]+"mqtt[.]solars[.]io[.]vn"([[:space:]]|$)' \
+                      '^#define[[:space:]]+MQTT_BROKER_HOST[[:space:]]+"mqtt[.]solaris[.]io[.]vn"([[:space:]]|$)' \
                       include/config.h
                     grep -Eq \
                       '^#define[[:space:]]+TLS_ALLOW_INSECURE[[:space:]]+0$' \
