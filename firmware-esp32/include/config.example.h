@@ -151,9 +151,12 @@
 #define MQTT_CLIENT_ID      DEVICE_CODE
 
 // Keep-alive (sec) — broker ngắt session sau ~1.5x giá trị này nếu không
-// nhận PING. 5s giúp broker phát LWT sau tối đa khoảng 7,5s khi gateway mất điện,
-// nhưng vẫn dài hơn một lượt đọc BMS thật để tránh tự ngắt kết nối vì jitter vòng lặp.
-#define MQTT_KEEPALIVE_SEC  5
+// nhận packet/PING. mqttTick() chạy cùng appTask với BMS, HTTPS fallback và OTA;
+// các tác vụ đồng bộ đó có thể giữ task hơn 20s. Keepalive 5s khiến broker đá
+// thiết bị dù Wi-Fi/TLS vẫn tốt (log: "exceeded timeout"). 60s cho appTask đủ
+// biên hoàn tất tác vụ chặn ngắn, nhưng broker vẫn phát LWT trong khoảng 90s
+// nếu gateway thực sự mất điện.
+#define MQTT_KEEPALIVE_SEC  60
 
 // CA cert path trên LittleFS (S4-FW-01): upload qua `pio run -t uploadfs`
 // sau khi `infra/mqtt/scripts/gen-certs.sh` xong. File text PEM.
