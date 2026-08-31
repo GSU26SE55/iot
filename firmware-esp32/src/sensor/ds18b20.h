@@ -43,4 +43,9 @@ size_t ds18b20BuildExternalTempReadings(const char* const* serials, size_t n,
 uint32_t ds18b20ReadOkCount();
 uint32_t ds18b20ReadFailCount();
 
+// Nhiệt độ môi trường đại diện (probe #0) cho báo cáo ambient gộp.
+// Trả false nếu chưa init / không dò ra sensor / probe mất kết nối — khi đó payload
+// bỏ hẳn trường nhiệt độ thay vì gửi giá trị rác.
+bool ds18b20ReadAmbient(float& outCelsius);
+
 }  // namespace sensor

@@ -11,6 +11,7 @@
 #endif
 
 #include "config/battery_map_runtime.h"
+#include "config/device_identity.h"
 #include "core/source_tags.h"   // S6-FW-03 (#65): canonical cross-source tags
 
 #include <Arduino.h>
@@ -127,5 +128,13 @@ size_t ds18b20BuildExternalTempReadings(const char* const* serials, size_t n,
 
 uint32_t ds18b20ReadOkCount()   { return s_readOk; }
 uint32_t ds18b20ReadFailCount() { return s_readFail; }
+
+bool ds18b20ReadAmbient(float& outCelsius) {
+  if (!s_inited || s_detected == 0) return false;
+  const float t = ds18b20ReadByIndex(0);
+  if (t == DEVICE_DISCONNECTED_C) return false;
+  outCelsius = t;
+  return true;
+}
 
 }  // namespace sensor

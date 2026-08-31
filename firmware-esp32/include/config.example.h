@@ -53,7 +53,7 @@
 // Dev local:   "https://10.0.0.10:7200" (laptop chạy docker compose, ESP32 cùng LAN)
 // Staging:     "https://api-dev.gsu26se55.com"
 // LƯU Ý: HTTPS scheme — Sprint 1 dùng setInsecure() trong dev, Sprint 3 thay bằng CA cert.
-#define BACKEND_URL         "https://api.solars.io.vn"
+#define BACKEND_URL         "https://api.solaris.io.vn"
 
 // Endpoint ingest theo legacy contract (Sprint 1 MVP — backward compat NI §7.4).
 // Sprint 3 (S3-FW-04) giữ URL nhưng đổi schema sang production contract.
@@ -132,7 +132,7 @@
 // Việc duy nhất phải điền tay trong cả file này: `BACKEND_URL`, `DEVICE_CODE`, `API_KEY`
 // (hoặc nạp qua CLI/trang cấu hình) và mật khẩu AP setup `SETUP_AP_PASSWORD`.
 
-#define MQTT_BROKER_HOST    "mqtt.solars.io.vn" // Production public broker
+#define MQTT_BROKER_HOST    "mqtt.solaris.io.vn" // Production public broker
 #define MQTT_BROKER_PORT    8883             // 1883 plain | 8883 TLS
 #define MQTT_USE_TLS        1                // 0 = plain (chỉ dev), 1 = TLS (production)
 #define MQTT_USERNAME       "gw-esp32-mvp-001"   // backend lower-case deviceCode
@@ -274,6 +274,9 @@
 #define DS18B20_GPIO         4
 #define DS18B20_RESOLUTION   12         // bits: 9-12, càng cao càng chính xác + chậm
 #define DS18B20_MAX_SENSORS  8          // max sensors trên bus (≥ BMS_UNIT_ID_COUNT)
+// Báo nhiệt độ probe #0 lên /api/ambient/readings/batch định kỳ — ĐỘC LẬP với
+// SHT31_ENABLED (chỉ cần có sensor detect). Dùng khi site không có cảm biến khí
+// hậu riêng: DS18B20 gắn cạnh pin đóng vai nhiệt độ đại diện khu vực.
 
 // --------- SHT31 ambient (WD §4.2 cùng I2C) ---------
 #define SHT31_ENABLED        0          // 0 = bỏ qua hoàn toàn; DS18B20 theo dõi nhiệt pin
@@ -282,6 +285,9 @@
 // Backend route thật: `[Route("api/ambient")] + [HttpPost("readings/batch")]`
 // → full path `/api/ambient/readings/batch` (verified với AmbientReadingsController.cs).
 #define BACKEND_AMBIENT_PATH "/api/ambient/readings/batch"
+// Nhịp gửi báo cáo môi trường GỘP (nhiệt độ + khí gas + rò nước trong một request).
+// Một đồng hồ chung cho cả ba: ba đồng hồ riêng sẽ trôi lệch nhau và đẻ ba hàng rời rạc.
+#define AMBIENT_POST_INTERVAL_MS 15000UL
 
 // ============== Sprint 6 — Environmental incidents (S6-FW-01/02) =================
 //
@@ -298,11 +304,12 @@
 // về ≤3.3V trước khi vào GPIO1, nếu không hỏng chân ADC ESP32.
 #define MQ2_ENABLED              1          // 0 = tắt (vd dev mock không gắn sensor)
 #define MQ2_ADC_PIN              1          // GPIO1 = ADC1_CH0
-#define MQ2_THRESHOLD_RAW        2000       // 0-4095 (12-bit); raw > = phát hiện khói
-                                            // Calibrate: đọc raw không khói rồi đặt cao hơn ~500
 #define MQ2_WARMUP_MS            30000UL    // 30s warm-up sau cấp nguồn mới đọc tin cậy
 #define MQ2_POLL_INTERVAL_MS     1000UL     // đọc ADC mỗi 1s
-#define MQ2_REARM_COOLDOWN_MS    300000UL   // 5 phút tối thiểu giữa 2 report (chống spam)
+// Báo cáo % gas định kỳ lên /api/ambient/readings/batch — ĐỘC LẬP với SHT31_ENABLED
+// (chỉ cần MQ2_ENABLED). Cho phép AmbientThresholdConfig.HighGasWarning/Critical
+// đánh giá được kể cả khi không có nhiệt/ẩm — item chỉ mang gasConcentration,
+// backend chấp nhận vì AmbientTemperature đã nới thành nullable (§ AmbientReading).
 
 // --------- Water leak (S6-FW-02, WD §4.3) ---------
 // Digital DO/AO → GPIO2. Module comparator onboard: có loại ướt→HIGH, loại ướt→LOW.

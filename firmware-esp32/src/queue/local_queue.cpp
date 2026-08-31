@@ -35,6 +35,7 @@ fs::FS* s_fs   = nullptr;           // points to SD or LittleFS after mount
 size_t s_depth = 0;
 uint32_t s_oldest = 0;
 uint32_t s_newest = 0;
+uint32_t s_epochs[kMaxQueuedBatches] = {};
 
 enum class StorageKind : uint8_t { None, Sd, LittleFs };
 StorageKind s_storageKind = StorageKind::None;
@@ -167,6 +168,7 @@ bool scanQueue(uint32_t* outOldest, uint32_t* outNewest, size_t* outCount) {
   uint32_t oldest = UINT32_MAX;
   uint32_t newest = 0;
   size_t   count  = 0;
+  bool     overflow = false;
 
   File f = dir.openNextFile();
   while (f) {
@@ -178,7 +180,11 @@ bool scanQueue(uint32_t* outOldest, uint32_t* outNewest, size_t* outCount) {
     if (nameLen > 5 && strcmp(base + nameLen - 5, kBodyExt) == 0) {
       uint32_t epoch = 0;
       if (parseEpochFromName(base, &epoch)) {
-        count++;
+        if (count < kMaxQueuedBatches) {
+          s_epochs[count++] = epoch;
+        } else {
+          overflow = true;
+        }
         if (epoch < oldest) oldest = epoch;
         if (epoch > newest) newest = epoch;
       }
@@ -187,6 +193,12 @@ bool scanQueue(uint32_t* outOldest, uint32_t* outNewest, size_t* outCount) {
     f = dir.openNextFile();
   }
   dir.close();
+
+  if (overflow) {
+    Serial.printf("[queue] index overflow: more than %u batches on storage\n",
+                  static_cast<unsigned>(kMaxQueuedBatches));
+    return false;
+  }
 
   if (count == 0) {
     if (outOldest) *outOldest = 0;
@@ -201,6 +213,25 @@ bool scanQueue(uint32_t* outOldest, uint32_t* outNewest, size_t* outCount) {
 
 bool refreshQueueIndex() {
   return scanQueue(&s_oldest, &s_newest, &s_depth);
+}
+
+void refreshQueueBoundsFromRam() {
+  s_oldest = findOldestEpoch(s_epochs, s_depth);
+  s_newest = findNewestEpoch(s_epochs, s_depth);
+}
+
+bool addEpochToIndex(uint32_t epochSec) {
+  if (s_depth >= kMaxQueuedBatches) return false;
+  s_epochs[s_depth++] = epochSec;
+  if (s_oldest == 0 || epochSec < s_oldest) s_oldest = epochSec;
+  if (epochSec > s_newest) s_newest = epochSec;
+  return true;
+}
+
+bool removeEpochFromIndex(uint32_t epochSec) {
+  if (!removeEpoch(s_epochs, &s_depth, epochSec)) return false;
+  refreshQueueBoundsFromRam();
+  return true;
 }
 
 bool deleteBatchFiles(uint32_t epochSec) {
@@ -245,8 +276,8 @@ bool queueBegin() {
 #endif
 
   if (!s_mounted) {
-    if (!LittleFS.begin(false)) {
-      Serial.println("[queue] LittleFS mount FAILED");
+    if (!LittleFS.begin(true /* formatOnFail */)) {
+      Serial.println("[queue] LittleFS mount/format FAILED");
       Serial.println("[queue] refusing to auto-format: unsent telemetry may still be present");
       return false;
     }
@@ -344,11 +375,15 @@ bool queueEnqueue(uint32_t epochSec,
     }
     Serial.printf("[queue] full → dropped oldest epoch=%lu\n",
                   static_cast<unsigned long>(oldestToDrop));
-    refreshQueueIndex();
+    // Bình thường chỉ cập nhật index RAM. Full scan chỉ là recovery nếu index
+    // lệch storage (ví dụ mất điện giữa hai thao tác).
+    if (removeEpochFromIndex(oldestToDrop)) {
+      if (!addEpochToIndex(epochSec)) refreshQueueIndex();
+    } else {
+      refreshQueueIndex();  // scan thấy file mới và không còn file cũ
+    }
   } else {
-    s_depth++;
-    if (s_oldest == 0 || epochSec < s_oldest) s_oldest = epochSec;
-    if (epochSec > s_newest) s_newest = epochSec;
+    if (!addEpochToIndex(epochSec)) refreshQueueIndex();
   }
   return true;
 }
@@ -402,8 +437,8 @@ bool queuePeekOldest(char* outBody, size_t outBodyLen, size_t* outBodyBytes,
 bool queueDelete(uint32_t epochSec) {
   if (!s_mounted) return false;
   if (!deleteBatchFiles(epochSec)) return false;
-  if (!refreshQueueIndex()) {
-    Serial.println("[queue] delete succeeded but index refresh failed; will rescan on next peek");
+  if (!removeEpochFromIndex(epochSec) && !refreshQueueIndex()) {
+    Serial.println("[queue] delete succeeded but index recovery failed; will rescan on next peek");
   }
   return true;
 }

@@ -1,6 +1,6 @@
 // Production trust anchor shared by HTTPS and MQTT TLS.
 //
-// mqtt.solars.io.vn currently serves the Let's Encrypt chain
+// mqtt.solaris.io.vn currently serves the Let's Encrypt chain
 // EE -> YR2 -> Root YR -> ISRG Root X1. Embedding the stable ISRG Root X1
 // keeps the firmware independent from LittleFS and avoids pinning a 90-day
 // leaf certificate. Source: https://letsencrypt.org/certs/isrgrootx1.pem

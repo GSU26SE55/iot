@@ -51,6 +51,7 @@
 #include "sensor/ds18b20.h"
 #include "sensor/mq2.h"                 // Sprint 6 (S6-FW-01)
 #include "sensor/water_leak.h"          // Sprint 6 (S6-FW-02)
+#include "sensor/ambient_report.h"      // gộp 3 cảm biến môi trường vào 1 lần gửi
 #include "sensor/environmental_incident.h"  // Sprint 6 — shared reporter
 #include "core/payload.h"
 #include "core/idempotency_key.h"
@@ -117,6 +118,7 @@ void ensureProvisioned() {
     s_provisionDone = true;
     // Sprint 5 (S5-FW-06): siteId now available — wire vào SHT31.
     sensor::sht31SetSiteId(s_provCfg.siteId);
+    sensor::ambientReportSetSiteId(s_provCfg.siteId);
     // Sprint 6 (S6-FW-01/02): siteId dùng chung cho MQ-2 + water leak reporter.
     sensor::envIncidentSetSiteId(s_provCfg.siteId);
 
@@ -140,6 +142,7 @@ void ensureProvisioned() {
     telemetry::heartbeatSetInterval(s_provCfg.heartbeatIntervalMs);
     // S5-FW-06: provision response chứa siteId → wire vào SHT31.
     sensor::sht31SetSiteId(s_provCfg.siteId);
+    sensor::ambientReportSetSiteId(s_provCfg.siteId);
     // S6-FW-01/02: siteId dùng chung cho MQ-2 + water leak reporter.
     sensor::envIncidentSetSiteId(s_provCfg.siteId);
   } else {
@@ -180,6 +183,7 @@ void checkMqttCredentialHealth() {
     s_backendAcknowledged = true;
     telemetry::heartbeatSetInterval(s_provCfg.heartbeatIntervalMs);
     sensor::sht31SetSiteId(s_provCfg.siteId);
+    sensor::ambientReportSetSiteId(s_provCfg.siteId);
     sensor::envIncidentSetSiteId(s_provCfg.siteId);
     Serial.println("[main] MQTT credential refresh OK — giữ trạng thái provisioned");
   } else {
@@ -653,7 +657,7 @@ void updateStatusLed() {
   }
 
   if (queue::queueSize() > 0) {
-    ui::ledSet(ui::LedState::Queued);           // xanh nháy — còn hàng đợi
+    ui::ledSet(ui::LedState::Queued);           // xanh đều — queue đang tự đẩy
   } else {
     ui::ledSet(ui::LedState::Online);           // xanh đều
   }
@@ -716,12 +720,16 @@ void logStatsPeriodic() {
 #endif
 
   // Sprint 6 (S6-FW-01/02): environmental incident sensors (chạy cả mock + real mode).
-  Serial.printf("[s6-env] mq2 raw=%lu reports=%lu / water wet=%s reports=%lu / "
-                "incident http ok=%lu fail=%lu\n",
+  // Thứ tự và SỐ LƯỢNG chỉ định phải khớp đúng danh sách đối số bên dưới: `Serial.printf` là
+  // method của lớp nên GCC KHÔNG kiểm tra được format, sai một chỗ là thiết bị panic lúc chạy
+  // (đọc %s từ một số → LoadProhibited) chứ không báo lỗi lúc biên dịch.
+  Serial.printf("[s6-env] mq2 raw=%lu / water wet=%s reports=%lu / "
+                "ambient(ok=%lu fail=%lu) / incident http ok=%lu fail=%lu\n",
                 static_cast<unsigned long>(sensor::mq2LastRaw()),
-                static_cast<unsigned long>(sensor::mq2ReportCount()),
                 sensor::waterLeakIsWet() ? "yes" : "no",
                 static_cast<unsigned long>(sensor::waterLeakReportCount()),
+                static_cast<unsigned long>(sensor::ambientReportOkCount()),
+                static_cast<unsigned long>(sensor::ambientReportFailCount()),
                 static_cast<unsigned long>(sensor::envIncidentReportOkCount()),
                 static_cast<unsigned long>(sensor::envIncidentReportFailCount()));
 
@@ -805,6 +813,7 @@ void setup() {
   // provision flow xong + main.cpp re-set qua sht31SetSiteId.
   if (s_provCfg.provisioned) {
     sensor::sht31SetSiteId(s_provCfg.siteId);
+    sensor::ambientReportSetSiteId(s_provCfg.siteId);
   }
 
   // Sprint 6 (S6-FW-01/02): environmental sensors MQ-2 (khói) + water leak.
@@ -958,6 +967,8 @@ void appLoopBody() {
   if (net::wifiIsConnected() && net::timeIsSynced()) {
     // SHT31 là cảm biến MÔI TRƯỜNG (nhiệt/ẩm) — chỉ để báo cáo, gate theo mạng là hợp lý.
     sensor::sht31Tick();
+    // Nhiệt độ + khí gas + rò nước gửi CHUNG một request → một hàng, ba cột.
+    sensor::ambientReportTick();
   }
 
   // GH-736 — CẢM BIẾN AN TOÀN CHẠY VÔ ĐIỀU KIỆN.

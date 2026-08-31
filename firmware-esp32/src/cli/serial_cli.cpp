@@ -31,6 +31,8 @@
 #include "sensor/ds18b20.h"
 #include "sensor/ina226.h"
 #include "sensor/sht31.h"
+#include "sensor/mq2.h"
+#include "sensor/water_leak.h"
 
 namespace cli {
 
@@ -67,12 +69,13 @@ void printHelp() {
   Serial.println("  set wifissid <ssid>     — chỉ đổi SSID (dùng khi SSID CÓ dấu cách)");
   Serial.println("  set wifipass <pass>     — chỉ đổi mật khẩu (dùng khi mật khẩu CÓ dấu cách)");
   Serial.println("  wifiscan                — quét mạng quanh đây + cảnh báo sóng yếu/Enterprise");
-  Serial.println("  set backend <url>       — đổi backend (vd http://192.168.1.9:4006) + provision lại");
+  Serial.println("  set backend <url>       — đổi backend (vd https://api.solaris.io.vn) + provision lại");
   Serial.println("  -- broker (IOT3-55) --");
   Serial.println("  set mqttbroker <host> <port>");
   Serial.println("  set mqttuser <U>        — username MQTT");
   Serial.println("  set mqttpass <P>        — mật khẩu MQTT");
   Serial.println("  set mqttprefix <T>      — tiền tố topic, vd solar/gw-esp32-001");
+  Serial.println("  -- cảm biến môi trường --");
   Serial.println("  -- khác --");
   Serial.println("  clear                   — erase NVS, fallback compile-time");
   Serial.println("  resume                  — phục hồi cờ provision, giữ nguyên mọi cấu hình");
@@ -174,6 +177,12 @@ void executeCommand(const char* line) {
 #else
     Serial.println("  (mock mode — sensor counters n/a)");
 #endif
+    Serial.println("  -- Cảm biến môi trường --");
+    Serial.printf("  mq2 gas    = %d%% (raw=%d) | nguong canh bao: backend (AmbientThresholdConfig)\n",
+                  sensor::mq2LastPercent(), sensor::mq2ReadRaw());
+    Serial.printf("  water leak = wet=%s | incidents=%lu\n",
+                  sensor::waterLeakIsWet() ? "YES (DETECTED)" : "NO (dry)",
+                  static_cast<unsigned long>(sensor::waterLeakReportCount()));
     return;
   }
   if (strcmp(line, "clear") == 0) {

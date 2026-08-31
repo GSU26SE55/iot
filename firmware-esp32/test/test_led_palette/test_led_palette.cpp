@@ -3,12 +3,8 @@
 //
 // Logic thuần — không phụ thuộc Arduino/neopixelWrite.
 //
-// ⚠️ IOT3-54 ĐỔI HỢP ĐỒNG so với S3-FW-05: `Queued` từ VÀNG sang XANH-NHÁY.
-//    Lý do: bảng màu mới thêm ba trạng thái về MẠNG (Setup / WifiSearching / Recovery) và
-//    năm màu đơn thì người dùng qua điện thoại không phân biệt nổi. Trục thứ hai — CÓ NHÁY
-//    HAY KHÔNG — dễ mô tả hơn hẳn, và mang đúng ngữ nghĩa "cần người xử lý".
-//
-// Vì vậy tính phân biệt được bây giờ là cặp (màu, kiểu nháy), không còn là màu đơn lẻ.
+// `Online` và `Queued` cùng xanh đứng im: queue tự flush, không cần người dùng xử lý.
+// Các trạng thái cần can thiệp (Setup / Recovery) vẫn có kiểu nháy riêng.
 //
 // Chạy: pio test -e native -f test_led_palette
 // ==================================================================
@@ -57,13 +53,13 @@ void test_online_is_solid_green() {
   TEST_ASSERT_EQUAL(ui::LedPattern::Solid, ui::patternForState(ui::LedState::Online));
 }
 
-void test_queued_is_blinking_green() {
-  // Đổi có chủ ý so với S3-FW-05 (vàng) — xem khối ghi chú đầu file.
+void test_queued_is_solid_green() {
+  // Queue tự flush nên hiển thị giống trạng thái Online.
   auto c = ui::paletteForState(ui::LedState::Queued);
   TEST_ASSERT_EQUAL(0, c.r);
   TEST_ASSERT_GREATER_THAN(0, c.g);
   TEST_ASSERT_EQUAL(0, c.b);
-  TEST_ASSERT_EQUAL(ui::LedPattern::Blink, ui::patternForState(ui::LedState::Queued));
+  TEST_ASSERT_EQUAL(ui::LedPattern::Solid, ui::patternForState(ui::LedState::Queued));
 }
 
 void test_offline_is_red() {
@@ -131,13 +127,14 @@ void test_low_brightness_safe() {
   }
 }
 
-void test_every_state_distinguishable_by_color_plus_pattern() {
-  // Đây là cam kết thật sự của bảng màu: KHÔNG có hai trạng thái nào trông giống hệt nhau.
-  // Cùng màu thì phải khác kiểu nháy (Online ↔ Queued, Provisioning ↔ Setup).
+void test_every_user_actionable_state_is_distinguishable() {
+  // Online và Queued cố ý giống nhau; các trạng thái còn lại phải phân biệt được.
   for (size_t i = 0; i < kStateCount; ++i) {
     for (size_t j = i + 1; j < kStateCount; ++j) {
       const auto a = kAllStates[i].state;
       const auto b = kAllStates[j].state;
+      if ((a == ui::LedState::Online && b == ui::LedState::Queued) ||
+          (a == ui::LedState::Queued && b == ui::LedState::Online)) continue;
       const bool colorSame   = sameColor(ui::paletteForState(a), ui::paletteForState(b));
       const bool patternSame = ui::patternForState(a) == ui::patternForState(b);
       if (colorSame && patternSame) {
@@ -164,7 +161,7 @@ int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_off_is_black);
   RUN_TEST(test_online_is_solid_green);
-  RUN_TEST(test_queued_is_blinking_green);
+  RUN_TEST(test_queued_is_solid_green);
   RUN_TEST(test_offline_is_red);
   RUN_TEST(test_provisioning_is_solid_purple);
   RUN_TEST(test_setup_is_blinking_purple);
@@ -172,7 +169,7 @@ int main(int, char**) {
   RUN_TEST(test_recovery_alternates_purple_and_orange);
   RUN_TEST(test_secondary_defaults_to_primary_for_non_alternating);
   RUN_TEST(test_low_brightness_safe);
-  RUN_TEST(test_every_state_distinguishable_by_color_plus_pattern);
+  RUN_TEST(test_every_user_actionable_state_is_distinguishable);
   RUN_TEST(test_blink_half_period_is_visible_but_not_frantic);
   return UNITY_END();
 }

@@ -64,4 +64,18 @@ inline uint32_t resolveCollision(uint32_t desiredEpoch,
   return e;
 }
 
+// Xóa một epoch khỏi index RAM không-sắp-xếp bằng cách đổi chỗ với phần tử cuối.
+// O(n) trên tối đa 200 số nguyên, nhưng không đụng filesystem nên đủ nhanh cho
+// MQTT keepalive. Caller tính lại oldest/newest bằng hai helper phía trên.
+inline bool removeEpoch(uint32_t* epochs, size_t* count, uint32_t target) {
+  if (epochs == nullptr || count == nullptr || *count == 0) return false;
+  for (size_t i = 0; i < *count; ++i) {
+    if (epochs[i] != target) continue;
+    epochs[i] = epochs[*count - 1];
+    --(*count);
+    return true;
+  }
+  return false;
+}
+
 }  // namespace queue
