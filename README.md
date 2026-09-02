@@ -223,8 +223,8 @@ A technician pairs a gateway with the production system using the Android app in
 
 ```mermaid
 sequenceDiagram
-    participant T as Technician (Android app)
-    participant G as Gateway (SoftAP portal)
+    participant T as Technician phone
+    participant G as Gateway SoftAP
     participant B as Backend
 
     T->>G: Join SolarGW-xxxx, open the portal at 192.168.4.1:8080
