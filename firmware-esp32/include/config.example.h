@@ -51,7 +51,7 @@
 
 // `BACKEND_URL` — gốc backend BatteryService (placeholder theo tasksprint S1-FW-01).
 // Dev local:   "https://10.0.0.10:7200" (laptop chạy docker compose, ESP32 cùng LAN)
-// Staging:     "https://api-dev.gsu26se55.com"
+// Production:  "https://api.solaris.io.vn"
 // LƯU Ý: HTTPS scheme — Sprint 1 dùng setInsecure() trong dev, Sprint 3 thay bằng CA cert.
 #define BACKEND_URL         "https://api.solaris.io.vn"
 

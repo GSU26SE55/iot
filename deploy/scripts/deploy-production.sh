@@ -50,22 +50,40 @@ auth_dir="$(read_env MQTT_AUTH_DIR "${host_env}")"
 mqtt_user="$(read_env Mqtt__Username "${runtime_env}")"
 mqtt_password="$(read_env Mqtt__Password "${runtime_env}")"
 
-if [[ ! -s "${auth_dir}/passwd" ]]; then
-  docker run --rm \
-    --user 0:0 \
-    --entrypoint /bin/sh \
-    -e "MQTT_BOOTSTRAP_USER=${mqtt_user}" \
-    -e "MQTT_BOOTSTRAP_PASSWORD=${mqtt_password}" \
-    -v "${auth_dir}:/work" \
-    "${mosquitto_image}" \
-    -ec '
-      umask 027
-      mosquitto_passwd -c -b /work/passwd \
-        "${MQTT_BOOTSTRAP_USER}" "${MQTT_BOOTSTRAP_PASSWORD}"
-      chown 10001:10001 /work/passwd
-      chmod 0640 /work/passwd
-    '
-fi
+# BatteryService may populate device credentials before the broker is deployed.
+# Always (re)install the bridge account while preserving those managed entries;
+# checking only for a non-empty file can otherwise lock the backend out.
+docker run --rm \
+  --user 0:0 \
+  --entrypoint /bin/sh \
+  -e "MQTT_BOOTSTRAP_USER=${mqtt_user}" \
+  -e "MQTT_BOOTSTRAP_PASSWORD=${mqtt_password}" \
+  -v "${auth_dir}:/work" \
+  "${mosquitto_image}" \
+  -ec '
+    set -eu
+    umask 027
+
+    password_file=/work/passwd
+    bridge_file="/work/.bridge-passwd.$$"
+    merged_file="/work/.passwd.new.$$"
+    trap '\''rm -f "${bridge_file}" "${merged_file}"'\'' EXIT HUP INT TERM
+
+    mosquitto_passwd -c -b "${bridge_file}" \
+      "${MQTT_BOOTSTRAP_USER}" "${MQTT_BOOTSTRAP_PASSWORD}"
+
+    {
+      cat "${bridge_file}"
+      if [ -s "${password_file}" ]; then
+        awk -F: -v user="${MQTT_BOOTSTRAP_USER}" '\''$1 != user'\'' \
+          "${password_file}"
+      fi
+    } > "${merged_file}"
+
+    chown 10001:10001 "${merged_file}"
+    chmod 0640 "${merged_file}"
+    mv -f "${merged_file}" "${password_file}"
+  '
 
 compose() {
   docker compose \
