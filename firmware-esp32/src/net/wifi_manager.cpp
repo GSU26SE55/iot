@@ -33,10 +33,13 @@ namespace net {
 
 namespace {
 constexpr uint32_t kReconnectThrottleMs = 5000;
+// Có khách đang mở trang cấu hình: giãn nhịp để radio đứng yên trên kênh của AP.
+constexpr uint32_t kReconnectThrottlePortalMs = 30000;
 
 // IOT3-50 — KHÔNG cache SSID/mật khẩu ở đây. `wificfg::` là nguồn chân lý duy nhất; cache lại
 // là tự tạo nguồn thứ hai, và hai nguồn thì sớm muộn cũng lệch.
 uint32_t     s_lastReconnectMs = 0;
+uint32_t     s_holdReconnectUntilMs = 0;  // 0 = không giữ; xem wifiHoldReconnect()
 bool         s_wasConnected    = false;   // edge detect connect/disconnect
 
 // IOT3-51 — máy trạng thái.
@@ -144,7 +147,21 @@ void wifiTick() {
 
   // AP setup luôn chạy song song. WiFi.disconnect()/begin() chỉ đổi phần STA;
   // portalTick() sẽ khôi phục AP nếu driver làm mất radio bit.
-  if (now - s_lastReconnectMs < kReconnectThrottleMs) return;
+  //
+  // NHƯNG chỉ có MỘT radio: mỗi WiFi.begin() quét hết kênh rồi bám kênh router, nên
+  //   - lệnh quét Wi-Fi của trang setup bị huỷ hoặc bị driver từ chối (STA đang assoc), và
+  //   - AP cấu hình bị kéo đi theo ⇒ điện thoại rớt khỏi trang, "lúc ăn lúc không".
+  // Vì vậy vòng thử-lại phải nhường radio trong hai trường hợp dưới.
+  if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) return;
+  if (s_holdReconnectUntilMs != 0) {
+    if (static_cast<int32_t>(now - s_holdReconnectUntilMs) < 0) return;
+    s_holdReconnectUntilMs = 0;
+  }
+
+  // Người dùng bấm "Kiểm tra Wi-Fi" đi qua wifiReconfigure() nên KHÔNG dính throttle này.
+  const uint32_t throttleMs = WiFi.softAPgetStationNum() > 0 ? kReconnectThrottlePortalMs
+                                                             : kReconnectThrottleMs;
+  if (now - s_lastReconnectMs < throttleMs) return;
   s_lastReconnectMs = now;
 
   Serial.println("[wifi] reconnecting...");
@@ -158,8 +175,15 @@ uint32_t wifiOfflineDurationMs() {
   return s_offlineSince == 0 ? 0 : (millis() - s_offlineSince);
 }
 
+void wifiHoldReconnect(uint32_t ms) {
+  const uint32_t until = millis() + ms;
+  s_holdReconnectUntilMs = (until == 0) ? 1 : until;  // 0 mang nghĩa "không giữ"
+}
+
 bool wifiReconfigure(const char* ssid, const char* password) {
   if (!wificfg::save(ssid, password)) return false;   // đã log lý do
+
+  s_holdReconnectUntilMs = 0;   // lệnh của người dùng thắng mọi lệnh giữ radio
 
   Serial.printf("[wifi] đổi sang mạng \"%s\" — nối lại ngay, không khởi động lại\n",
                 wificfg::ssid());

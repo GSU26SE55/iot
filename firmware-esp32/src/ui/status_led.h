@@ -6,8 +6,7 @@
 //
 // Trạng thái:
 //   ONLINE       — xanh sáng đều      — WiFi up + NTP synced + ingest ok
-//   QUEUED       — xanh NHÁY           — WiFi up nhưng queue còn data chưa flush
-//                                        ⚠️ IOT3-54 ĐỔI từ vàng sang xanh-nháy so với S3-FW-05.
+//   QUEUED       — xanh sáng đều       — WiFi up, queue đang tự flush
 //   OFFLINE      — đỏ                  — WiFi down hoặc backend unreachable
 //   PROVISIONING — tím sáng đều        — boot, đang gọi /provision
 //   SETUP        — tím NHÁY            — chưa cấu hình, trang cài đặt đang mở (IOT3-54)
@@ -26,7 +25,7 @@ namespace ui {
 enum class LedState : uint8_t {
   Off          = 0,
   Online       = 1,    // xanh, sáng đều — mọi thứ bình thường
-  Queued       = 2,    // xanh NHÁY — còn hàng đợi chưa đẩy hết (IOT3-54)
+  Queued       = 2,    // xanh, sáng đều — queue tự flush, không cần người can thiệp
   Offline      = 3,    // đỏ — mất mạng / backend không với tới
   Provisioning = 4,    // tím, sáng đều — đang gọi /provision
 

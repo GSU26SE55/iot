@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Solars Gateway</string>
+
+    <!-- Scanner — giữ nguyên nội dung của :app, chỉ đổi module -->
+    <string name="scan_device_qr">Scan device QR</string>
+    <string name="scanner_live_hint">Center the QR from the Admin page in the frame</string>
+    <string name="scanner_privacy_hint">Live scan • no photo is taken or stored</string>
+    <string name="scanner_wrong_qr">This is not a Solar BMS pairing QR</string>
+    <string name="scanner_start_failed">Could not open the camera: %1$s</string>
+    <string name="close_scanner">Close the QR scanner</string>
+    <string name="toggle_flash">Toggle the flash</string>
+    <string name="camera_required">Camera permission is required to scan the device QR.</string>
+</resources>

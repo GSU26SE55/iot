@@ -1,10 +1,9 @@
 // Trust anchors shared by HTTPS and MQTT TLS.
 //
-// The first certificate keeps the current development broker compatible.
-// The second certificate is ISRG Root X1 for the production endpoints
-// api.solaris.io.vn and mqtt.solaris.io.vn. Embedding the stable roots keeps
-// firmware independent from LittleFS and avoids pinning a 90-day leaf cert.
-// ISRG source: https://letsencrypt.org/certs/isrgrootx1.pem
+// mqtt.solaris.io.vn currently serves the Let's Encrypt chain
+// EE -> YR2 -> Root YR -> ISRG Root X1. Embedding the stable ISRG Root X1
+// keeps the firmware independent from LittleFS and avoids pinning a 90-day
+// leaf certificate. Source: https://letsencrypt.org/certs/isrgrootx1.pem
 // SHA-1: CA:BD:2A:79:A1:07:6A:31:F2:1D:25:36:35:CB:03:9D:43:29:A5:E8
 #pragma once
 

@@ -35,4 +35,8 @@ bool waterLeakIsWet();
 
 uint32_t waterLeakReportCount();   // số lần đã report incident
 
+// Đã lấy được ít nhất một mẫu chưa. Trước mẫu đầu tiên, trạng thái "khô" chỉ là giá trị
+// khởi tạo chứ không phải số đo, nên báo cáo ambient bỏ hẳn trường nước cho tới khi có mẫu.
+bool waterLeakHasSample();
+
 }  // namespace sensor

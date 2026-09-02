@@ -11,6 +11,7 @@
 #endif
 
 #include "config/battery_map_runtime.h"
+#include "config/device_identity.h"
 #include "core/source_tags.h"   // S6-FW-03 (#65): canonical cross-source tags
 
 #include <Arduino.h>
@@ -30,6 +31,10 @@ size_t            s_detected   = 0;
 bool              s_inited     = false;
 uint32_t          s_readOk     = 0;
 uint32_t          s_readFail   = 0;
+// Gia tri doc duoc gan nhat cua cam bien dau tien, kem moc thoi gian.
+float             s_lastAmbient    = 0.0f;
+uint32_t          s_lastAmbientMs  = 0;
+bool              s_hasLastAmbient = false;
 
 }  // namespace
 
@@ -72,7 +77,24 @@ float ds18b20ReadByIndex(size_t index) {
     return t;
   }
   s_readOk++;
+  // Nho lai gia tri cam bien dau tien + moc doc.
+  //
+  // `requestTemperatures()` CHAN 750 ms o do phan giai 12-bit, va duong BMS da goi no moi ~1 s.
+  // Ai chi can biet "nhiet do hien tai" de SO SANH thi doc lai la nhan doi 750 ms cham trong
+  // vong lap chinh chi de lay dung con so vua co.
+  if (index == 0) {
+    s_lastAmbient = t;
+    s_lastAmbientMs = millis();
+    s_hasLastAmbient = true;
+  }
   return t;
+}
+
+bool ds18b20LastAmbient(float& outCelsius, uint32_t maxAgeMs) {
+  if (!s_hasLastAmbient) return false;
+  if (millis() - s_lastAmbientMs > maxAgeMs) return false;
+  outCelsius = s_lastAmbient;
+  return true;
 }
 
 size_t ds18b20BuildExternalTempReadings(const char* const* serials, size_t n,
@@ -127,5 +149,13 @@ size_t ds18b20BuildExternalTempReadings(const char* const* serials, size_t n,
 
 uint32_t ds18b20ReadOkCount()   { return s_readOk; }
 uint32_t ds18b20ReadFailCount() { return s_readFail; }
+
+bool ds18b20ReadAmbient(float& outCelsius) {
+  if (!s_inited || s_detected == 0) return false;
+  const float t = ds18b20ReadByIndex(0);
+  if (t == DEVICE_DISCONNECTED_C) return false;
+  outCelsius = t;
+  return true;
+}
 
 }  // namespace sensor

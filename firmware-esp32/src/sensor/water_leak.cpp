@@ -14,11 +14,14 @@
 
 #include "sensor/environmental_incident.h"
 #include "sensor/incident_trigger.h"
+#include "config/device_identity.h"
 #include "core/elapsed.h"
 #include "core/retry_gate.h"
 #include "net/backoff.h"
 
 #include <Arduino.h>
+
+#include <cstring>
 
 namespace sensor {
 
@@ -26,9 +29,11 @@ namespace {
 
 bool     s_inited       = false;
 bool     s_wet          = false;
+bool     s_wetLatched   = false;
 bool     s_hasSample    = false;
 uint32_t s_lastPollMs   = 0;
 uint32_t s_reportCount  = 0;
+
 
 // Pending-retry: cạnh lên detect nhưng report FAIL (offline/NTP/backend) → giữ để
 // retry tick sau, không mất incident.
@@ -52,6 +57,8 @@ bool waterLeakBegin() {
   // INPUT_PULLUP tránh chân float khi sensor chưa cắm (đọc nhiễu → false trigger).
   pinMode(WATER_LEAK_GPIO, INPUT_PULLUP);
   s_inited      = true;
+  s_wet         = false;
+  s_wetLatched  = false;
   s_hasSample   = false;
   s_lastPollMs  = 0;
   Serial.printf("[water] init OK pin=GPIO%d active=%s poll=%lums\n",
@@ -70,7 +77,17 @@ void waterLeakTick() {
   s_lastPollMs = now;
 
   const int level = digitalRead(WATER_LEAK_GPIO);
-  const bool wet = (level == (WATER_LEAK_ACTIVE_HIGH ? HIGH : LOW));
+  const bool rawWet = (level == (WATER_LEAK_ACTIVE_HIGH ? HIGH : LOW));
+
+  // Debounce: cần duy trì liên tục mức WET ít nhất 3 mẫu (300ms) để loại bỏ nhiễu điện/rung dây.
+  // Đảm bảo chỉ khi đèn LED trên module sáng rõ (nước thật) thì mới kích hoạt WET.
+  static uint8_t s_wetStreak = 0;
+  if (rawWet) {
+    if (s_wetStreak < 255) s_wetStreak++;
+  } else {
+    s_wetStreak = 0;
+  }
+  const bool wet = (s_wetStreak >= 3);
 
   // Log ngay mẫu đầu tiên và mỗi lần đổi trạng thái để kiểm tra mạch trực tiếp.
   // Không log mọi 100 ms, tránh làm nghẽn UART khi cảm biến giữ nguyên mức.
@@ -79,49 +96,27 @@ void waterLeakTick() {
                   static_cast<int>(WATER_LEAK_GPIO), level, wet ? "WET" : "DRY");
   }
   s_wet = wet;
+  if (wet) {
+    s_wetLatched = true;
+  }
   s_hasSample = true;
 
-  // Cạnh khô→ướt → cần report (1 lần / cooldown).
+  // Cạnh khô→ướt ghi nhận trạng thái để telemetry gửi WaterLeak lên backend
   if (s_trigger.update(s_wet, now)) {
-    s_pendingReport = true;
-    s_pendingDetectedMs = now;
-    // GH-741 — sự cố MỚI phải được báo NGAY, không chờ hết backoff của lần trước.
-    // Đây là cảm biến an toàn: bắt một xung khí mới đợi 5 phút vì lần trước backend
-    // lỗi là biến sự cố mạng thành sự cố an toàn.
-    s_reportBackoff.reset();
-    s_nextReportAtMs = now;
-    Serial.printf("[water] LEAK detected GPIO%d level=%d → report\n",
+    Serial.printf("[water] LEAK detected GPIO%d level=%d → telemetry will report WaterLeak\n",
                   static_cast<int>(WATER_LEAK_GPIO), level);
-  }
-
-  // GH-741 — lỗi tạm thời phải đợi hết backoff mới thử lại.
-  if (core::shouldAttemptReport(s_pendingReport, now, s_nextReportAtMs)) {
-    char notes[64];
-    snprintf(notes, sizeof(notes), "water leak GPIO%d", static_cast<int>(WATER_LEAK_GPIO));
-    const auto result = envIncidentReport(IncidentType::Flood, IncidentSeverity::Critical, notes,
-                          core::elapsedSeconds(s_pendingDetectedMs, now));
-    if (result == IncidentReportResult::Success) {
-      s_pendingReport = false;
-      s_reportCount++;
-      s_reportBackoff.reset();
-    } else if (result == IncidentReportResult::Permanent) {
-      // Gửi lại vẫn hỏng (sai scope, chưa provision, payload sai) ⇒ DỪNG.
-      // Sự cố vẫn được ghi nhận cục bộ qua log + envIncidentDroppedCount().
-      Serial.println("[water] BỎ report (lỗi vĩnh viễn) — xem log env-incident");
-      s_pendingReport = false;
-      s_reportBackoff.reset();
-      s_nextReportAtMs = now;
-    } else {
-      const uint32_t waitMs = s_reportBackoff.recordFailure();
-      s_nextReportAtMs = now + waitMs;
-      Serial.printf("[water] report lỗi tạm thời → thử lại sau %lums\n",
-                    static_cast<unsigned long>(waitMs));
-    }
   }
 }
 
-bool waterLeakIsWet() { return s_inited && s_wet; }
+bool waterLeakIsWet() {
+  if (!s_inited) return false;
+  const bool wasWet = s_wet || s_wetLatched;
+  s_wetLatched = false;
+  return wasWet;
+}
 
 uint32_t waterLeakReportCount() { return s_reportCount; }
+
+bool waterLeakHasSample() { return s_inited && s_hasSample; }
 
 }  // namespace sensor

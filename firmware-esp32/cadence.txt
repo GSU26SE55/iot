@@ -1,0 +1,426 @@
+[  0.0s] ESP-ROM:esp32s3-20210327
+[  0.0s] Build:Mar 27 2021
+[  0.0s] rst:0x1 (POWERON),boot:0x28 (SPI_FAST_FLASH_BOOT)
+[  0.0s] SPIWP:0xee
+[  0.0s] mode:DIO, clock div:1
+[  0.0s] load:0x3fce3808,len:0x4bc
+[  0.0s] load:0x403c9700,len:0xbd8
+[  0.0s] load:0x403cc700,len:0x2a0c
+[  0.0s] entry 0x403c98d0
+[  0.3s] [led] init GPIO48 (WS2812)
+[  0.3s] [nvs] mount OK namespace="iot"
+[  0.3s] [identity] deviceCode=IOT-TEST (source=NVS)
+[  0.3s] [identity] apiKey=iotk***TlxU (source=NVS)
+[  0.3s] [wificfg] ssid="YARN 1F" (nguồn=NVS) mật khẩu=***
+[  0.3s] [mqttcfg] host=192.168.3.48 port=21883 prefix=solar/iot-test user=iot-test (nguồn=NVS) usable=có
+[  0.4s] [batmap] nạp 1 pin từ NVS
+[  0.4s] [config] backend=http://192.168.3.48:4001 (source=NVS)
+[  0.4s] ========================================
+[  0.4s] Sprint 1+2+3 — Firmware ESP32-S3
+[  0.4s] Version : 0.1.0-real-uartlog
+[  0.4s] Env     : esp32-s3-real-uartlog
+[  0.4s] Backend : http://192.168.3.48:4001
+[  0.4s] Pins    : 4 × 3 sources
+[  0.4s] Scenario: normal
+[  0.4s] ========================================
+[  0.5s] ========================================
+[  0.5s] SETUP WEB IS ALWAYS AVAILABLE
+[  0.5s] Wi-Fi:    SolarGW-107C
+[  0.5s] Password: 12345678
+[  0.5s] URL:      http://192.168.4.1:8080
+[  0.5s] ========================================
+[  0.5s] [portal] web setup listening on port 8080
+[  0.5s] [wifi] connecting to "YARN 1F" in background; setup AP remains available
+[  0.5s] [ntp] sync requested servers=time.google.com,time.cloudflare.com,pool.ntp.org
+[  0.5s] [main] loaded provisioned config: polling=10000ms hb=60000ms site=04169ef1-0a36-4670-8dc8-b8878005b11b ntp=time.google.com
+[  0.5s] [http] TLS configured (verify CA)
+[  0.5s] [ota] ready (current=0.1.0-real-uartlog, poll mỗi 3600s)
+[  0.5s] [bms-source] REAL mode — Modbus + INA226 + DS18B20 (SHT31 disabled)
+[  0.5s] [modbus] init OK — baud=115200 tx=17 rx=18 de=-1 model=JK-BMS Modbus V1.1
+[  0.5s] [wifi] GOT_IP  ip=192.168.3.189 rssi=-30dBm
+[  1.5s] [ina226] init FAIL — không respond tại 0x40 (check wiring/I2C)
+[  1.5s] [bms-source] ina226 init FAIL — redundant readings SKIP
+[  1.6s] [ds18b20] init OK — gpio=4 resolution=12bit detected=1 sensors
+[  1.6s] [bms-source] sht31 disabled by firmware config
+[  1.6s] [setup] BMS source mode: REAL
+[  1.6s] [mq2] init OK pin=GPIO1 threshold=2000 (48%) warmup=30000ms poll=1000ms
+[  1.6s] [water] init OK pin=GPIO2 active=LOW poll=100ms
+[  1.6s] [env-incident] siteId set: 04169ef1-0a36-4670-8dc8-b8878005b11b
+[  1.6s] [heartbeat] init interval=60000ms (target endpoint=/api/iot-devices/heartbeat)
+[  1.6s] [cli] Serial CLI ready — gõ `help` để xem commands.
+[  1.6s] [queue] LittleFS mount OK (fallback)
+[  1.6s] [queue] backend=littlefs depth=0/200 used=16KB total=3456KB
+[  1.8s] [memory] flash=16384KB sketch=1216KB ota-free=6400KB / heap-free=211/304KB psram-free=0/0KB / queue=littlefs used=16/3456KB
+[  1.8s] [cmd] handler registered — listening solar/{dev}/cmd
+[  1.8s] [mqtt] MQTT_USE_TLS=0 — plain MQTT (KHÔNG dùng cho production)
+[  1.8s] [mqtt] init OK — broker=192.168.3.48:21883 tls=0 prefix=solar/iot-test buf=4096 keepalive=5s
+[  1.8s] [setup] done — entering loop()
+[  1.8s] [wifi] có mạng trở lại sau 1s
+[  1.8s] [mq2] warm-up... gas=0% (raw=0) (29s còn lại)
+[  1.8s] [water] GPIO2 level=0 state=WET
+[  1.8s] [water] LEAK detected GPIO2 level=0 → report
+[  1.8s] [portal] LAN url=http://solar-gateway.local:8080 or http://192.168.3.189:8080
+[  1.9s] [env-incident] NTP chưa sync — skip report
+[  1.9s] [water] report lỗi tạm thời → thử lại sau 1672ms
+[  2.8s] [mq2] warm-up... gas=0% (raw=0) (28s còn lại)
+[  3.6s] [http] POST /api/environmental-incidents → 200 (101ms, 166 bytes sent, 0 bytes resp)
+[  3.6s] [env-incident] reported type=4 severity=3 (200) [101ms]
+[  3.8s] [mq2] warm-up... gas=0% (raw=0) (27s còn lại)
+[  4.8s] [mq2] warm-up... gas=0% (raw=0) (26s còn lại)
+[  5.0s] [ntp] synced first time = 2026-08-30T06:39:46Z (epoch=1788071986)
+[  5.0s] [mqtt] connect host=192.168.3.48 port=21883 user=iot-test lwt=solar/iot-test/status ...
+[  5.0s] [mqtt] CONNECTED (count=1)
+[  5.0s] [mqtt] status=online retain → OK
+[  5.0s] [mqtt] subscribe solar/iot-test/cmd → OK
+[  5.2s] [http] POST /api/iot-devices/heartbeat → 200 (108ms, 238 bytes sent, 0 bytes resp)
+[  5.2s] [heartbeat] ok#1 (200, 108ms, 238→0 bytes)
+[  5.8s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[  5.8s] [modbus] unitId=1 OK V=26.852 I=2.395 T=33.0 SOC=85.0%
+[  6.4s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[  6.4s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 530 bytes) → OK
+[  6.4s] [ingest] MQTT posted 2 readings across 4 pin
+[  6.4s] [mq2] warm-up... gas=0% (raw=0) (25s còn lại)
+[  6.8s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[  6.8s] [modbus] unitId=1 OK V=26.849 I=2.395 T=33.0 SOC=85.0%
+[  7.4s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[  7.4s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 530 bytes) → OK
+[  7.4s] [ingest] MQTT posted 2 readings across 4 pin
+[  7.4s] [mq2] warm-up... gas=0% (raw=0) (24s còn lại)
+[  7.8s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[  7.8s] [modbus] unitId=1 OK V=26.853 I=2.395 T=33.0 SOC=85.0%
+[  8.4s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[  8.4s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 530 bytes) → OK
+[  8.4s] [ingest] MQTT posted 2 readings across 4 pin
+[  8.4s] [mq2] warm-up... gas=0% (raw=0) (23s còn lại)
+[  8.8s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[  8.8s] [modbus] unitId=1 OK V=26.853 I=2.395 T=33.0 SOC=85.0%
+[  9.4s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[  9.4s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 530 bytes) → OK
+[  9.5s] [ingest] MQTT posted 2 readings across 4 pin
+[  9.5s] [mq2] warm-up... gas=0% (raw=0) (22s còn lại)
+[  9.8s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[  9.8s] [modbus] unitId=1 OK V=26.853 I=2.395 T=33.0 SOC=85.0%
+[ 10.4s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[ 10.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 530 bytes) → OK
+[ 10.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 10.5s] [mq2] warm-up... gas=0% (raw=0) (21s còn lại)
+[ 10.8s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 10.8s] [modbus] unitId=1 OK V=26.853 I=2.395 T=33.0 SOC=85.0%
+[ 11.4s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[ 11.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 530 bytes) → OK
+[ 11.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 11.5s] [mq2] warm-up... gas=0% (raw=0) (20s còn lại)
+[ 11.8s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 11.9s] [modbus] unitId=1 OK V=26.853 I=2.395 T=33.0 SOC=85.0%
+[ 12.5s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[ 12.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 530 bytes) → OK
+[ 12.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 12.5s] [mq2] warm-up... gas=0% (raw=0) (19s còn lại)
+[ 12.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 12.9s] [modbus] unitId=1 OK V=26.853 I=2.395 T=33.0 SOC=85.0%
+[ 13.5s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[ 13.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 530 bytes) → OK
+[ 13.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 13.5s] [mq2] warm-up... gas=0% (raw=0) (18s còn lại)
+[ 13.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 13.9s] [modbus] unitId=1 OK V=26.853 I=2.395 T=33.0 SOC=85.0%
+[ 14.5s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[ 14.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 530 bytes) → OK
+[ 14.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 14.5s] [mq2] warm-up... gas=0% (raw=0) (17s còn lại)
+[ 14.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 14.9s] [modbus] unitId=1 OK V=26.854 I=2.395 T=33.0 SOC=85.0%
+[ 15.5s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[ 15.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 15.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 16.2s] [http] POST /api/ambient/readings/batch → 201 (98ms, 159 bytes sent, 0 bytes resp)
+[ 16.2s] [ds18b20] ambient post OK 28.4°C (201) [98ms]
+[ 16.3s] [http] POST /api/ambient/readings/batch → 201 (101ms, 155 bytes sent, 0 bytes resp)
+[ 16.3s] [water] ambient post OK WET (201) [101ms]
+[ 16.3s] [mq2] warm-up... gas=0% (raw=0) (15s còn lại)
+[ 16.3s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 16.3s] [modbus] unitId=1 OK V=26.852 I=2.395 T=33.0 SOC=85.0%
+[ 16.9s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[ 16.9s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 16.9s] [ingest] MQTT posted 2 readings across 4 pin
+[ 17.3s] [mq2] warm-up... gas=0% (raw=0) (14s còn lại)
+[ 17.3s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 17.3s] [modbus] unitId=1 OK V=26.852 I=2.395 T=33.0 SOC=85.0%
+[ 17.9s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[ 17.9s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 17.9s] [ingest] MQTT posted 2 readings across 4 pin
+[ 18.3s] [mq2] warm-up... gas=0% (raw=0) (13s còn lại)
+[ 18.3s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 18.3s] [modbus] unitId=1 OK V=26.853 I=2.395 T=33.0 SOC=85.0%
+[ 18.9s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[ 18.9s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 18.9s] [ingest] MQTT posted 2 readings across 4 pin
+[ 19.3s] [mq2] warm-up... gas=0% (raw=0) (12s còn lại)
+[ 19.3s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 19.3s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 19.9s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[ 19.9s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 20.0s] [ingest] MQTT posted 2 readings across 4 pin
+[ 20.3s] [mq2] warm-up... gas=0% (raw=0) (11s còn lại)
+[ 20.3s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 20.3s] [modbus] unitId=1 OK V=26.853 I=2.395 T=33.0 SOC=85.0%
+[ 21.0s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 21.0s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 21.0s] [ingest] MQTT posted 2 readings across 4 pin
+[ 21.3s] [mq2] warm-up... gas=0% (raw=0) (10s còn lại)
+[ 21.3s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 21.4s] [modbus] unitId=1 OK V=26.852 I=2.395 T=33.0 SOC=85.0%
+[ 22.0s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 22.0s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 22.0s] [ingest] MQTT posted 2 readings across 4 pin
+[ 22.3s] [mq2] warm-up... gas=0% (raw=0) (9s còn lại)
+[ 22.4s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 22.4s] [modbus] unitId=1 OK V=26.854 I=2.395 T=33.0 SOC=85.0%
+[ 23.0s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 23.0s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 23.0s] [ingest] MQTT posted 2 readings across 4 pin
+[ 23.3s] [mq2] warm-up... gas=0% (raw=0) (8s còn lại)
+[ 23.4s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 23.4s] [modbus] unitId=1 OK V=26.854 I=2.395 T=33.0 SOC=85.0%
+[ 24.0s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 24.0s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 24.0s] [ingest] MQTT posted 2 readings across 4 pin
+[ 24.3s] [mq2] warm-up... gas=0% (raw=0) (7s còn lại)
+[ 24.4s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 24.4s] [modbus] unitId=1 OK V=26.854 I=2.395 T=33.0 SOC=85.0%
+[ 25.0s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 25.0s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 25.0s] [ingest] MQTT posted 2 readings across 4 pin
+[ 25.3s] [mq2] warm-up... gas=0% (raw=0) (6s còn lại)
+[ 25.4s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 25.4s] [modbus] unitId=1 OK V=26.854 I=2.395 T=33.0 SOC=85.0%
+[ 26.0s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 26.0s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 26.0s] [ingest] MQTT posted 2 readings across 4 pin
+[ 26.4s] [mq2] warm-up... gas=0% (raw=0) (5s còn lại)
+[ 26.4s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 26.4s] [modbus] unitId=1 OK V=26.853 I=2.395 T=33.0 SOC=85.0%
+[ 27.0s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 27.0s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 27.0s] [ingest] MQTT posted 2 readings across 4 pin
+[ 27.4s] [mq2] warm-up... gas=0% (raw=0) (4s còn lại)
+[ 27.4s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 27.4s] [modbus] unitId=1 OK V=26.854 I=2.395 T=33.0 SOC=85.0%
+[ 28.0s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 28.0s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 28.0s] [ingest] MQTT posted 2 readings across 4 pin
+[ 28.4s] [mq2] warm-up... gas=0% (raw=0) (3s còn lại)
+[ 28.4s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 28.4s] [modbus] unitId=1 OK V=26.853 I=2.395 T=33.0 SOC=85.0%
+[ 29.0s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 29.0s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 29.0s] [ingest] MQTT posted 2 readings across 4 pin
+[ 29.4s] [mq2] warm-up... gas=0% (raw=0) (2s còn lại)
+[ 29.4s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 29.4s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 30.0s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 30.0s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 30.0s] [ingest] MQTT posted 2 readings across 4 pin
+[ 30.1s] [http] GET /api/iot-devices/firmware-check?currentVersion=0.1.0-real-uartlog → 200 (41ms, 293 bytes resp)
+[ 30.1s] [ota] no update (current=0.1.0-real-uartlog)
+[ 30.4s] [mq2] warm-up... gas=0% (raw=0) (1s còn lại)
+[ 30.4s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 30.4s] [modbus] unitId=1 OK V=26.854 I=2.395 T=33.0 SOC=85.0%
+[ 31.0s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 31.0s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 31.0s] [ingest] MQTT posted 2 readings across 4 pin
+[ 31.7s] [http] POST /api/ambient/readings/batch → 201 (105ms, 159 bytes sent, 0 bytes resp)
+[ 31.7s] [ds18b20] ambient post OK 28.6°C (201) [105ms]
+[ 31.8s] [http] POST /api/ambient/readings/batch → 201 (85ms, 155 bytes sent, 0 bytes resp)
+[ 31.8s] [water] ambient post OK WET (201) [85ms]
+[ 31.8s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 31.8s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 32.4s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 32.4s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 32.4s] [ingest] MQTT posted 2 readings across 4 pin
+[ 32.8s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 32.8s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 33.4s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 33.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 33.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 33.8s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 33.8s] [modbus] unitId=1 OK V=26.856 I=2.441 T=33.0 SOC=85.0%
+[ 34.5s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 34.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 530 bytes) → OK
+[ 34.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 34.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 34.9s] [modbus] unitId=1 OK V=26.854 I=2.395 T=33.0 SOC=85.0%
+[ 35.5s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 35.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 530 bytes) → OK
+[ 35.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 35.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 35.9s] [modbus] unitId=1 OK V=26.854 I=2.395 T=33.0 SOC=85.0%
+[ 36.5s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 36.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 530 bytes) → OK
+[ 36.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 36.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 36.9s] [modbus] unitId=1 OK V=26.853 I=2.395 T=33.0 SOC=85.0%
+[ 37.5s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 37.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 37.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 37.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 37.9s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 38.5s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 38.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 38.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 38.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 38.9s] [modbus] unitId=1 OK V=26.857 I=2.395 T=33.0 SOC=85.0%
+[ 39.5s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 39.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 39.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 39.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 39.9s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 40.5s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 40.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 40.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 40.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 40.9s] [modbus] unitId=1 OK V=26.854 I=2.395 T=33.0 SOC=85.0%
+[ 41.0s] [ds18b20] sensor #0 disconnect — skip battery BATTERY-TEST
+[ 41.0s] [mqtt-ingest] pub BATTERY-TEST (1 readings, 288 bytes) → OK
+[ 41.0s] [ingest] MQTT posted 1 readings across 4 pin
+[ 41.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 41.9s] [modbus] unitId=1 OK V=26.854 I=2.395 T=33.0 SOC=85.0%
+[ 42.5s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 42.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 42.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 42.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 42.9s] [modbus] unitId=1 OK V=26.857 I=2.395 T=33.0 SOC=85.0%
+[ 43.5s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 43.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 43.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 43.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 43.9s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 44.5s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 44.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 44.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 44.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 44.9s] [modbus] unitId=1 OK V=26.853 I=2.395 T=33.0 SOC=85.0%
+[ 45.5s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 45.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 45.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 45.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 45.9s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 46.5s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 46.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 46.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 46.6s] [http] POST /api/ambient/readings/batch → 201 (114ms, 151 bytes sent, 0 bytes resp)
+[ 46.6s] [mq2] ambient post OK gas=0% (201) [114ms]
+[ 47.3s] [http] POST /api/ambient/readings/batch → 201 (106ms, 159 bytes sent, 0 bytes resp)
+[ 47.3s] [ds18b20] ambient post OK 28.6°C (201) [106ms]
+[ 47.4s] [http] POST /api/ambient/readings/batch → 201 (99ms, 155 bytes sent, 0 bytes resp)
+[ 47.4s] [water] ambient post OK WET (201) [99ms]
+[ 47.5s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 47.5s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 48.1s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 48.1s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 48.1s] [ingest] MQTT posted 2 readings across 4 pin
+[ 48.5s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 48.5s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 49.1s] [ds18b20] read serial=BATTERY-TEST temp=28.6C
+[ 49.1s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 49.1s] [ingest] MQTT posted 2 readings across 4 pin
+[ 49.5s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 49.5s] [modbus] unitId=1 OK V=26.858 I=2.395 T=33.0 SOC=85.0%
+[ 50.1s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 50.1s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 50.1s] [ingest] MQTT posted 2 readings across 4 pin
+[ 50.5s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 50.5s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 51.1s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 51.1s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 51.1s] [ingest] MQTT posted 2 readings across 4 pin
+[ 51.5s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 51.5s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 52.1s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 52.1s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 52.1s] [ingest] MQTT posted 2 readings across 4 pin
+[ 52.5s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 52.5s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 53.1s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 53.1s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 53.1s] [ingest] MQTT posted 2 readings across 4 pin
+[ 53.5s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 53.5s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 54.1s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 54.1s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 54.1s] [ingest] MQTT posted 2 readings across 4 pin
+[ 54.5s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 54.5s] [modbus] unitId=1 OK V=26.857 I=2.395 T=33.0 SOC=85.0%
+[ 55.1s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 55.1s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 55.1s] [ingest] MQTT posted 2 readings across 4 pin
+[ 55.5s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 55.5s] [modbus] unitId=1 OK V=26.857 I=2.395 T=33.0 SOC=85.0%
+[ 56.1s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 56.1s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 56.1s] [ingest] MQTT posted 2 readings across 4 pin
+[ 56.5s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 56.5s] [modbus] unitId=1 OK V=26.854 I=2.395 T=33.0 SOC=85.0%
+[ 57.1s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 57.1s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 57.1s] [ingest] MQTT posted 2 readings across 4 pin
+[ 57.5s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 57.5s] [modbus] unitId=1 OK V=26.857 I=2.395 T=33.0 SOC=85.0%
+[ 58.1s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 58.1s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 58.1s] [ingest] MQTT posted 2 readings across 4 pin
+[ 58.5s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 58.5s] [modbus] unitId=1 OK V=26.857 I=2.395 T=33.0 SOC=85.0%
+[ 59.1s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 59.2s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 59.2s] [ingest] MQTT posted 2 readings across 4 pin
+[ 59.5s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 59.5s] [modbus] unitId=1 OK V=26.857 I=2.395 T=33.0 SOC=85.0%
+[ 60.2s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 60.2s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 60.2s] [ingest] MQTT posted 2 readings across 4 pin
+[ 60.2s] [stats] uptime=60s ingest ok=53 fail=4 queued=0 flushed=0 / hb ok=1 fail=0 / queue=0 backoff_attempt=0 / mqtt conn=UP cn=1 pubok=53 pubfail=0 streak=0 / cmd rx=0 ok=0 fail=0 unk=0 / heap=185556 rssi=-35dBm wifi=UP prov=yes / cfg wifi=nvs mqtt=nvs batmap=nvs(1 pin)
+[ 60.2s] [s5-stats] mode=REAL modbus ok=53 fail=0 / ina226 ok=0 fail=0 / ds18b20 ok=55 fail=1 ambient(ok=3 fail=0) / sht31 post ok=0 fail=0
+[ 60.2s] [s6-env] mq2 raw=0 reports=0 ambient(ok=1 fail=0) / water wet=yes reports=1 ambient(ok=3 fail=0) / incident http ok=1 fail=1
+[ 60.2s] [s7-ota] verify_mode=no checks=1 updates_ok=0
+[ 60.6s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 60.6s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 61.2s] [ds18b20] read serial=BATTERY-TEST temp=28.5C
+[ 61.2s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 528 bytes) → OK
+[ 61.2s] [ingest] MQTT posted 2 readings across 4 pin
+[ 61.6s] [http] POST /api/ambient/readings/batch → 201 (95ms, 151 bytes sent, 0 bytes resp)
+[ 61.6s] [mq2] ambient post OK gas=0% (201) [95ms]
+[ 61.7s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 61.7s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 62.3s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[ 62.3s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 62.3s] [ingest] MQTT posted 2 readings across 4 pin
+[ 63.0s] [http] POST /api/ambient/readings/batch → 201 (159ms, 159 bytes sent, 0 bytes resp)
+[ 63.0s] [ds18b20] ambient post OK 28.4°C (201) [159ms]
+[ 65.9s] [http] POST /api/ambient/readings/batch → 201 (2853ms, 155 bytes sent, 0 bytes resp)
+[ 65.9s] [water] ambient post OK WET (201) [2853ms]
+[ 65.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 65.9s] [modbus] unitId=1 OK V=26.857 I=2.395 T=33.0 SOC=85.0%
+[ 66.5s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[ 66.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 66.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 66.7s] [http] POST /api/iot-devices/heartbeat → 200 (156ms, 239 bytes sent, 0 bytes resp)
+[ 66.7s] [heartbeat] ok#2 (200, 156ms, 239→0 bytes)
+[ 66.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 66.9s] [modbus] unitId=1 OK V=26.856 I=2.395 T=33.0 SOC=85.0%
+[ 67.5s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[ 67.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 67.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 67.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 67.9s] [modbus] unitId=1 OK V=26.858 I=2.395 T=33.0 SOC=85.0%
+[ 68.5s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[ 68.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 531 bytes) → OK
+[ 68.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 68.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 68.9s] [modbus] unitId=1 OK V=26.859 I=2.395 T=33.0 SOC=85.0%
+[ 69.5s] [ds18b20] read serial=BATTERY-TEST temp=28.4C
+[ 69.5s] [mqtt-ingest] pub BATTERY-TEST (2 readings, 530 bytes) → OK
+[ 69.5s] [ingest] MQTT posted 2 readings across 4 pin
+[ 69.9s] [modbus-jk] block=28 regs Tmos=33.0 T1=31.8 T2=31.6 SOC=85%
+[ 69.9s] [modbus] unitId=1 OK V=26.858 I=2.395 T=33.0 SOC=85.0%
+[ 70.5s] [ds18b20] read serial=BATTERY-TEST temp=28.4C

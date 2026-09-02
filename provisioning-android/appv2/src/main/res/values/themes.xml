@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Chỉ là nền trước khi Compose vẽ. Toàn bộ Material 3 nằm trong ui/Theme.kt. -->
+    <style name="Theme.SolarSetupV2" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/seed_surface</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <!-- Scanner là viewfinder camera nền tối, giữ XML như :app. -->
+    <style name="Theme.SolarSetupV2.Scanner" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/scanner_background</item>
+        <item name="android:statusBarColor">@color/scanner_background</item>
+        <item name="android:navigationBarColor">@color/scanner_background</item>
+    </style>
+</resources>

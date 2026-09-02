@@ -31,13 +31,19 @@ namespace net {
 namespace {
 
 // ---- Static state ----
-#if MQTT_USE_TLS
-WiFiClientSecure s_wifiClient;
-#else
-WiFiClient       s_wifiClient;
-#endif
+// Cả hai lớp vận chuyển cùng tồn tại; chọn cái nào là việc của RUNTIME
+// (`mqttcfg::brokerWantsTls()`), không phải của bộ tiền xử lý. Nhờ vậy MỘT bản
+// firmware chạy được cả broker plain (dev) lẫn broker TLS (production) — đổi môi
+// trường chỉ là ghi NVS rồi reboot, không phải build lại.
+//
+// Giá RAM: WiFiClientSecure cấp ngữ cảnh mbedTLS lúc connect chứ không phải lúc
+// khai báo, nên bản plain không trả thêm gì đáng kể. mbedtls vốn đã link sẵn vì
+// backend chạy HTTPS.
+WiFiClientSecure s_tlsClient;
+WiFiClient       s_plainClient;
 
-PubSubClient    s_mqtt(s_wifiClient);
+// Khởi tạo tạm bằng plain; applyTransport() gọi setClient() theo cấu hình thật.
+PubSubClient    s_mqtt(s_plainClient);
 CommandCallback s_userCmdCb     = nullptr;
 bool            s_inited        = false;
 uint32_t        s_lastReconnectMs = 0;
@@ -78,6 +84,7 @@ char s_appliedUser  [mqttcfg::kUserBufLen];
 char s_appliedPass  [mqttcfg::kPassBufLen];
 char s_appliedPrefix[mqttcfg::kPrefixBufLen];
 int  s_appliedPort = 0;
+bool s_appliedTls  = false;
 
 void snapshotAppliedConfig() {
   snprintf(s_appliedHost,   sizeof(s_appliedHost),   "%s", mqttcfg::host());
@@ -85,6 +92,7 @@ void snapshotAppliedConfig() {
   snprintf(s_appliedPass,   sizeof(s_appliedPass),   "%s", mqttcfg::password());
   snprintf(s_appliedPrefix, sizeof(s_appliedPrefix), "%s", mqttcfg::topicPrefix());
   s_appliedPort = mqttcfg::port();
+  s_appliedTls  = mqttcfg::brokerWantsTls();
 }
 
 bool configDiffersFromApplied() {
@@ -92,7 +100,8 @@ bool configDiffersFromApplied() {
          strcmp(s_appliedUser,   mqttcfg::username())    != 0 ||
          strcmp(s_appliedPass,   mqttcfg::password())    != 0 ||
          strcmp(s_appliedPrefix, mqttcfg::topicPrefix()) != 0 ||
-         s_appliedPort != mqttcfg::port();
+         s_appliedPort != mqttcfg::port() ||
+         s_appliedTls  != mqttcfg::brokerWantsTls();
 }
 
 void onMessage(char* topic, byte* payload, unsigned int length) {
@@ -109,8 +118,8 @@ void onMessage(char* topic, byte* payload, unsigned int length) {
   }
 }
 
+/// Nạp CA cho đường TLS. CHỈ gọi khi `mqttcfg::brokerWantsTls()` — applyTransport() gate sẵn.
 bool loadCaCert() {
-#if MQTT_USE_TLS
   // Ưu tiên CA nhúng trong firmware. LittleFS không dùng được cho việc này:
   // local_queue và chính file này đều gọi LittleFS.begin(true) tức
   // format-nếu-mount-lỗi, mà ảnh mklittlefs không mount được nên phân vùng
@@ -121,7 +130,7 @@ bool loadCaCert() {
     // "X509 Certificate verification failed", rất dễ tưởng nhầm sai CA.
     s_caCert = String(kMqttCaCert);
     if (s_caCert.indexOf("-----BEGIN CERTIFICATE-----") >= 0) {
-      s_wifiClient.setCACert(s_caCert.c_str());
+      s_tlsClient.setCACert(s_caCert.c_str());
       Serial.printf("[mqtt] CA cert nhúng trong firmware (%u bytes)\n",
                     static_cast<unsigned>(s_caCert.length()));
       return true;
@@ -131,7 +140,7 @@ bool loadCaCert() {
 
   // Never auto-format here: the same LittleFS partition may contain offline
   // telemetry. A missing CA must disable MQTT, not erase unsent readings.
-  if (!LittleFS.begin(false /*formatOnFail*/)) {
+  if (!LittleFS.begin(true /*formatOnFail*/)) {
     Serial.println("[mqtt] LittleFS mount FAIL — không load được CA cert");
     return false;
   }
@@ -159,14 +168,26 @@ bool loadCaCert() {
     Serial.println("[mqtt]   → Sửa: cp infra/mqtt/mosquitto/certs/ca.crt data/ca_cert.pem (PEM ASCII)");
     return false;
   }
-  s_wifiClient.setCACert(s_caCert.c_str());
+  s_tlsClient.setCACert(s_caCert.c_str());
   Serial.printf("[mqtt] CA cert loaded (%u bytes) từ %s\n",
                 static_cast<unsigned>(s_caCert.length()), MQTT_CA_CERT_PATH);
   return true;
-#else
-  Serial.println("[mqtt] MQTT_USE_TLS=0 — plain MQTT (KHÔNG dùng cho production)");
-  return true;
-#endif
+}
+
+/// Gắn PubSubClient vào đúng lớp vận chuyển theo cấu hình hiện tại, nạp CA nếu cần.
+///
+/// Gọi lúc khởi tạo và mỗi lần cờ TLS đổi. Caller PHẢI `disconnect()` trước: đổi
+/// client khi socket đang mở là bỏ rơi một kết nối còn sống ở lớp dưới.
+bool applyTransport() {
+  const bool useTls = mqttcfg::brokerWantsTls();
+  s_mqtt.setClient(useTls ? static_cast<Client&>(s_tlsClient)
+                          : static_cast<Client&>(s_plainClient));
+  if (!useTls) {
+    Serial.println("[mqtt] transport = TCP thường (KHÔNG TLS — chỉ dùng cho dev/local)");
+    return true;
+  }
+  Serial.println("[mqtt] transport = TLS");
+  return loadCaCert();
 }
 
 void configureBrokerEndpoint() {
@@ -321,11 +342,9 @@ bool mqttBegin() {
     return false;
   }
 
-  if (!loadCaCert()) {
-#if MQTT_USE_TLS
-    Serial.println("[mqtt] mqttBegin FAIL — CA cert chưa sẵn sàng");
+  if (!applyTransport()) {
+    Serial.println("[mqtt] mqttBegin FAIL — CA cert chưa sẵn sàng cho đường TLS");
     return false;
-#endif
   }
 
   configureBrokerEndpoint();
@@ -338,7 +357,8 @@ bool mqttBegin() {
   s_inited = true;
   snapshotAppliedConfig();
   Serial.printf("[mqtt] init OK — broker=%s:%d tls=%d prefix=%s buf=%u keepalive=%ds\n",
-                mqttcfg::host(), mqttcfg::port(), MQTT_USE_TLS, mqttcfg::topicPrefix(),
+                mqttcfg::host(), mqttcfg::port(),
+                mqttcfg::brokerWantsTls() ? 1 : 0, mqttcfg::topicPrefix(),
                 static_cast<unsigned>(MQTT_MAX_PACKET_SIZE),
                 static_cast<int>(MQTT_KEEPALIVE_SEC));
   return true;
@@ -360,11 +380,17 @@ bool mqttApplyConfig() {
     return true;
   }
 
-  configureBrokerEndpoint();
+  // Ngắt TRƯỚC khi đổi transport: gọi setClient() lúc socket còn mở là bỏ rơi một
+  // kết nối còn sống ở lớp dưới.
   if (s_mqtt.connected()) {
     Serial.println("[mqtt] cấu hình đổi → ngắt kết nối để dựng lại LWT/topic/subscribe");
     s_mqtt.disconnect();
   }
+  if (!applyTransport()) {
+    Serial.println("[mqtt] áp cấu hình mới FAIL — CA cert chưa sẵn sàng cho đường TLS");
+    return false;
+  }
+  configureBrokerEndpoint();
   // Nối lại NGAY, không đợi hết MQTT_RECONNECT_INTERVAL_MS — cùng lý do với mqttOnIdentityChanged().
   s_lastReconnectMs = 0;
   // Credential mới ⇒ streak xác thực cũ không còn ý nghĩa, xoá kẻo re-provision oan.
@@ -372,8 +398,9 @@ bool mqttApplyConfig() {
 
   snapshotAppliedConfig();
   warnIfTopicPrefixMismatch();
-  Serial.printf("[mqtt] áp cấu hình mới — broker=%s:%d prefix=%s\n",
-                mqttcfg::host(), mqttcfg::port(), mqttcfg::topicPrefix());
+  Serial.printf("[mqtt] áp cấu hình mới — broker=%s:%d tls=%d prefix=%s\n",
+                mqttcfg::host(), mqttcfg::port(),
+                mqttcfg::brokerWantsTls() ? 1 : 0, mqttcfg::topicPrefix());
   return true;
 }
 
@@ -392,12 +419,14 @@ void mqttTick() {
   if (!s_inited) return;
   if (!WiFi.isConnected()) return;
 
-#if MQTT_USE_TLS
   // TLS cert validation cần NTP synced — broker cert có notBefore=2026 GMT,
   // ESP32 boot time=1970 sẽ fail "certificate not yet valid" và loop spam log
   // tới khi NTP sync. Gate tryConnect bằng net::timeIsSynced() — Sprint 1 đã có
   // setup NTP qua time_sync.cpp.
-  if (!net::timeIsSynced()) {
+  //
+  // Cổng này CHỈ áp cho TLS: broker plain không validate cert, bắt nó đợi NTP là
+  // chặn oan cả một môi trường dev vốn thường chạy không có internet.
+  if (mqttcfg::brokerWantsTls() && !net::timeIsSynced()) {
     static uint32_t s_lastNtpWaitLogMs = 0;
     uint32_t now = millis();
     if (now - s_lastNtpWaitLogMs > 10000) {
@@ -406,7 +435,6 @@ void mqttTick() {
     }
     return;
   }
-#endif
 
   if (!s_mqtt.connected()) {
     uint32_t now = millis();
