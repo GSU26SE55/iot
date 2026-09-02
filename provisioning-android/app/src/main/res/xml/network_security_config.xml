@@ -2,7 +2,7 @@
 <network-security-config>
     <!-- The setup portal is served by the ESP32 over local HTTP. Navigation is
          restricted to the three portal hosts in MainActivity. -->
-    <base-config cleartextTrafficPermitted="true" />
+    <base-config cleartextTrafficPermitted="false" />
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">192.168.4.1</domain>
         <domain includeSubdomains="false">solargw.local</domain>

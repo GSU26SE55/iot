@@ -6,6 +6,7 @@
 
 # Project local config (chứa WiFi password, API key)
 include/config.h
+include/config.h.*.bak
 
 # Build artifact
 *.bin
