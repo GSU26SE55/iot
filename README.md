@@ -227,11 +227,11 @@ sequenceDiagram
     participant G as Gateway (SoftAP portal)
     participant B as Backend
 
-    T->>G: Join SolarGW-xxxx, open http://192.168.4.1:8080
+    T->>G: Join SolarGW-xxxx, open the portal at 192.168.4.1:8080
     G-->>T: Setup portal (served from LittleFS)
     T->>G: Pick the customer's 2.4 GHz Wi-Fi + password
     T->>G: Scan the provisioning QR from the Admin portal
-    Note over T,G: QR must carry a valid deviceCode + apiKey;<br/>nothing is captured or stored
+    Note over T,G: QR must carry a valid deviceCode and apiKey.<br/>Nothing is captured or stored.
     G->>G: Persist config to NVS, reboot
     G->>B: Provision over HTTPS → MQTT credentials
     G->>B: Connect to the broker, publish retained "online"
