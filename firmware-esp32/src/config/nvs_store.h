@@ -26,8 +26,9 @@
 //   "wifipass"   string  — mật khẩu WiFi                 (IOT3-36)
 //   "mqhost"     string  — host broker MQTT              (IOT3-37, config/mqtt_config.cpp)
 //   "mqport"     int32   — cổng broker                   (IOT3-37)
-//   "mqtls"      uint8   — backend BÁO có TLS hay không  (IOT3-37 — chỉ để đối chiếu;
-//                          đường TLS thật do `MQTT_USE_TLS` compile-time quyết, quyết định Q2)
+//   "mqtls"      uint8   — dùng TLS hay không            (IOT3-37 — đây LÀ nguồn sự thật;
+//                          mqtt_client chọn WiFiClientSecure/WiFiClient theo giá trị này
+//                          lúc chạy. MQTT_USE_TLS chỉ là fallback khi key này trống.)
 //   "mquser"     string  — username MQTT                 (IOT3-37)
 //   "mqpass"     string  — mật khẩu MQTT                 (IOT3-37)
 //   "mqprefix"   string  — tiền tố topic, vd solar/gw-esp32-001 (IOT3-37)

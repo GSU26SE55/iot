@@ -324,8 +324,6 @@ PostResult httpPutJson(const char* path, const char* body, size_t bodyLen) {
 
 namespace {
 
-// Cache CA PEM. setCACert() giữ CON TRỎ chứ không copy, nên chuỗi phải sống lâu hơn
-// mọi kết nối ⇒ static, không phải biến cục bộ.
 String s_caPem;
 bool   s_caLoaded    = false;
 bool   s_caAttempted = false;
@@ -336,19 +334,6 @@ tls::CaLoadStatus loadCaPemOnce() {
   if (s_caAttempted && !s_caLoaded) return tls::CaLoadStatus::FileMissing;
   s_caAttempted = true;
 
-  // IOT3-23 — ƯU TIÊN CA NHÚNG, giống hệt mqtt_client.cpp::loadCaCert().
-  //
-  // Trước đây đường HTTPS chỉ đọc LittleFS trong khi đường MQTT đã chuyển sang CA
-  // nhúng (ca_cert_embedded.h). Lý do phải nhúng — ghi ngay trong header đó — là
-  // "ảnh mklittlefs không mount được nên phân vùng bị xoá sạch mỗi lần boot, cuốn
-  // theo ca_cert.pem". Nếu điều đó đúng thì LittleFS.begin(false) ở dưới trả false,
-  // TLS_ALLOW_INSECURE=0 khiến httpConfigureTls() fail-closed, và postJsonInternal()
-  // return ngay ⇒ provision + heartbeat + OTA + đẩy bù hàng đợi CHẾT HẾT, trong khi
-  // telemetry vẫn chảy qua MQTT nên dashboard trông vẫn bình thường.
-  //
-  // Đặt CA nhúng TRƯỚC LittleFS (ngược với thứ tự "ưu tiên file để thay tại hiện
-  // trường") là có chủ ý: giữ hai đường TLS CÙNG MỘT logic quan trọng hơn, vì chính
-  // việc hai đường xử lý khác nhau đã tạo ra lỗ hổng này.
   if (kMqttCaCert[0] != '\0' &&
       tls::isLikelyPemCertificate(kMqttCaCert, strlen(kMqttCaCert))) {
     s_caPem = String(kMqttCaCert);
@@ -356,9 +341,7 @@ tls::CaLoadStatus loadCaPemOnce() {
     return tls::CaLoadStatus::Ok;
   }
 
-  // formatOnFail=false CÓ CHỦ Ý: format sẽ xoá luôn hàng đợi offline và chính file CA
-  // (xem GH-936). Thà báo lỗi còn hơn tự ý xoá dữ liệu.
-  if (!LittleFS.begin(false)) return tls::CaLoadStatus::FilesystemUnavailable;
+  if (!LittleFS.begin(true)) return tls::CaLoadStatus::FilesystemUnavailable;
   if (!LittleFS.exists(TLS_CA_CERT_PATH)) return tls::CaLoadStatus::FileMissing;
 
   File f = LittleFS.open(TLS_CA_CERT_PATH, "r");
@@ -384,16 +367,12 @@ bool httpConfigureTls(WiFiClientSecure& client) {
   }
 
 #if TLS_ALLOW_INSECURE
-  // Lối thoát dev — cố ý ồn ào để không ai vô tình để lọt lên production.
   Serial.printf("[http] *** TLS KHÔNG VERIFY *** (%s). CHỈ dùng cho dev — "
                 "TLS_ALLOW_INSECURE=1.\n", tls::describe(st));
   client.setInsecure();
   s_insecureMode = true;
   return true;
 #else
-  // GH-735 — FAIL CLOSED. Trước đây nhánh này gọi setInsecure(), nghĩa là thiếu CA thì
-  // firmware vẫn chạy nhưng nhận mọi chứng chỉ: kẻ đứng giữa trả về bản mô tả firmware
-  // giả kèm SHA khớp là thiết bị flash luôn. Không nạp được CA thì KHÔNG kết nối.
   Serial.printf("[http] TLS FAIL: %s. Từ chối kết nối.\n", tls::describe(st));
   Serial.printf("[http]   → copy CA vào data%s rồi `pio run -t uploadfs`\n", TLS_CA_CERT_PATH);
   s_insecureMode = false;

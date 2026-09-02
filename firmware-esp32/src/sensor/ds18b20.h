@@ -43,4 +43,14 @@ size_t ds18b20BuildExternalTempReadings(const char* const* serials, size_t n,
 uint32_t ds18b20ReadOkCount();
 uint32_t ds18b20ReadFailCount();
 
+// Nhiệt độ môi trường đại diện (probe #0) cho báo cáo ambient gộp.
+// Trả false nếu chưa init / không dò ra sensor / probe mất kết nối — khi đó payload
+// bỏ hẳn trường nhiệt độ thay vì gửi giá trị rác.
+bool ds18b20ReadAmbient(float& outCelsius);
+
+// Gia tri doc duoc gan nhat cua cam bien dau tien, KHONG cham bus 1-Wire.
+// Tra false neu chua co lan doc nao hoac gia tri da cu hon `maxAgeMs`.
+// Dung cho vong do bien dong: `ds18b20ReadAmbient()` chan 750 ms nen khong goi lien tuc duoc.
+bool ds18b20LastAmbient(float& outCelsius, uint32_t maxAgeMs);
+
 }  // namespace sensor

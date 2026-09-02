@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ESPmDNS.h>
+#include <Update.h>
 #include <WebServer.h>
 #include <WiFi.h>
 #include <cstring>
@@ -50,6 +51,11 @@ uint32_t s_wifiCheckStartedAtMs = 0;
 char s_wifiCheckSsid[wificfg::kSsidBufLen]{};
 
 constexpr uint32_t kWifiCheckTimeoutMs = 30000UL;
+// Đủ cho một lượt quét (~2 s) cộng vài nhịp poll của trình duyệt.
+constexpr uint32_t kScanHoldReconnectMs = 8000UL;
+// Nạp 1.25 MB qua SoftAP mất 30–60 s. Hẹn dài rồi gia hạn mỗi chunk: hết hạn giữa
+// chừng là wifiTick() gọi disconnect()/begin() và cắt đứt luồng đang ghi.
+constexpr uint32_t kOtaHoldReconnectMs = 20000UL;
 
 extern const uint8_t kJsQrGzipStart[] asm("_binary_data_jsqr_1_4_0_js_gz_start");
 extern const uint8_t kJsQrGzipEnd[] asm("_binary_data_jsqr_1_4_0_js_gz_end");
@@ -127,6 +133,9 @@ button:disabled{opacity:.55;cursor:wait}
 .saving-dots{display:flex;justify-content:center;gap:5px;margin-top:12px}
 .saving-dots i{width:5px;height:5px;border-radius:50%;background:#c3cbe6;animation:dots 1.1s ease-in-out infinite}
 .saving-dots i:nth-child(2){animation-delay:.15s}.saving-dots i:nth-child(3){animation-delay:.3s}
+.saving-block.done .loader{background:#e4f5ee}
+.saving-block.done .loader:before{content:"✓";width:auto;height:auto;border:0;border-radius:0;animation:none;color:var(--ok);font-size:27px;font-weight:800;line-height:1}
+.saving-block.done .saving-dots{display:none}
 .hidden{display:none!important}
 details{border-top:1px solid var(--border);padding-top:12px;margin-top:2px}
 summary{cursor:pointer;color:var(--muted);margin-bottom:10px;font-size:11.5px;font-weight:700}
@@ -151,9 +160,9 @@ summary{cursor:pointer;color:var(--muted);margin-bottom:10px;font-size:11.5px;fo
 </div><input id="deviceCode" type="hidden"><input id="apiKey" type="hidden">
 <details><summary>Cấu hình nâng cao</summary><div class="grid">
 <label class="full">Backend URL<input id="backendUrl" maxlength="159" placeholder="https://api.solaris.io.vn" required></label>
-<label>Broker host<input id="mqttHost" maxlength="95" required></label><label>Port (cố định theo firmware)<input id="mqttPort" type="number" disabled></label>
+<label>Broker host<input id="mqttHost" maxlength="95" required></label><label>Port<input id="mqttPort" type="number" min="1" max="65535" required></label>
 <label>Username<input id="mqttUsername" maxlength="64"></label><label>Password<input id="mqttPassword" type="password" maxlength="96" placeholder="Để trống để giữ nguyên"></label>
-<label class="check full"><input id="mqttUseTls" type="checkbox" disabled> Dùng TLS (cố định theo firmware)</label>
+<label class="check full"><input id="mqttUseTls" type="checkbox"> Dùng TLS</label>
 </div></details><button class="full-btn" id="continueButton" type="submit" style="margin-top:14px">Tiếp tục chụp QR →</button><div id="message" class="message"></div></form>
 
 <section class="step-block hidden" id="qrStep"><h2>Quét QR thiết bị</h2><p>Đưa camera vào mã QR của IoT mới trên web Admin.</p><div class="qr-scanner idle" id="qrScanner"><img id="qrPreview" alt="Ảnh QR vừa chọn"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span><div class="qr-icon">QR</div></div><canvas id="qrCanvas" class="hidden"></canvas><input id="qrImageInput" class="hidden" type="file" accept="image/*" capture="environment"><div class="message" id="qrMessage">Wi‑Fi đã kết nối. Hãy quét QR để tiếp tục.</div><button class="camera-button" id="cameraButton" type="button">Mở camera / chọn ảnh QR</button><div class="external-help"><b>Web chạy trực tiếp trên ESP32 qua HTTP</b><span>Trình duyệt sẽ mở camera hệ thống, sau đó trang thử nhiều độ phân giải và mức tương phản để đọc QR. Ảnh không được gửi đi và không lưu trong ESP32. Bạn cũng có thể dán mã bằng tay bên dưới.</span><div class="manual"><input id="qrText" autocomplete="off" placeholder="Hoặc dán URL/chuỗi QR"><button id="applyQrButton" type="button">Ghép</button></div></div><p class="helper">Lấy trọn 4 góc QR, giữ gần và tránh ánh sáng phản chiếu từ màn hình.</p><button class="secondary full-btn" id="backButton" type="button" style="margin-top:6px">← Quay lại chọn Wi‑Fi</button></section>
@@ -170,21 +179,21 @@ summary{cursor:pointer;color:var(--muted);margin-bottom:10px;font-size:11.5px;fo
 const $=id=>document.getElementById(id),msg=$('message'),pendingKey='solarSetupPendingV2',pendingMaxAge=15*60*1000;
 const params=new URLSearchParams(location.search);let qrDeviceCode=params.get('dc')||'',qrApiKey=params.get('key')||'',qrBackendUrl=params.get('api')||params.get('backendUrl')||'',qrMqttHost=params.get('mh')||params.get('mqttHost')||'',apActive=false,hasIdentity=false,canReprovision=false,qrBusy=false;
 if(qrDeviceCode||qrApiKey||qrBackendUrl||qrMqttHost)history.replaceState({},document.title,'/');
-function showStep(name){$('setupForm').classList.toggle('hidden',name!=='wifi');$('qrStep').classList.toggle('hidden',name!=='qr');$('savingStep').classList.toggle('hidden',name!=='saving');$('syncStep').classList.toggle('hidden',name!=='wifi'||!canReprovision);$('rebindStep').classList.toggle('hidden',name!=='wifi'||!canReprovision);$('stepOne').classList.toggle('active',name==='wifi');$('stepTwo').classList.toggle('active',name!=='wifi');if(apActive&&name==='qr')$('network').textContent='Wi‑Fi đã chọn: '+$('wifiSsid').value;if(apActive&&name==='saving')$('network').textContent='Wi‑Fi: đang lưu và kết nối'}
+function showStep(name){$('savingStep').classList.remove('done');$('setupForm').classList.toggle('hidden',name!=='wifi');$('qrStep').classList.toggle('hidden',name!=='qr');$('savingStep').classList.toggle('hidden',name!=='saving');$('syncStep').classList.toggle('hidden',name!=='wifi'||!canReprovision);$('rebindStep').classList.toggle('hidden',name!=='wifi'||!canReprovision);$('stepOne').classList.toggle('active',name==='wifi');$('stepTwo').classList.toggle('active',name!=='wifi');if(apActive&&name==='qr')$('network').textContent='Wi‑Fi đã chọn: '+$('wifiSsid').value;if(apActive&&name==='saving')$('network').textContent='Wi‑Fi: đang lưu và kết nối'}
 function collect(){return{wifiSsid:$('wifiSsid').value.trim(),wifiPassword:$('wifiPassword').value,backendUrl:$('backendUrl').value.trim(),deviceCode:$('deviceCode').value.trim(),apiKey:$('apiKey').value,mqttHost:$('mqttHost').value.trim(),mqttPort:Number($('mqttPort').value),mqttUseTls:$('mqttUseTls').checked,mqttUsername:$('mqttUsername').value.trim(),mqttPassword:$('mqttPassword').value}}
 function storePending(body){try{localStorage.setItem(pendingKey,JSON.stringify({savedAt:Date.now(),config:body}));return true}catch{return false}}
 function readPending(){try{const raw=localStorage.getItem(pendingKey);if(!raw)return null;const value=JSON.parse(raw);if(Date.now()-Number(value.savedAt)<=pendingMaxAge)return value.config;localStorage.removeItem(pendingKey);return null}catch{try{localStorage.removeItem(pendingKey)}catch{}return null}}
 function clearPending(){try{localStorage.removeItem(pendingKey)}catch{}}
-function readProvisioningQr(raw){try{const url=new URL(raw.trim()),dc=url.searchParams.get('dc')||url.searchParams.get('deviceCode')||'',key=url.searchParams.get('key')||url.searchParams.get('apiKey')||'',api=url.searchParams.get('api')||url.searchParams.get('backendUrl')||'',mh=url.searchParams.get('mh')||url.searchParams.get('mqttHost')||'';if(!dc||!key)throw Error();if(api&&!/^https?:\/\//i.test(api))throw Error();return{dc,key,api,mh}}catch{throw Error('QR này không phải mã ghép thiết bị Solar BMS.')}}
+function readProvisioningQr(raw){const seen=String(raw||'').trim();if(!seen)throw Error('Không đọc được nội dung QR.');let url;try{url=new URL(seen)}catch{throw Error('QR không phải URL hợp lệ. Đọc được: '+seen.slice(0,160))}const dc=url.searchParams.get('dc')||url.searchParams.get('deviceCode')||'',key=url.searchParams.get('key')||url.searchParams.get('apiKey')||'',api=url.searchParams.get('api')||url.searchParams.get('backendUrl')||'',mh=url.searchParams.get('mh')||url.searchParams.get('mqttHost')||'';if(!dc||!key)throw Error('QR thiếu mã thiết bị hoặc API key. Đọc được: '+seen.slice(0,160));if(api&&!/^https?:\/\//i.test(api))throw Error("Backend URL trong QR phải bắt đầu bằng http:// hoặc https:// — đang là: "+api);return{dc,key,api,mh}}
 async function applyQr(raw){if(qrBusy)return;qrBusy=true;try{const code=readProvisioningQr(raw);$('deviceCode').value=code.dc;$('apiKey').value=code.key;const pending=readPending()||(hasIdentity?collect():null);if(!pending)throw Error('Thông tin Wi‑Fi tạm đã hết hạn. Hãy quay lại bước 1.');pending.deviceCode=code.dc;pending.apiKey=code.key;if(code.api)pending.backendUrl=code.api;if(code.mh)pending.mqttHost=code.mh;$('qrMessage').className='message ok';$('qrMessage').textContent='Đã nhận QR '+code.dc+'. Đang lưu cấu hình…';if(await saveConfig(pending))clearPending();else qrBusy=false}catch(err){$('qrMessage').className='message err';$('qrMessage').textContent=err.message;qrBusy=false}}
 function loadPreview(url){return new Promise((resolve,reject)=>{const image=$('qrPreview');image.onload=()=>resolve(image);image.onerror=()=>reject(Error('Không đọc được ảnh đã chọn'));image.src=url})}
 async function findQrInImage(image){const canvas=$('qrCanvas'),ctx=canvas.getContext('2d',{willReadFrequently:true}),maxSides=[2400,1800,1200];for(let pass=0;pass<maxSides.length;pass++){const scale=Math.min(1,maxSides[pass]/Math.max(image.naturalWidth,image.naturalHeight)),width=Math.max(1,Math.round(image.naturalWidth*scale)),height=Math.max(1,Math.round(image.naturalHeight*scale));canvas.width=width;canvas.height=height;ctx.drawImage(image,0,0,width,height);if(pass===0&&window.BarcodeDetector){try{const detector=new window.BarcodeDetector({formats:['qr_code']}),codes=await detector.detect(canvas);if(codes[0]&&codes[0].rawValue)return codes[0].rawValue}catch{}}const pixels=ctx.getImageData(0,0,width,height),normal=window.jsQR(pixels.data,width,height,{inversionAttempts:'attemptBoth'});if(normal)return normal.data;if(pass===1){for(const threshold of [88,120,152,184]){const bw=ctx.getImageData(0,0,width,height),data=bw.data;for(let i=0;i<data.length;i+=4){const light=(data[i]*77+data[i+1]*150+data[i+2]*29)>>8,value=light>=threshold?255:0;data[i]=value;data[i+1]=value;data[i+2]=value}const result=window.jsQR(data,width,height,{inversionAttempts:'attemptBoth'});if(result)return result.data}}}return''}
 async function decodeQrFile(file){if(!file||qrBusy)return;const status=$('qrMessage'),button=$('cameraButton'),url=URL.createObjectURL(file);qrBusy=true;button.disabled=true;status.className='message';status.textContent='Đang tìm mã QR trong ảnh…';try{if(file.size>12*1024*1024)throw Error('Ảnh lớn hơn 12 MB. Hãy chụp lại ở độ phân giải thấp hơn.');const image=await loadPreview(url);$('qrScanner').classList.remove('idle');const result=await findQrInImage(image);if(!result)throw Error('Không tìm thấy QR. Hãy đưa mã gần hơn, lấy trọn 4 góc và tránh phản chiếu màn hình.');status.className='message ok';status.textContent='Đã nhận diện QR. Đang kiểm tra…';qrBusy=false;await applyQr(result)}catch(err){status.className='message err';status.textContent=err.message;qrBusy=false;button.disabled=false}finally{setTimeout(()=>URL.revokeObjectURL(url),1000);$('qrImageInput').value=''}}
 function prepareQrCapture(){$('qrScanner').classList.add('idle');$('qrPreview').removeAttribute('src');$('qrMessage').className='message ok';$('qrMessage').textContent='Wi‑Fi đã kết nối thành công. Bây giờ có thể quét hoặc nhập QR.';$('cameraButton').disabled=false}
 async function verifyWifi(body){msg.className='message';msg.textContent='ESP32 đang kết nối và kiểm tra Wi‑Fi…';const started=await fetch('/api/wifi/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({wifiSsid:body.wifiSsid,wifiPassword:body.wifiPassword})}),startBody=await started.json();if(!started.ok)throw Error(startBody.error||('HTTP '+started.status));for(let attempt=0;attempt<45;attempt++){await new Promise(resolve=>setTimeout(resolve,800));try{const response=await fetch('/api/wifi/check',{cache:'no-store'}),status=await response.json();if(status.connected){msg.className='message ok';msg.textContent='Đã kết nối Wi‑Fi '+status.ssid+'. Có thể tiếp tục ghép thiết bị.';return}if(!status.connecting){const failure=Error(status.error||'ESP32 không kết nối được Wi‑Fi đã chọn.');failure.name='WifiRejected';throw failure}}catch(error){if(error.name==='WifiRejected')throw error;/* AP có thể đổi kênh theo STA; chờ điện thoại nối lại rồi poll tiếp. */}}throw Error('Kiểm tra Wi‑Fi quá thời gian. Hãy kiểm tra mật khẩu rồi thử lại.')}
-async function saveConfig(body){showStep('saving');try{const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const out=await r.json();if(!r.ok)throw Error(out.error||('HTTP '+r.status));$('savingTitle').textContent='Đã lưu thành công';$('savingText').textContent='ESP32 đang khởi động lại, kết nối Wi‑Fi và tự provision với backend.';return true}catch(err){showStep('wifi');msg.className='message err';msg.textContent='Lưu thất bại: '+err.message;$('continueButton').disabled=false;return false}}
-async function reprovision(){if(!confirm('Đồng bộ lại cấu hình pin và khởi động ESP32?'))return;const button=$('syncButton');button.disabled=true;$('syncMessage').className='message';$('syncMessage').textContent='Đang gửi yêu cầu…';try{const r=await fetch('/api/reprovision',{method:'POST'}),out=await r.json();if(!r.ok)throw Error(out.error||('HTTP '+r.status));$('savingTitle').textContent='Đang đồng bộ cấu hình pin…';$('savingText').textContent='ESP32 đang khởi động lại. Wi‑Fi và mã IoT vẫn được giữ nguyên.';showStep('saving')}catch(err){$('syncMessage').className='message err';$('syncMessage').textContent='Không thể đồng bộ: '+err.message;button.disabled=false}}
-async function prepareNewPairing(){if(!confirm('Xóa liên kết IoT hiện tại và quét QR của IoT mới? Wi‑Fi sẽ được giữ lại.'))return;const button=$('newPairingButton');button.disabled=true;$('newPairingMessage').className='message';$('newPairingMessage').textContent='Đang xóa dữ liệu IoT cũ…';try{const r=await fetch('/api/new-pairing',{method:'POST'}),out=await r.json();if(!r.ok)throw Error(out.error||('HTTP '+r.status));$('savingTitle').textContent='Đã đưa về chế độ ghép mới';$('savingText').textContent='ESP32 đang khởi động lại. Kết nối lại SolarGW-xxxx, chọn Wi‑Fi rồi chụp QR của IoT mới.';showStep('saving')}catch(err){$('newPairingMessage').className='message err';$('newPairingMessage').textContent='Không thể đưa về ban đầu: '+err.message;button.disabled=false}}
+async function saveConfig(body){showStep('saving');try{const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const out=await r.json();if(!r.ok)throw Error(out.error||('HTTP '+r.status));$('savingStep').classList.add('done');$('savingTitle').textContent='Đã lưu thành công';$('savingText').textContent='ESP32 đang khởi động lại, kết nối Wi‑Fi và tự provision với backend.';return true}catch(err){showStep('wifi');msg.className='message err';msg.textContent='Lưu thất bại: '+err.message;$('continueButton').disabled=false;return false}}
+async function reprovision(){if(!confirm('Đồng bộ lại cấu hình pin và khởi động ESP32?'))return;const button=$('syncButton');button.disabled=true;$('syncMessage').className='message';$('syncMessage').textContent='Đang gửi yêu cầu…';try{const r=await fetch('/api/reprovision',{method:'POST'}),out=await r.json();if(!r.ok)throw Error(out.error||('HTTP '+r.status));showStep('saving');$('savingStep').classList.add('done');$('savingTitle').textContent='Đã nhận lệnh đồng bộ';$('savingText').textContent='ESP32 đang khởi động lại. Wi‑Fi và mã IoT vẫn được giữ nguyên.'}catch(err){$('syncMessage').className='message err';$('syncMessage').textContent='Không thể đồng bộ: '+err.message;button.disabled=false}}
+async function prepareNewPairing(){if(!confirm('Xóa liên kết IoT hiện tại và quét QR của IoT mới? Wi‑Fi sẽ được giữ lại.'))return;const button=$('newPairingButton');button.disabled=true;$('newPairingMessage').className='message';$('newPairingMessage').textContent='Đang xóa dữ liệu IoT cũ…';try{const r=await fetch('/api/new-pairing',{method:'POST'}),out=await r.json();if(!r.ok)throw Error(out.error||('HTTP '+r.status));showStep('saving');$('savingStep').classList.add('done');$('savingTitle').textContent='Đã đưa về chế độ ghép mới';$('savingText').textContent='ESP32 đang khởi động lại. Kết nối lại SolarGW-xxxx, chọn Wi‑Fi rồi chụp QR của IoT mới.'}catch(err){$('newPairingMessage').className='message err';$('newPairingMessage').textContent='Không thể đưa về ban đầu: '+err.message;button.disabled=false}}
 async function load(){try{const r=await fetch('/api/config',{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const c=await r.json();
 for(const k of ['wifiSsid','backendUrl','deviceCode','mqttHost','mqttPort','mqttUsername'])$(k).value=c[k]??'';$('mqttUseTls').checked=!!c.mqttUseTls;apActive=!!c.apActive;hasIdentity=!!(c.hasApiKey&&c.deviceCode);$('continueButton').textContent=hasIdentity?'Kiểm tra và lưu Wi‑Fi mới':((qrDeviceCode&&qrApiKey)?'Kiểm tra Wi‑Fi và lưu':'Kiểm tra Wi‑Fi rồi quét QR →');
 if(qrBackendUrl)$('backendUrl').value=qrBackendUrl;if(qrMqttHost)$('mqttHost').value=qrMqttHost;
@@ -192,11 +201,10 @@ $('network').textContent=c.stationConnected?'Wi‑Fi: đã kết nối':'Wi‑Fi
 canReprovision=hasIdentity;$('syncStep').classList.toggle('hidden',!canReprovision);$('rebindStep').classList.toggle('hidden',!canReprovision);if(hasIdentity){$('flowLead').textContent='Thiết bị đã ghép. Bạn có thể đổi Wi‑Fi mà không cần quét QR lại.';$('stepTwo').querySelector('b').textContent='Giữ mã IoT';$('stepTwo').querySelector('small').textContent='Không cần QR';msg.className='message ok';msg.textContent='Chế độ đổi Wi‑Fi: mã thiết bị và API key sẽ được giữ nguyên.'}
 if(qrDeviceCode&&qrApiKey){$('deviceCode').value=qrDeviceCode;$('apiKey').value=qrApiKey;const pending=readPending();if(pending){pending.deviceCode=qrDeviceCode;pending.apiKey=qrApiKey;if(qrBackendUrl)pending.backendUrl=qrBackendUrl;if(qrMqttHost)pending.mqttHost=qrMqttHost;if(await saveConfig(pending))clearPending();return}msg.className='message ok';msg.textContent='Đã nhận QR '+qrDeviceCode+'. Chọn Wi‑Fi rồi tiếp tục để lưu.';}
 }catch(e){msg.className='message err';msg.textContent='Không đọc được cấu hình: '+e.message}}
-async function loadNetworks(){const button=$('scanButton');button.disabled=true;button.textContent='Đang quét…';try{const r=await fetch('/api/networks',{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const out=await r.json(),seen=new Set(),dataList=$('wifiNetworks'),visibleList=$('wifiList');dataList.replaceChildren();visibleList.replaceChildren();for(const n of out.networks||[]){if(!n.ssid||seen.has(n.ssid))continue;seen.add(n.ssid);const option=document.createElement('option');option.value=n.ssid;option.label=(n.secure?'🔒 ':'')+n.rssi+' dBm';dataList.appendChild(option);const choice=document.createElement('button'),name=document.createElement('span'),signal=document.createElement('span');choice.type='button';choice.className='secondary network-option';name.textContent=(n.secure?'🔒 ':'')+n.ssid;signal.textContent=n.rssi+' dBm';choice.appendChild(name);choice.appendChild(signal);choice.addEventListener('click',()=>{$('wifiSsid').value=n.ssid;for(const item of visibleList.children)item.classList.remove('selected');choice.classList.add('selected')});visibleList.appendChild(choice);}}catch(e){msg.className='message err';msg.textContent='Không quét được Wi‑Fi: '+e.message}finally{button.disabled=false;button.textContent='Quét lại mạng Wi‑Fi'}}
 $('setupForm').addEventListener('submit',async e=>{e.preventDefault();const body=collect(),button=$('continueButton');button.disabled=true;try{await verifyWifi(body);if(hasIdentity||(qrDeviceCode&&qrApiKey)){await saveConfig(body);return}if(!storePending(body))throw Error('Trình duyệt không cho lưu tạm Wi‑Fi. Hãy bật lưu trữ trang web rồi thử lại.');showStep('qr');button.disabled=false;prepareQrCapture()}catch(error){msg.className='message err';msg.textContent='Không thể tiếp tục: '+error.message;button.disabled=false}});
 const scanWait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function renderNetworkResults(items){const seen=new Set(),dataList=$('wifiNetworks'),visibleList=$('wifiList');dataList.replaceChildren();visibleList.replaceChildren();for(const n of items||[]){if(!n.ssid||seen.has(n.ssid))continue;seen.add(n.ssid);const option=document.createElement('option');option.value=n.ssid;option.label=(n.secure?'🔒 ':'')+n.rssi+' dBm';dataList.appendChild(option);const choice=document.createElement('button'),name=document.createElement('span'),signal=document.createElement('span');choice.type='button';choice.className='secondary network-option';name.textContent=(n.secure?'🔒 ':'')+n.ssid;signal.textContent=n.rssi+' dBm';choice.appendChild(name);choice.appendChild(signal);choice.addEventListener('click',()=>{$('wifiSsid').value=n.ssid;for(const item of visibleList.children)item.classList.remove('selected');choice.classList.add('selected')});visibleList.appendChild(choice)}return seen.size}
-async function loadNetworksRobust(){const button=$('scanButton');button.disabled=true;button.textContent='Đang quét…';try{for(let attempt=0;attempt<20;attempt++){const response=await fetch('/api/networks',{cache:'no-store'}),out=await response.json();if(response.status===202||out.scanning){await scanWait(700);continue}if(!response.ok)throw Error(out.error||('HTTP '+response.status));const count=renderNetworkResults(out.networks);if(count===0){msg.className='message';msg.textContent='Chưa tìm thấy mạng 2.4 GHz. Bạn vẫn có thể nhập SSID thủ công.'}return}throw Error('Quét Wi‑Fi quá thời gian. Hãy thử lại hoặc nhập SSID thủ công.')}catch(e){msg.className='message err';msg.textContent='Không quét được Wi‑Fi: '+e.message+' Bạn vẫn có thể nhập SSID thủ công.'}finally{button.disabled=false;button.textContent='Quét lại mạng Wi‑Fi'}}
+async function loadNetworksRobust(){const button=$('scanButton');button.disabled=true;button.textContent='Đang quét…';let netErr=0;try{for(let attempt=0;attempt<40;attempt++){let response,out;try{response=await fetch('/api/networks',{cache:'no-store'});out=await response.json()}catch(err){if(++netErr>12)throw Error('Mất kết nối tới thiết bị khi đang quét. Hãy nối lại Wi-Fi SolarGW rồi bấm quét lại.');await scanWait(600);continue}netErr=0;if(response.status===202||out.scanning){await scanWait(350);continue}if(!response.ok)throw Error(out.error||('HTTP '+response.status));const count=renderNetworkResults(out.networks);if(count===0){msg.className='message';msg.textContent='Chưa tìm thấy mạng 2.4 GHz. Bạn vẫn có thể nhập SSID thủ công.'}return}throw Error('Quét Wi‑Fi quá thời gian. Hãy thử lại hoặc nhập SSID thủ công.')}catch(e){msg.className='message err';msg.textContent='Không quét được Wi‑Fi: '+e.message+' Bạn vẫn có thể nhập SSID thủ công.'}finally{button.disabled=false;button.textContent='Quét lại mạng Wi‑Fi'}}
 $('scanButton').addEventListener('click',loadNetworksRobust);$('cameraButton').addEventListener('click',()=>$('qrImageInput').click());$('qrImageInput').addEventListener('change',event=>decodeQrFile(event.target.files&&event.target.files[0]));$('applyQrButton').addEventListener('click',()=>applyQr($('qrText').value));$('backButton').addEventListener('click',()=>showStep('wifi'));$('syncButton').addEventListener('click',reprovision);$('newPairingButton').addEventListener('click',prepareNewPairing);load().then(loadNetworksRobust);
 </script></main></body></html>)HTML";
 
@@ -233,8 +241,8 @@ void handleGetConfig() {
   document["deviceCode"] = identity::deviceCode();
   document["hasApiKey"] = identity::apiKey()[0] != '\0';
   document["mqttHost"] = mqttcfg::host();
-  document["mqttPort"] = MQTT_BROKER_PORT;
-  document["mqttUseTls"] = MQTT_USE_TLS != 0;
+  document["mqttPort"] = mqttcfg::port();
+  document["mqttUseTls"] = mqttcfg::brokerWantsTls();
   document["mqttUsername"] = mqttcfg::username();
   document["hasMqttPassword"] = mqttcfg::password()[0] != '\0';
   document["stationConnected"] = WiFi.status() == WL_CONNECTED;
@@ -242,6 +250,8 @@ void handleGetConfig() {
   document["apActive"] = net::portalIsActive();
   document["apIp"] = net::portalIsActive() ? WiFi.softAPIP().toString() : "";
   document["setupPort"] = CONFIG_PORTAL_PORT;
+  // Kỹ thuật viên cần biết máy đang chạy bản nào TRƯỚC khi quyết định nạp đè.
+  document["fwVersion"] = FW_VERSION;
   sendJson(200, document);
 }
 
@@ -285,8 +295,17 @@ void handleGetNetworks() {
   // No result is available yet (WIFI_SCAN_FAILED is also the initial state).
   // Start an asynchronous scan so the HTTP handler does not block the AP
   // client while the radio visits the 2.4 GHz channels.
+  //
+  // One radio, two users: net::wifiTick() retries WiFi.disconnect()/begin() on its own
+  // task and would abort this scan a moment after it starts. Hold it off first, then
+  // leave the association state — the driver refuses esp_wifi_scan_start while the STA
+  // is handshaking. Scanning while already connected is legal, so keep that link up.
+  net::wifiHoldReconnect(kScanHoldReconnectMs);
+  if (WiFi.status() != WL_CONNECTED) WiFi.disconnect(false, false);
+
   WiFi.scanDelete();
-  const int startState = WiFi.scanNetworks(true, true);
+  // Fast async scan: show_hidden=false, passive=false, 120ms max dwell time per channel
+  const int startState = WiFi.scanNetworks(true, false, false, 120);
   if (startState == WIFI_SCAN_FAILED) {
     // The ESP32 driver rejects scans briefly while STA is associating or
     // changing channel. This is transient: report pending so the browser
@@ -399,7 +418,10 @@ void handleSaveConfig() {
   const char* mqttHost = document["mqttHost"] | "";
   const char* mqttUsername = document["mqttUsername"] | "";
   const char* mqttPassword = document["mqttPassword"] | "";
-  const int mqttPort = MQTT_BROKER_PORT;
+  // Thiếu trường thì giữ nguyên giá trị đang chạy — trang cũ còn trong cache trình duyệt
+  // vẫn phải POST được mà không vô tình kéo thiết bị về mặc định compile-time.
+  const int  mqttPort   = document["mqttPort"]   | mqttcfg::port();
+  const bool mqttUseTls = document["mqttUseTls"] | mqttcfg::brokerWantsTls();
   const bool receivedApiKey = apiKey[0] != '\0';
 
   if (wifiSsid[0] == '\0' || backendUrl[0] == '\0' || deviceCode[0] == '\0' ||
@@ -423,10 +445,13 @@ void handleSaveConfig() {
     sendError(400, "Backend URL phải bắt đầu bằng http:// hoặc https://");
     return;
   }
-  // TLS and its public broker port are compile-time properties of this
-  // production transport. Ignore stale values from cached pages/legacy QR;
-  // accepting mp=1883 while MQTT_USE_TLS=1 makes WiFiClientSecure attempt a
-  // TLS handshake against the plain listener and can never succeed.
+  if (!core::mqttPortUsable(mqttPort)) {
+    sendError(400, "Cổng MQTT ngoài dải [1,65535]");
+    return;
+  }
+  // Port và TLS nay là cấu hình LÚC CHẠY: mqtt_client giữ sẵn cả WiFiClientSecure lẫn
+  // WiFiClient rồi chọn theo mqttcfg::brokerWantsTls(). Nhờ vậy một bản firmware phục vụ
+  // được cả hai môi trường — đổi env không còn phải nạp lại firmware.
 
   // Password fields are write-only. Với Wi-Fi, chỉ giữ mật khẩu cũ khi SSID
   // không đổi; SSID mới + password rỗng phải thực sự là mạng mở, không được
@@ -449,15 +474,34 @@ void handleSaveConfig() {
     return;
   }
 
-  if (!wificfg::save(wifiSsid, nextWifiPassword) ||
-      !runtimecfg::saveBackendUrl(backendUrl) ||
-      !identity::setDeviceCode(deviceCode) ||
-      (apiKey[0] != '\0' && !identity::setApiKey(apiKey)) ||
-      !mqttcfg::setBroker(mqttHost, mqttPort) ||
-      !mqttcfg::setCredential(nextMqttUsername, nextMqttPassword) ||
-      !mqttcfg::setTopicPrefix(topicPrefix) ||
-      (receivedApiKey && !provision::clearProvisionFlag())) {
-    sendError(500, "Không ghi được cấu hình vào NVS");
+  // Username/mật khẩu MQTT do BACKEND cấp lúc provision, không phải kỹ thuật viên nhập. Ở
+  // bước lưu tại portal chúng THƯỜNG CÒN RỖNG (fallback compile-time cũng là chuỗi rỗng), mà
+  // setCredential từ chối chuỗi rỗng — gọi vô điều kiện là làm hỏng cả lượt lưu của một thiết
+  // bị hoàn toàn bình thường. Rỗng ở đây nghĩa là "chưa có gì để ghi", không phải lỗi.
+  const bool hasMqttCredential =
+      nextMqttUsername[0] != '\0' && nextMqttPassword[0] != '\0';
+
+  // Từng bước một, mỗi bước một thông điệp riêng. Trước đây chín phép ghi gộp vào một chuỗi
+  // `||` rồi trả đúng một câu "Không ghi được cấu hình vào NVS" — đọc xong không biết trường
+  // nào hỏng, phải cắm serial mới truy ra.
+  const char* failed = nullptr;
+  if (!wificfg::save(wifiSsid, nextWifiPassword))          failed = "Wi-Fi";
+  else if (!runtimecfg::saveBackendUrl(backendUrl))        failed = "Backend URL";
+  else if (!identity::setDeviceCode(deviceCode))           failed = "Device code";
+  else if (apiKey[0] != '\0' && !identity::setApiKey(apiKey)) failed = "API key";
+  else if (!mqttcfg::setBroker(mqttHost, mqttPort))        failed = "MQTT host/port";
+  else if (!mqttcfg::setUseTls(mqttUseTls))                failed = "MQTT TLS";
+  else if (hasMqttCredential &&
+           !mqttcfg::setCredential(nextMqttUsername, nextMqttPassword))
+                                                          failed = "MQTT credential";
+  else if (!mqttcfg::setTopicPrefix(topicPrefix))          failed = "MQTT topic prefix";
+  else if (receivedApiKey && !provision::clearProvisionFlag()) failed = "co provision";
+
+  if (failed != nullptr) {
+    char message[96];
+    snprintf(message, sizeof(message), "Khong ghi duoc vao NVS: %s", failed);
+    Serial.printf("[portal] LUU THAT BAI o buoc: %s\n", failed);
+    sendError(500, message);
     return;
   }
 
@@ -533,6 +577,116 @@ void handlePrepareNewPairing() {
   Serial.println("[portal] old IoT data cleared; new QR pairing scheduled");
 }
 
+// ---- Nạp firmware thủ công qua SoftAP ----
+//
+// Đây là đường HOÀN TOÀN CỤC BỘ: điện thoại → ESP32. Không gọi backend, không báo cáo
+// trạng thái, không đụng `ota/ota_update.cpp` (đường kéo .bin từ backend, vẫn chạy song
+// song). Cũng không đặt cờ `otaPend`: verify-mode và rollback của đường kia cần backend
+// xác nhận khoẻ, mà thiết bị nạp qua SoftAP có thể còn chưa provision.
+//
+// ⚠ Không có đường lùi tự động. Bản .bin nào không dựng nổi SoftAP thì mất luôn đường
+//   cứu qua điện thoại, phải cắm USB. Client PHẢI cảnh báo người dùng trước khi nạp.
+char   s_otaError[112]{};
+size_t s_otaBytes = 0;
+bool   s_otaRunning = false;
+
+void otaFail(const char* message) {
+  snprintf(s_otaError, sizeof(s_otaError), "%s", message);
+  if (s_otaRunning) {
+    Update.abort();
+    s_otaRunning = false;
+  }
+  Serial.printf("[portal] OTA LOI: %s\n", s_otaError);
+}
+
+void handleOtaUpload() {
+  HTTPUpload& upload = s_server.upload();
+
+  if (upload.status == UPLOAD_FILE_START) {
+    s_otaError[0] = '\0';
+    s_otaBytes = 0;
+    s_otaRunning = false;
+
+    // Xác thực NGAY tại đây chứ không đợi handler kết thúc: handler ấy chỉ chạy SAU khi
+    // toàn bộ thân request đã được ghi vào flash. Kiểm tra ở đó là kiểm tra quá muộn.
+    if (!s_server.authenticate(CONFIG_PORTAL_USER, CONFIG_PORTAL_PASSWORD)) {
+      snprintf(s_otaError, sizeof(s_otaError), "Chua xac thuc");
+      return;
+    }
+
+    net::wifiHoldReconnect(kOtaHoldReconnectMs);
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
+      snprintf(s_otaError, sizeof(s_otaError), "Update.begin: %s", Update.errorString());
+      return;
+    }
+    s_otaRunning = true;
+    Serial.printf("[portal] OTA bat dau — file=%s\n", upload.filename.c_str());
+    return;
+  }
+
+  if (s_otaError[0] != '\0') return;   // đã hỏng ở bước trước — nuốt phần còn lại
+
+  switch (upload.status) {
+    case UPLOAD_FILE_WRITE:
+      if (!s_otaRunning) return;
+      // Ảnh ESP32 luôn mở đầu bằng magic 0xE9. Chặn ngay byte đầu rẻ hơn nhiều so với
+      // phát hiện sau khi đã ghi hơn một megabyte rác đè lên phân vùng.
+      if (s_otaBytes == 0 &&
+          (upload.currentSize == 0 || upload.buf[0] != 0xE9)) {
+        otaFail("File khong phai firmware ESP32 (thieu magic 0xE9)");
+        return;
+      }
+      net::wifiHoldReconnect(kOtaHoldReconnectMs);
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+        otaFail(Update.errorString());
+        return;
+      }
+      s_otaBytes += upload.currentSize;
+      return;
+
+    case UPLOAD_FILE_END:
+      if (!s_otaRunning) return;
+      if (!Update.end(true)) {   // flush + esp_ota_set_boot_partition
+        otaFail(Update.errorString());
+        return;
+      }
+      s_otaRunning = false;
+      Serial.printf("[portal] OTA ghi xong %u byte\n",
+                    static_cast<unsigned>(s_otaBytes));
+      return;
+
+    case UPLOAD_FILE_ABORTED:
+      // Rớt Wi-Fi giữa chừng. Boot partition CHƯA bị đổi (chỉ Update.end mới đổi), nên
+      // thiết bị vẫn lên bằng firmware cũ và portal vẫn dùng được để nạp lại.
+      otaFail("Upload bi ngat giua chung");
+      return;
+
+    default:
+      return;
+  }
+}
+
+void handleOtaDone() {
+  if (!authenticated()) return;
+  if (s_otaError[0] != '\0') {
+    sendError(400, s_otaError);
+    return;
+  }
+  if (s_otaBytes == 0) {
+    sendError(400, "Khong nhan duoc du lieu firmware");
+    return;
+  }
+
+  JsonDocument response;
+  response["ok"] = true;
+  response["bytes"] = s_otaBytes;
+  response["restarting"] = true;
+  sendJson(200, response);
+  s_restartPending = true;
+  s_restartAtMs = millis() + 1500;
+  Serial.println("[portal] OTA hoan tat; restart scheduled");
+}
+
 void startMdnsIfPossible() {
   if (s_mdnsStarted || WiFi.status() != WL_CONNECTED) return;
   if (MDNS.begin(CONFIG_PORTAL_HOSTNAME)) {
@@ -578,6 +732,7 @@ void setupPortalBegin() {
   s_server.on("/api/config", HTTP_POST, handleSaveConfig);
   s_server.on("/api/reprovision", HTTP_POST, handleReprovision);
   s_server.on("/api/new-pairing", HTTP_POST, handlePrepareNewPairing);
+  s_server.on("/api/ota", HTTP_POST, handleOtaDone, handleOtaUpload);
   s_server.onNotFound([]() {
     if (!authenticated()) return;
     s_server.sendHeader("Location", "/", true);

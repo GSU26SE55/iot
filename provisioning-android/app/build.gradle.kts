@@ -16,6 +16,10 @@ android {
 
     buildTypes {
         release {
+            // ponytail: ký bằng debug keystore. APK này chỉ phát cho kỹ thuật viên và phải
+            // cài đè được bản debug đang có trên máy (cùng chữ ký). Tạo keystore riêng khi
+            // nào phát hành ra ngoài, không sớm hơn.
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

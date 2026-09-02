@@ -25,7 +25,7 @@ inline constexpr RgbColor paletteForState(LedState s) {
   switch (s) {
     case LedState::Off:           return { 0,  0,  0};
     case LedState::Online:        return { 0, 32,  0};   // xanh lá
-    case LedState::Queued:        return { 0, 32,  0};   // xanh lá — phân biệt bằng NHÁY
+    case LedState::Queued:        return { 0, 32,  0};   // xanh lá đứng im như Online
     case LedState::Offline:       return {32,  0,  0};   // đỏ
     case LedState::Provisioning:  return {16,  0, 32};   // tím (R+B)
     case LedState::Setup:         return {16,  0, 32};   // tím — phân biệt bằng NHÁY
@@ -45,13 +45,11 @@ inline constexpr RgbColor secondaryPaletteForState(LedState s) {
 
 /// <summary>Kiểu nhấp nháy của từng trạng thái.</summary>
 /// <remarks>
-/// Ba trạng thái NHÁY đều là "cần người xử lý": còn hàng đợi, chưa cấu hình, mất mạng lâu.
-/// Hai trạng thái SÁNG ĐỀU là "cứ để yên": đang chạy tốt, hoặc đang tự provision.
-/// Quy ước này giúp nói qua điện thoại được: "đèn có nháy không?" trước cả khi hỏi màu gì.
+/// Queue đang tự đẩy không cần người xử lý nên dùng xanh đứng im như Online.
+/// Chỉ Setup và Recovery nháy để báo trạng thái cần can thiệp.
 /// </remarks>
 inline constexpr LedPattern patternForState(LedState s) {
   switch (s) {
-    case LedState::Queued:   return LedPattern::Blink;
     case LedState::Setup:    return LedPattern::Blink;
     case LedState::Recovery: return LedPattern::Alternate;
     default:                 return LedPattern::Solid;

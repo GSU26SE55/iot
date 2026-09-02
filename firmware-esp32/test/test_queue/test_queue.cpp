@@ -117,6 +117,18 @@ void test_resolve_collision_multiple_bumps() {
   TEST_ASSERT_EQUAL(103u, queue::resolveCollision(100, existing, 4));
 }
 
+void test_remove_epoch_updates_ram_index_without_storage_scan() {
+  uint32_t epochs[] = {100, 200, 300, 400};
+  size_t count = 4;
+
+  TEST_ASSERT_TRUE(queue::removeEpoch(epochs, &count, 200));
+  TEST_ASSERT_EQUAL(3, static_cast<int>(count));
+  TEST_ASSERT_EQUAL(100u, queue::findOldestEpoch(epochs, count));
+  TEST_ASSERT_EQUAL(400u, queue::findNewestEpoch(epochs, count));
+  TEST_ASSERT_FALSE(queue::removeEpoch(epochs, &count, 999));
+  TEST_ASSERT_EQUAL(3, static_cast<int>(count));
+}
+
 // ─── Tests core S3-FW-01 AC ─────────────────────────────────────────
 
 void test_enqueue_within_capacity() {
@@ -217,6 +229,7 @@ int main(int, char**) {
   RUN_TEST(test_resolve_collision_no_conflict);
   RUN_TEST(test_resolve_collision_bump);
   RUN_TEST(test_resolve_collision_multiple_bumps);
+  RUN_TEST(test_remove_epoch_updates_ram_index_without_storage_scan);
   // AC tests
   RUN_TEST(test_enqueue_within_capacity);
   RUN_TEST(test_enqueue_200_then_201st_drops_oldest);   // ★ S3-FW-01 AC chính

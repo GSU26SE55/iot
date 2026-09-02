@@ -8,10 +8,13 @@
 // Đây là mấu chốt của Phương án A: trước đây bốn giá trị này nhúng cứng trong config.h nên MỖI
 // THIẾT BỊ MỘT BẢN BUILD. Nay backend cấp lúc chạy, kỹ thuật viên chỉ còn nạp deviceCode + apiKey.
 //
-// ⚠️ TLS vẫn là COMPILE-TIME (`MQTT_USE_TLS`), KHÔNG runtime — quyết định Q2 của sprint.
-//    Lý do: `WiFiClientSecure` và `WiFiClient` là HAI KIỂU khác nhau, chọn lúc biên dịch qua
-//    `#if` trong mqtt_client.cpp. Runtime hoá chỉ để đổi một cờ là không đáng. Trường `useTls`
-//    backend gửi xuống vẫn được LƯU và ĐỐI CHIẾU để cảnh báo khi lệch với bản build.
+// TLS nay là RUNTIME cùng với host/port (thay cho quyết định Q2 cũ). `mqtt_client.cpp` giữ
+// sẵn CẢ `WiFiClientSecure` LẪN `WiFiClient` rồi gọi `PubSubClient::setClient()` theo
+// `brokerWantsTls()`. Nhờ vậy MỘT bản firmware chạy được cả broker plain (dev) lẫn broker TLS
+// (production) — đổi môi trường là ghi NVS rồi reboot, không phải build lại.
+//
+// `MQTT_USE_TLS` trong config.h vẫn còn, nhưng chỉ với vai trò FALLBACK khi NVS trống —
+// đúng như MQTT_BROKER_HOST/PORT/USERNAME/PASSWORD.
 // ==================================================================
 #pragma once
 #include <cstddef>
@@ -31,7 +34,7 @@ void begin();
 
 const char* host();
 int         port();
-/// Giá trị `useTls` backend gửi xuống. CHỈ để đối chiếu — đường TLS thật do `MQTT_USE_TLS` quyết.
+/// Cờ TLS đang áp dụng. `mqtt_client` chọn lớp vận chuyển theo đúng giá trị này lúc chạy.
 bool        brokerWantsTls();
 const char* username();
 const char* password();
@@ -71,6 +74,9 @@ bool applyFromProvision(const char* newHost, int newPort, bool newUseTls,
 
 /// Đặt tay từng phần qua Serial CLI. Trả true nếu ghi được.
 bool setBroker(const char* newHost, int newPort);
+/// Đổi lớp vận chuyển (plain ↔ TLS). Caller phải gọi `net::mqttApplyConfig()` sau đó để
+/// phiên đang chạy được dựng lại — đổi cờ mà không nối lại thì vẫn đang nói bằng lớp cũ.
+bool setUseTls(bool useTls);
 bool setCredential(const char* user, const char* pass);
 bool setTopicPrefix(const char* prefix);
 
