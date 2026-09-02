@@ -287,7 +287,13 @@
 #define BACKEND_AMBIENT_PATH "/api/ambient/readings/batch"
 // Nhịp gửi báo cáo môi trường GỘP (nhiệt độ + khí gas + rò nước trong một request).
 // Một đồng hồ chung cho cả ba: ba đồng hồ riêng sẽ trôi lệch nhau và đẻ ba hàng rời rạc.
-#define AMBIENT_POST_INTERVAL_MS 15000UL
+#define AMBIENT_POST_INTERVAL_MS 15000UL    // heartbeat: nhip gui khi khong co bien dong
+// Gui NGAY khi so do nhay qua nguong duoi day, khong doi het heartbeat. Thiet bi KHONG biet
+// nguong canh bao (do backend giu) — no chi bao "co bien dong", con canh bao hay khong la viec
+// cua `AmbientThresholdConfig`.
+#define AMBIENT_MIN_POST_INTERVAL_MS 2000UL // san chong doi: khong bao gio gui day hon muc nay
+#define AMBIENT_TEMP_DELTA_C     1.0f       // lech >= 1.0 C so voi lan gui truoc -> gui ngay
+#define AMBIENT_GAS_DELTA_PCT    5          // lech >= 5 % -> gui ngay
 
 // ============== Sprint 6 — Environmental incidents (S6-FW-01/02) =================
 //

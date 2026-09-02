@@ -122,15 +122,8 @@ void begin() {
                 s_fromNvs ? "NVS" : "compile-time",
                 isConfigured() ? "có" : "KHÔNG");
 
-  // Quyết định Q2: TLS là compile-time. Nếu backend bảo khác thì phải nói to — nối sai lớp
-  // vận chuyển sẽ thất bại ở tầng TCP với thông báo rất khó truy.
-  const bool buildTls = (MQTT_USE_TLS != 0);
-  if (s_wantTls != buildTls) {
-    Serial.printf("[mqttcfg] ⚠ LỆCH TLS — backend muốn %s nhưng firmware build với MQTT_USE_TLS=%d.\n",
-                  s_wantTls ? "TLS" : "plain", MQTT_USE_TLS);
-    Serial.println("[mqttcfg]   Đường TLS do compile-time quyết (Q2). Phải build lại firmware "
-                   "cho khớp, hoặc sửa Mqtt__UseTls ở backend.");
-  }
+  // Không còn cảnh báo "lệch TLS": kể từ khi mqtt_client chọn lớp vận chuyển lúc chạy
+  // theo brokerWantsTls(), giá trị này KHÔNG thể lệch với bản build được nữa.
 }
 
 const char* host()          { return s_host; }
@@ -240,6 +233,15 @@ bool setBroker(const char* newHost, int newPort) {
   return true;
 }
 
+bool setUseTls(bool useTls) {
+  if (s_wantTls == useTls && storage::nvsHasKey(kKeyTls)) return true;
+  if (!storage::nvsPutUInt8(kKeyTls, useTls ? 1 : 0)) return false;
+  s_wantTls = useTls;
+  s_fromNvs = true;
+  Serial.printf("[mqttcfg] TLS → %d\n", s_wantTls ? 1 : 0);
+  return true;
+}
+
 bool setCredential(const char* user, const char* pass) {
   const auto userErr = core::validateIdentityField(user, kUserBufLen);
   if (userErr != core::IdentityFieldError::Ok) {
@@ -294,7 +296,8 @@ bool clear() {
 void printStatus() {
   Serial.println("==== MQTT config ====");
   Serial.printf("  host      = %s:%d (%s)\n", s_host, s_port, s_fromNvs ? "NVS" : "compile-time");
-  Serial.printf("  tls       = build:%d / backend muốn:%d\n", MQTT_USE_TLS, s_wantTls ? 1 : 0);
+  Serial.printf("  tls       = %d (fallback lúc build:%d)\n",
+                s_wantTls ? 1 : 0, MQTT_USE_TLS);
   Serial.printf("  username  = %s\n", s_user);
   Serial.printf("  mật khẩu  = %s\n", s_pass[0] == '\0' ? "(rỗng)" : "***");
   Serial.printf("  prefix    = %s\n", topicPrefix());

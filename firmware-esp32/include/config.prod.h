@@ -86,7 +86,7 @@
 #define I2C_FREQUENCY_HZ     100000UL
 
 // --------- HS0724 microSD (SPI, 3.3V only) ---------
-#define SD_CARD_ENABLED      1
+#define SD_CARD_ENABLED      0
 #define SD_CS_PIN            14
 #define SD_MOSI_PIN          5
 #define SD_SCK_PIN           21

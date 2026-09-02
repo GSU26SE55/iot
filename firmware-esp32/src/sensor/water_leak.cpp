@@ -101,42 +101,10 @@ void waterLeakTick() {
   }
   s_hasSample = true;
 
-  // Cạnh khô→ướt → cần report (1 lần / cooldown).
+  // Cạnh khô→ướt ghi nhận trạng thái để telemetry gửi WaterLeak lên backend
   if (s_trigger.update(s_wet, now)) {
-    s_pendingReport = true;
-    s_pendingDetectedMs = now;
-    // GH-741 — sự cố MỚI phải được báo NGAY, không chờ hết backoff của lần trước.
-    // Đây là cảm biến an toàn: bắt một xung khí mới đợi 5 phút vì lần trước backend
-    // lỗi là biến sự cố mạng thành sự cố an toàn.
-    s_reportBackoff.reset();
-    s_nextReportAtMs = now;
-    Serial.printf("[water] LEAK detected GPIO%d level=%d → report\n",
+    Serial.printf("[water] LEAK detected GPIO%d level=%d → telemetry will report WaterLeak\n",
                   static_cast<int>(WATER_LEAK_GPIO), level);
-  }
-
-  // GH-741 — lỗi tạm thời phải đợi hết backoff mới thử lại.
-  if (core::shouldAttemptReport(s_pendingReport, now, s_nextReportAtMs)) {
-    char notes[64];
-    snprintf(notes, sizeof(notes), "water leak GPIO%d", static_cast<int>(WATER_LEAK_GPIO));
-    const auto result = envIncidentReport(IncidentType::Flood, IncidentSeverity::Critical, notes,
-                          core::elapsedSeconds(s_pendingDetectedMs, now));
-    if (result == IncidentReportResult::Success) {
-      s_pendingReport = false;
-      s_reportCount++;
-      s_reportBackoff.reset();
-    } else if (result == IncidentReportResult::Permanent) {
-      // Gửi lại vẫn hỏng (sai scope, chưa provision, payload sai) ⇒ DỪNG.
-      // Sự cố vẫn được ghi nhận cục bộ qua log + envIncidentDroppedCount().
-      Serial.println("[water] BỎ report (lỗi vĩnh viễn) — xem log env-incident");
-      s_pendingReport = false;
-      s_reportBackoff.reset();
-      s_nextReportAtMs = now;
-    } else {
-      const uint32_t waitMs = s_reportBackoff.recordFailure();
-      s_nextReportAtMs = now + waitMs;
-      Serial.printf("[water] report lỗi tạm thời → thử lại sau %lums\n",
-                    static_cast<unsigned long>(waitMs));
-    }
   }
 }
 

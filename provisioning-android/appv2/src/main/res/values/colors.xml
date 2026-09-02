@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Seed brand — chỉ dùng làm fallback khi máy không có dynamic color (API < 31). -->
+    <color name="seed_brand">#3559E8</color>
+    <color name="seed_surface">#F7F9FE</color>
+
+    <!-- Scanner: các giá trị này trước đây hardcode trong Java (QrScannerActivity,
+         QrOverlayView). Gom về đây để đổi một chỗ. -->
+    <color name="scanner_background">#07111F</color>
+    <color name="scanner_scrim">#88040A14</color>
+    <color name="scanner_corner">#FF82A8FF</color>
+    <color name="scanner_warning">#FFFFCDD4</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>

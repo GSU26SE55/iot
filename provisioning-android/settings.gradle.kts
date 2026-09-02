@@ -16,4 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "SolarBmsSetup"
 include(":app")
+include(":appv2")
 

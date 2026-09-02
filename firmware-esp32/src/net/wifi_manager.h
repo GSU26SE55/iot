@@ -57,6 +57,16 @@ enum class WifiPhase : uint8_t {
 /// </remarks>
 void wifiTick();
 
+/// <summary>
+/// Giữ vòng thử-lại STA đứng yên trong <paramref name="ms"/> mili-giây.
+/// </summary>
+/// <remarks>
+/// ESP32-S3 chỉ có MỘT radio cho cả SoftAP lẫn station. Mỗi `WiFi.begin()` quét hết kênh rồi
+/// bám kênh router, kéo AP cấu hình đi theo (khách đang mở trang web bị rớt) và làm
+/// `esp_wifi_scan_start` của trang setup trả lỗi. Trang setup gọi hàm này trước khi quét.
+/// </remarks>
+void wifiHoldReconnect(uint32_t ms);
+
 WifiPhase wifiPhase();
 
 /// Đã mất mạng bao lâu (ms). 0 khi đang có mạng.
